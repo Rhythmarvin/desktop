@@ -3,5 +3,9 @@ name = "ora-web-server"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "ora_web_server"
+path = "src/main.rs"
+
 [dependencies]
 ora-domain = { workspace = true }

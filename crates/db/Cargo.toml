@@ -3,6 +3,10 @@ name = "ora-db"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "ora_db"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 
