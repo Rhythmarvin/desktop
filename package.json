@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "pnpm --filter @ora/desktop dev",
     "build": "pnpm --filter @ora/desktop build",
+    "prepare": "husky",
     "tauri": "pnpm --filter @ora/desktop tauri"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.3",
+    "@commitlint/config-conventional": "^20.5.3",
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^24.12.2",
@@ -18,6 +21,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "husky": "^9.1.7",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2"
   }
