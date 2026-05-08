@@ -1,11 +1,15 @@
 [package]
-name = "ora-domain"
+name = "ora-db"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-serde = { workspace = true, features = ["derive"] }
+rusqlite = { workspace = true, features = ["bundled"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

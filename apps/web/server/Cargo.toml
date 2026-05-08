@@ -1,8 +1,7 @@
 [package]
 name = "ora-web-server"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-ora-domain = { path = "../../../crates/domain" }
+ora-domain = { workspace = true }

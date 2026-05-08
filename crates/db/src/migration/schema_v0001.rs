@@ -1,7 +1,7 @@
--- Ora SQLite Schema
--- Constraints: No foreign keys, numeric category fields.
+use super::Migration;
 
-CREATE TABLE projects (
+const UP_STATEMENTS: &[&str] = &[r#"
+CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     root_path TEXT NOT NULL,
@@ -10,28 +10,28 @@ CREATE TABLE projects (
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     title TEXT NOT NULL,
-    status INTEGER NOT NULL DEFAULT 0, -- 0: todo, 1: doing, 2: done
+    status INTEGER NOT NULL DEFAULT 0,
     worktree_id TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE worktrees (
+CREATE TABLE IF NOT EXISTS worktrees (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
     branch_name TEXT,
-    is_active INTEGER DEFAULT 0, -- 0: inactive, 1: active
+    is_active INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE virtual_folders (
+CREATE TABLE IF NOT EXISTS virtual_folders (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -41,30 +41,30 @@ CREATE TABLE virtual_folders (
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE virtual_entries (
+CREATE TABLE IF NOT EXISTS virtual_entries (
     id TEXT PRIMARY KEY,
     virtual_folder_id TEXT NOT NULL,
-    parent_entry_id TEXT, -- Nullable for root entries
+    parent_entry_id TEXT,
     name TEXT NOT NULL,
-    kind INTEGER NOT NULL DEFAULT 0, -- 0: file, 1: directory
-    content_ref TEXT, -- Artifact UUID when kind is file
+    kind INTEGER NOT NULL DEFAULT 0,
+    content_ref TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     agent_session_id TEXT,
-    status INTEGER NOT NULL DEFAULT 0, -- 0: running, 1: stopped
+    status INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE artifacts (
+CREATE TABLE IF NOT EXISTS artifacts (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
     content TEXT,
@@ -72,3 +72,24 @@ CREATE TABLE artifacts (
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS migrations (
+    version TEXT PRIMARY KEY,
+    executed_at INTEGER NOT NULL
+);
+"#];
+
+const DOWN_STATEMENTS: &[&str] = &[r#"
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS virtual_entries;
+DROP TABLE IF EXISTS virtual_folders;
+DROP TABLE IF EXISTS worktrees;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS projects;
+"#];
+
+/// Builds the initial migration and seeds migration bookkeeping.
+pub fn migration() -> Migration {
+    Migration::new("0001", UP_STATEMENTS, DOWN_STATEMENTS)
+}

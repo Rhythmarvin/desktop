@@ -35,7 +35,7 @@ Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 
 ## Tests
 
-- run tests: `task test-fast`
+- run tests: `task test`
 
 ### Test assertions
 
