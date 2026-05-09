@@ -8,4 +8,6 @@ name = "ora_web_server"
 path = "src/main.rs"
 
 [dependencies]
+ora-application = { workspace = true }
+ora-contracts = { workspace = true }
 ora-domain = { workspace = true }

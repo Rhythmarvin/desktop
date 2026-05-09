@@ -1,0 +1,17 @@
+# Application and Contracts Boundary
+
+The first `project` vertical slice is split across `ora-application`, `ora-contracts`, and transport adapters so the repository can prove an end-to-end flow without coupling use-case orchestration to HTTP or Tauri.
+
+## Ownership
+
+- `ora-contracts` owns serialization-friendly request and response DTOs for `CreateProject`, `GetProject`, `ListProjects`, `UpdateProject`, and `DeleteProject`.
+- `ora-contracts::Project` is the single shared app-facing project payload for the first slice. It exposes `id`, `name`, and `root_path` only.
+- `ora-contracts` keeps Rust field names idiomatic while serializing JSON payloads in `camelCase` for adapter and frontend consumption.
+- `ora-application` owns project CRUD handlers, application errors, repository ports, and the mapping from `ora-domain::Project` into `ora-contracts::Project`.
+- Transport adapters such as `apps/web/server` stay thin: they accept contract requests, delegate to `ora-application`, and return contract responses or application errors.
+
+## Project Slice Notes
+
+- The current implementation keeps delete externally CRUD-shaped through `DeleteProjectHandler`.
+- Repository implementations can still soft-delete internally by updating `is_deleted` and `updated_at`.
+- `ora-db` remains the future home for SQLite-backed implementations of the `ora-application` ports.

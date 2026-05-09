@@ -1,0 +1,20 @@
+[package]
+name = "ora-application"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ora_application"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+ora-contracts = { workspace = true }
+ora-domain = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

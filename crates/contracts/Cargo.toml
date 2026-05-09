@@ -1,0 +1,18 @@
+[package]
+name = "ora-contracts"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ora_contracts"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }

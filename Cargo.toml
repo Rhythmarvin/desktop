@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "apps/web/server",
+    "crates/application",
+    "crates/contracts",
     "crates/db",
     "crates/domain",
 ]
@@ -16,6 +18,8 @@ edition = "2024"
 
 [workspace.dependencies]
 # Internal
+ora-application = { path = "crates/application" }
+ora-contracts = { path = "crates/contracts" }
 ora-domain = { path = "crates/domain" }
 
 # External
@@ -26,6 +30,7 @@ serde = "1.0"
 serde_json = "1.0"
 tempfile = "3"
 thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [workspace.lints]
 rust = {}
