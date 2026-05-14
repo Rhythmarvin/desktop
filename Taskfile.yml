@@ -10,6 +10,13 @@ tasks:
   default:
     cmds:
       - task: list
+  
+  install:
+    desc: Install all dependencies for the project
+    cmds:
+      - pnpm install
+      - cargo fetch
+      - task: build
 
   list:
     desc: List all tasks in the current project
@@ -27,14 +34,24 @@ tasks:
     cmds:
       - cargo build --workspace
 
+  export-contracts:
+    desc: Regenerate TypeScript contracts and the frontend SDK package
+    cmds:
+      - cargo xtask export-contracts
+
   test:
-    desc: Run tests, excluding the Tauri desktop on Linux
+    desc: Run contract package tests and Rust tests
     silent: true
     cmds:
       - task: lint
+      - task: export-contracts
+      - pnpm --filter @ora/contracts test
       - cargo test --workspace
 
   clean:
     desc: Clean build artifacts
     cmds:
+      - rm -rf node_modules
+      - pnpm -r exec -- rm -rf node_modules
+      - pnpm store prune
       - cargo clean
