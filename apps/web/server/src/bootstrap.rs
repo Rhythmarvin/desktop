@@ -1,10 +1,12 @@
 use crate::app_state::AppState;
 use crate::config::{ProjectConfig, RuntimeConfig};
 use crate::error::WebBootstrapError;
-use crate::service::{ProjectApi, SessionApi, TaskApi, WorktreeApi};
+use crate::service::{ProjectApi, ProjectWorkContextApi, SessionApi, TaskApi, WorktreeApi};
 use ora_application::{
-    Clock, ProjectIdGenerator, ProjectRepository, ProjectRepositoryError, UuidProjectIdGenerator,
+    Clock, OpenProjectWorkContextHandler, ProjectIdGenerator, ProjectRepository,
+    ProjectRepositoryError, UuidProjectIdGenerator, UuidProjectWorkContextIdGenerator,
 };
+use ora_contracts::{OpenProjectWorkContextRequest, ProjectWorkContextSurface};
 use ora_db::{DatabaseBootstrapper, DatabaseLocation, RepositoryPool, default_migration_catalog};
 use ora_domain::{AuditFields, Project};
 use std::path::Path;
@@ -20,6 +22,7 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
 
     Ok(AppState::new(
         Arc::new(ProjectApi::new(pool.clone(), clock)),
+        Arc::new(ProjectWorkContextApi::new(pool.clone(), clock)),
         Arc::new(TaskApi::new(pool.clone(), clock)),
         Arc::new(WorktreeApi::new(pool.clone(), clock)),
         Arc::new(SessionApi::new(pool, clock)),
@@ -36,6 +39,7 @@ pub(crate) fn build_app_state_for_database(
 
     Ok(AppState::new(
         Arc::new(ProjectApi::new(pool.clone(), clock)),
+        Arc::new(ProjectWorkContextApi::new(pool.clone(), clock)),
         Arc::new(TaskApi::new(pool.clone(), clock)),
         Arc::new(WorktreeApi::new(pool.clone(), clock)),
         Arc::new(SessionApi::new(pool, clock)),
@@ -49,13 +53,16 @@ fn reconcile_configured_project(
     clock: SystemClock,
 ) -> Result<(), WebBootstrapError> {
     let repository = ora_db::SqliteProjectRepository::new(pool.clone());
+    let context_repository = ora_db::SqliteProjectWorkContextRepository::new(pool.clone());
     let configured_project_path = project_config.path().to_string_lossy().to_string();
     let existing_project = repository
         .find_project_by_name(project_config.name())
         .map_err(project_bootstrap_error)?;
 
-    match existing_project {
-        Some(existing_project) if existing_project.root_path == configured_project_path => Ok(()),
+    let project_id = match existing_project {
+        Some(existing_project) if existing_project.root_path == configured_project_path => {
+            Ok(existing_project.id)
+        }
         Some(existing_project) => {
             let updated_at = clock.now_timestamp_millis();
 
@@ -70,7 +77,7 @@ fn reconcile_configured_project(
                         existing_project.audit_fields.is_deleted,
                     ),
                 ))
-                .map(|_| ())
+                .map(|project| project.id)
                 .map_err(project_bootstrap_error)
         }
         None => {
@@ -83,10 +90,25 @@ fn reconcile_configured_project(
                     configured_project_path,
                     AuditFields::new(now, now, false),
                 ))
-                .map(|_| ())
+                .map(|project| project.id)
                 .map_err(project_bootstrap_error)
         }
-    }
+    }?;
+    let handler = OpenProjectWorkContextHandler::new(
+        repository,
+        context_repository,
+        UuidProjectWorkContextIdGenerator::new(),
+        clock,
+    );
+
+    handler
+        .handle(OpenProjectWorkContextRequest {
+            surface: ProjectWorkContextSurface::Web,
+            window_id: "main".to_string(),
+            project_id: project_id.to_string(),
+        })
+        .map(|_| ())
+        .map_err(project_work_context_bootstrap_error)
 }
 
 /// Opens the configured file-backed SQLite database and returns the shared repository pool.
@@ -104,6 +126,15 @@ fn project_bootstrap_error(error: ProjectRepositoryError) -> WebBootstrapError {
         ProjectRepositoryError::OperationFailed(message) => {
             WebBootstrapError::ProjectBootstrap { message }
         }
+    }
+}
+
+/// Converts project work context bootstrap failures into one stable startup error variant.
+fn project_work_context_bootstrap_error(
+    error: ora_application::ApplicationError,
+) -> WebBootstrapError {
+    WebBootstrapError::ProjectBootstrap {
+        message: error.to_string(),
     }
 }
 
@@ -126,9 +157,10 @@ mod tests {
     use super::{build_app_state, build_app_state_for_database};
     use crate::config::RuntimeConfig;
     use crate::error::WebBootstrapError;
-    use ora_application::ProjectRepository;
+    use ora_application::{ProjectRepository, ProjectWorkContextRepository};
     use ora_db::{
-        DatabaseBootstrapper, DatabaseLocation, SqliteProjectRepository, default_migration_catalog,
+        DatabaseBootstrapper, DatabaseLocation, SqliteProjectRepository,
+        SqliteProjectWorkContextRepository, default_migration_catalog,
     };
     use pretty_assertions::assert_eq;
     use std::path::Path;
@@ -159,6 +191,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("expected runtime bootstrap to succeed: {error}"));
 
         let repository = bootstrapped_project_repository(&database_path);
+        let context_repository = bootstrapped_project_work_context_repository(&database_path);
 
         assert_eq!(
             repository
@@ -170,6 +203,22 @@ mod tests {
                     project.audit_fields.is_deleted,
                 )),
             Some(("Ora".to_string(), "/workspace/ora".to_string(), false))
+        );
+        let project = repository
+            .find_project_by_name("Ora")
+            .unwrap()
+            .unwrap_or_else(|| panic!("expected configured project to exist after bootstrap"));
+
+        assert_eq!(
+            context_repository
+                .find_project_work_context(ora_domain::ProjectWorkContextSurface::Web, "main")
+                .unwrap()
+                .map(|context| (context.surface, context.window_id, context.project_id)),
+            Some((
+                ora_domain::ProjectWorkContextSurface::Web,
+                "main".to_string(),
+                project.id,
+            ))
         );
     }
 
@@ -269,5 +318,21 @@ mod tests {
             });
 
         SqliteProjectRepository::new(pool)
+    }
+
+    /// Opens the test database so bootstrap assertions can inspect persisted project work context state.
+    fn bootstrapped_project_work_context_repository(
+        database_path: &Path,
+    ) -> SqliteProjectWorkContextRepository {
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::path(database_path),
+                &default_migration_catalog().unwrap(),
+            )
+            .unwrap_or_else(|error| {
+                panic!("expected repository pool bootstrap to succeed: {error}")
+            });
+
+        SqliteProjectWorkContextRepository::new(pool)
     }
 }

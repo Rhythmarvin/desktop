@@ -33,6 +33,8 @@ pub struct FrontendEndpoint {
 
 pub const PROJECTS_PATH: &str = "/api/projects";
 pub const PROJECT_PATH: &str = "/api/projects/{projectId}";
+pub const PROJECT_WORK_CONTEXT_OPEN_PATH: &str = "/api/project-work-contexts/open";
+pub const PROJECT_WORK_CONTEXT_RENEW_PATH: &str = "/api/project-work-contexts/renew";
 pub const TASKS_PATH: &str = "/api/tasks";
 pub const TASK_PATH: &str = "/api/tasks/{taskId}";
 pub const WORKTREES_PATH: &str = "/api/worktrees";
@@ -108,6 +110,24 @@ const FRONTEND_ENDPOINTS: &[FrontendEndpoint] = &[
         response_type: "DeleteProjectResponse",
         path_params: PROJECT_PATH_PARAMS,
         has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "openProjectWorkContext",
+        method: FrontendHttpMethod::Post,
+        path_template: PROJECT_WORK_CONTEXT_OPEN_PATH,
+        request_type: "OpenProjectWorkContextRequest",
+        response_type: "OpenProjectWorkContextResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: true,
+    },
+    FrontendEndpoint {
+        operation_name: "renewProjectWorkContext",
+        method: FrontendHttpMethod::Post,
+        path_template: PROJECT_WORK_CONTEXT_RENEW_PATH,
+        request_type: "RenewProjectWorkContextRequest",
+        response_type: "RenewProjectWorkContextResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: true,
     },
     FrontendEndpoint {
         operation_name: "createTask",
@@ -254,7 +274,8 @@ pub fn frontend_endpoints() -> &'static [FrontendEndpoint] {
 #[cfg(test)]
 mod tests {
     use super::{
-        FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH, PROJECTS_PATH,
+        FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH,
+        PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH,
         SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, WORKTREE_PATH, WORKTREES_PATH,
         frontend_endpoints,
     };
@@ -319,6 +340,24 @@ mod tests {
                         wire_name: "projectId",
                     }],
                     has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "openProjectWorkContext",
+                    method: FrontendHttpMethod::Post,
+                    path_template: PROJECT_WORK_CONTEXT_OPEN_PATH,
+                    request_type: "OpenProjectWorkContextRequest",
+                    response_type: "OpenProjectWorkContextResponse",
+                    path_params: &[],
+                    has_json_body: true,
+                },
+                FrontendEndpoint {
+                    operation_name: "renewProjectWorkContext",
+                    method: FrontendHttpMethod::Post,
+                    path_template: PROJECT_WORK_CONTEXT_RENEW_PATH,
+                    request_type: "RenewProjectWorkContextRequest",
+                    response_type: "RenewProjectWorkContextResponse",
+                    path_params: &[],
+                    has_json_body: true,
                 },
                 FrontendEndpoint {
                     operation_name: "createTask",

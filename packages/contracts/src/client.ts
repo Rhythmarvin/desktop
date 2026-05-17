@@ -15,6 +15,8 @@ export function createContractsClient(transport: ContractTransport): ContractsCl
     listProjects: (request) => executeOperation("listProjects", request, transport),
     updateProject: (request) => executeOperation("updateProject", request, transport),
     deleteProject: (request) => executeOperation("deleteProject", request, transport),
+    openProjectWorkContext: (request) => executeOperation("openProjectWorkContext", request, transport),
+    renewProjectWorkContext: (request) => executeOperation("renewProjectWorkContext", request, transport),
     createTask: (request) => executeOperation("createTask", request, transport),
     getTask: (request) => executeOperation("getTask", request, transport),
     listTasks: (request) => executeOperation("listTasks", request, transport),

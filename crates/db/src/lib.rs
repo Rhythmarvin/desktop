@@ -15,7 +15,7 @@ pub use error::{DatabaseError, MigrationDirection};
 pub use location::DatabaseLocation;
 pub use migration::{AppliedMigration, Migration, MigrationCatalog, default_migration_catalog};
 pub use repository::{
-    RepositoryPool, SqliteProjectRepository, SqliteSessionRepository, SqliteTaskRepository,
-    SqliteWorktreeRepository,
+    RepositoryPool, SqliteProjectRepository, SqliteProjectWorkContextRepository,
+    SqliteSessionRepository, SqliteTaskRepository, SqliteWorktreeRepository,
 };
 pub use time::{SystemTimestampSource, TimestampSource};

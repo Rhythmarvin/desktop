@@ -44,6 +44,7 @@ fn bootstraps_empty_database_with_default_catalog() {
         vec![
             "artifacts".to_string(),
             "migrations".to_string(),
+            "project_work_contexts".to_string(),
             "projects".to_string(),
             "sessions".to_string(),
             "tasks".to_string(),
@@ -54,7 +55,10 @@ fn bootstraps_empty_database_with_default_catalog() {
     );
     assert_eq!(
         load_applied_migrations(database.connection()),
-        vec![AppliedMigration::new("0001", 1_700_000_000_000)]
+        vec![
+            AppliedMigration::new("0001", 1_700_000_000_000),
+            AppliedMigration::new("0002", 1_700_000_000_000),
+        ]
     );
 }
 

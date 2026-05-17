@@ -1,18 +1,23 @@
 mod frontend;
 mod project;
+mod project_work_context;
 mod session;
 mod task;
 mod worktree;
 
 pub use frontend::{
-    FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH, PROJECTS_PATH,
-    SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, WORKTREE_PATH, WORKTREES_PATH,
-    frontend_endpoints,
+    FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH,
+    PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH, SESSION_PATH,
+    SESSIONS_PATH, TASK_PATH, TASKS_PATH, WORKTREE_PATH, WORKTREES_PATH, frontend_endpoints,
 };
 pub use project::{
     CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse,
     GetProjectRequest, GetProjectResponse, ListProjectsRequest, ListProjectsResponse, Project,
     UpdateProjectRequest, UpdateProjectResponse,
+};
+pub use project_work_context::{
+    OpenProjectWorkContextRequest, OpenProjectWorkContextResponse, ProjectWorkContext,
+    ProjectWorkContextSurface, RenewProjectWorkContextRequest, RenewProjectWorkContextResponse,
 };
 pub use session::{
     CreateSessionRequest, CreateSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
@@ -49,6 +54,12 @@ pub fn export_typescript_bindings_to(
     UpdateProjectResponse::export(&config)?;
     DeleteProjectRequest::export(&config)?;
     DeleteProjectResponse::export(&config)?;
+    ProjectWorkContextSurface::export(&config)?;
+    ProjectWorkContext::export(&config)?;
+    OpenProjectWorkContextRequest::export(&config)?;
+    OpenProjectWorkContextResponse::export(&config)?;
+    RenewProjectWorkContextRequest::export(&config)?;
+    RenewProjectWorkContextResponse::export(&config)?;
 
     SessionStatus::export(&config)?;
     Session::export(&config)?;

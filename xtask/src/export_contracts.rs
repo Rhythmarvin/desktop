@@ -392,6 +392,7 @@ fn render_index_module() -> String {
     source.push_str("export * from \"./endpoints.js\";\n");
     source.push_str("export * from \"./transport.js\";\n");
     source.push_str("export * from \"./project.js\";\n");
+    source.push_str("export * from \"./project-work-context.js\";\n");
     source.push_str("export * from \"./session.js\";\n");
     source.push_str("export * from \"./task.js\";\n");
     source.push_str("export * from \"./worktree.js\";\n");
@@ -432,6 +433,11 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "ListProjectsResponse"
         | "UpdateProjectRequest"
         | "UpdateProjectResponse" => "project",
+        "OpenProjectWorkContextRequest"
+        | "OpenProjectWorkContextResponse"
+        | "ProjectWorkContext"
+        | "RenewProjectWorkContextRequest"
+        | "RenewProjectWorkContextResponse" => "project-work-context",
         "CreateTaskRequest" | "CreateTaskResponse" | "DeleteTaskRequest" | "DeleteTaskResponse"
         | "GetTaskRequest" | "GetTaskResponse" | "ListTasksRequest" | "ListTasksResponse"
         | "UpdateTaskRequest" | "UpdateTaskResponse" => "task",

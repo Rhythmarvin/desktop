@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use ora_application::{
-    ProjectRepository, ProjectRepositoryError, SessionRepository, SessionRepositoryError,
-    TaskRepository, TaskRepositoryError, WorktreeRepository, WorktreeRepositoryError,
+    ProjectRepository, ProjectRepositoryError, ProjectWorkContextRepository, SessionRepository,
+    SessionRepositoryError, TaskRepository, TaskRepositoryError, WorktreeRepository,
+    WorktreeRepositoryError,
 };
 use ora_domain::{
-    AuditFields, Project, ProjectId, Session, SessionId, SessionStatus, Task, TaskId, TaskStatus,
+    AuditFields, Project, ProjectId, ProjectWorkContext, ProjectWorkContextId,
+    ProjectWorkContextSurface, Session, SessionId, SessionStatus, Task, TaskId, TaskStatus,
     Worktree, WorktreeActivity, WorktreeId,
 };
 use ora_logging::with_trace_logging;
@@ -14,8 +16,8 @@ use tempfile::TempDir;
 
 use crate::{
     DatabaseBootstrapper, DatabaseLocation, RepositoryPool, SqliteProjectRepository,
-    SqliteSessionRepository, SqliteTaskRepository, SqliteWorktreeRepository, TimestampSource,
-    default_migration_catalog,
+    SqliteProjectWorkContextRepository, SqliteSessionRepository, SqliteTaskRepository,
+    SqliteWorktreeRepository, TimestampSource, default_migration_catalog,
 };
 
 /// Produces deterministic bootstrap timestamps so repository tests can assert stored objects.
@@ -161,6 +163,88 @@ fn project_repository_ignores_soft_deleted_projects_during_name_lookup() {
         .unwrap();
 
     assert_eq!(repository.find_project_by_name("Ora").unwrap(), None);
+}
+
+/// Verifies the SQLite-backed project work context repository preserves lease-aware rows and cleanup.
+#[test]
+fn project_work_context_repository_supports_active_lookup_and_cleanup() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteProjectWorkContextRepository::new(pool);
+    let created_context = ProjectWorkContext::new(
+        ProjectWorkContextId::new("context-1"),
+        ProjectWorkContextSurface::Tauri,
+        "window-1",
+        ProjectId::new("project-1"),
+        120,
+        10,
+        10,
+    );
+
+    assert_eq!(
+        repository
+            .create_project_work_context(created_context.clone())
+            .unwrap(),
+        created_context.clone()
+    );
+    assert_eq!(
+        repository
+            .find_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
+            .unwrap(),
+        Some(created_context.clone())
+    );
+    assert_eq!(
+        repository
+            .find_active_project_work_context_for_project(&created_context.project_id, 100)
+            .unwrap(),
+        Some(created_context.clone())
+    );
+    assert_eq!(
+        repository
+            .find_active_project_work_context_for_project(&created_context.project_id, 120)
+            .unwrap(),
+        None
+    );
+
+    let updated_context = ProjectWorkContext::new(
+        created_context.id.clone(),
+        created_context.surface,
+        created_context.window_id.clone(),
+        ProjectId::new("project-2"),
+        240,
+        created_context.created_at,
+        40,
+    );
+
+    assert_eq!(
+        repository
+            .update_project_work_context(updated_context.clone())
+            .unwrap(),
+        updated_context.clone()
+    );
+    assert_eq!(
+        repository
+            .find_active_project_work_context_for_project(&ProjectId::new("project-2"), 200)
+            .unwrap(),
+        Some(updated_context.clone())
+    );
+    assert_eq!(
+        repository
+            .delete_expired_project_work_contexts(200)
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        repository
+            .delete_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
+            .unwrap(),
+        true
+    );
+    assert_eq!(
+        repository
+            .find_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
+            .unwrap(),
+        None
+    );
 }
 
 /// Verifies the SQLite-backed task repository preserves CRUD snapshots and hides soft-deleted rows.

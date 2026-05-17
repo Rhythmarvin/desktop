@@ -28,6 +28,7 @@ Startup reconciles this configured project into the `projects` table before the 
 - If no visible project exists with the configured name, startup creates one row.
 - If a visible project exists with the configured name but a different stored path, startup updates that row in place.
 - If both the configured name and path already match, startup leaves the row unchanged.
+- After project reconciliation, startup also opens the synthetic web work context `surface = web`, `window_id = main` for that project and refreshes its lease immediately.
 
 ## Bind Configuration
 
@@ -56,6 +57,8 @@ The persisted runtime exposes CRUD routes for all core models:
 - `GET /api/projects/{project_id}`
 - `PUT /api/projects/{project_id}`
 - `DELETE /api/projects/{project_id}`
+- `POST /api/project-work-contexts/open`
+- `POST /api/project-work-contexts/renew`
 - `POST /api/tasks`
 - `GET /api/tasks`
 - `GET /api/tasks/{task_id}`
@@ -74,10 +77,16 @@ The persisted runtime exposes CRUD routes for all core models:
 
 Request and response payloads use `ora-contracts` DTO shapes, so transport behavior stays aligned with the shared application contract.
 
+The project work context routes provide the current backend-managed project selection surface.
+
+- `open` creates or switches one `(surface, window_id)` context into a project and refreshes its lease immediately.
+- `renew` extends an existing context lease using backend time.
+- Occupied-project conflicts return a stable HTTP `409` error without exposing the owning surface or window id in the response.
+
 ## Storage Behavior
 
 The current runtime uses a file-backed SQLite database bootstrapped through `ora-db`.
 
 - Data persists across process restarts as long as the same `ORA_DB_PATH` is reused.
-- Readiness depends on successful database bootstrap, repository-pool construction, and bootstrap-project reconciliation.
+- Readiness depends on successful database bootstrap, repository-pool construction, bootstrap-project reconciliation, and synthetic web work context reconciliation.
 - Application-layer failures still map into the shared structured HTTP error envelope across all four route families.

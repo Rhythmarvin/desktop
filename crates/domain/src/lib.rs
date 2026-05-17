@@ -3,6 +3,7 @@ mod audit_fields;
 mod error;
 mod ids;
 mod project;
+mod project_work_context;
 mod session;
 mod task;
 mod virtual_entry;
@@ -16,9 +17,11 @@ pub use artifact::Artifact;
 pub use audit_fields::AuditFields;
 pub use error::DomainModelError;
 pub use ids::{
-    ArtifactId, ProjectId, SessionId, TaskId, VirtualEntryId, VirtualFolderId, WorktreeId,
+    ArtifactId, ProjectId, ProjectWorkContextId, SessionId, TaskId, VirtualEntryId,
+    VirtualFolderId, WorktreeId,
 };
 pub use project::Project;
+pub use project_work_context::{ProjectWorkContext, ProjectWorkContextSurface};
 pub use session::{Session, SessionStatus};
 pub use task::{Task, TaskStatus};
 pub use virtual_entry::{VirtualEntry, VirtualEntryKind};
