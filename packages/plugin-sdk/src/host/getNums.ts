@@ -1,12 +1,5 @@
 import { readLine } from "../internal/reader";
-
-/** Generic JSON-RPC request read from the transport — intentionally method-agnostic. */
-interface JsonRpcRequest {
-  jsonrpc: string;
-  id: string;
-  method: string;
-  params: unknown;
-}
+import type { PluginJsonRpcRequest } from "../types/plugin-protocol.js";
 
 /**
  * 从 stdin 读取一条 Host 发来的请求。
@@ -15,12 +8,12 @@ interface JsonRpcRequest {
  *   1. 调用 readLine() 获取一行文本
  *   2. JSON.parse 解析
  *   3. 校验 jsonrpc === "2.0" 且有 id 和 method 字段
- *   4. 组装为 JsonRpcRequest 返回
+ *   4. 组装为 PluginJsonRpcRequest 返回
  *
  * 返回 null 表示 stdin 已关闭。
  * 收到不合法的行（非 JSON、缺少字段）会跳过并继续读取下一行。
  */
-export async function getNums(): Promise<JsonRpcRequest | null> {
+export async function getNums(): Promise<PluginJsonRpcRequest | null> {
   while (true) {
     const line = await readLine();
     if (line === null) return null;

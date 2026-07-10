@@ -19,22 +19,18 @@ test("成功响应——序列化为 JSON-RPC 格式", async () => {
   expect(output).toEqual({ jsonrpc: "2.0", id: "1", result: 3 });
 });
 
-test("undefined 结果序列化为 null", async () => {
-  await returnNums("1", undefined);
+test("零值正确序列化", async () => {
+  await returnNums("1", 0);
 
   const output = JSON.parse(writeLineMock.mock.calls[0][0]);
-  expect(output).toEqual({ jsonrpc: "2.0", id: "1", result: null });
+  expect(output).toEqual({ jsonrpc: "2.0", id: "1", result: 0 });
 });
 
-test("复杂对象正确序列化", async () => {
-  await returnNums("1", { name: "test", items: [1, 2] });
+test("负数正确序列化", async () => {
+  await returnNums("1", -42);
 
   const output = JSON.parse(writeLineMock.mock.calls[0][0]);
-  expect(output).toEqual({
-    jsonrpc: "2.0",
-    id: "1",
-    result: { name: "test", items: [1, 2] },
-  });
+  expect(output).toEqual({ jsonrpc: "2.0", id: "1", result: -42 });
 });
 
 test("错误响应——序列化为 JSON-RPC error 格式", async () => {
