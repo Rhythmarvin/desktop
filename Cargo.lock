@@ -2701,6 +2701,7 @@ version = "0.0.0"
 dependencies = [
  "deno_ast",
  "getrandom 0.3.4",
+ "hex",
  "ora-plugin-protocol",
  "ora-process",
  "pretty_assertions",
@@ -2721,6 +2722,7 @@ dependencies = [
 name = "ora-plugin-protocol"
 version = "0.0.0"
 dependencies = [
+ "hex",
  "pretty_assertions",
  "semver",
  "serde",

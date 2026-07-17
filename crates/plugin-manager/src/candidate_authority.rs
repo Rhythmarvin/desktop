@@ -401,7 +401,7 @@ fn platform_identity(
 #[cfg(test)]
 mod tests {
     use super::{AuthorityClock, CandidateAuthority, ManagementSessionId};
-    use crate::{PackageValidator, PluginLimits};
+    use crate::{PackageValidator, PluginFsLimits};
     use ora_plugin_protocol::{CandidateAuditId, PluginVersion};
     use pretty_assertions::assert_eq;
     use std::fs;
@@ -444,7 +444,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("expected selection: {error}"));
         let selection_replay = selection.selection_handle.clone();
         let validator = PackageValidator::new(
-            PluginLimits::default(),
+            PluginFsLimits::default(),
             PluginVersion::parse("0.1.0")
                 .unwrap_or_else(|error| panic!("expected Host version: {error}")),
             PluginVersion::parse("1.3.14")

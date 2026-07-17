@@ -265,36 +265,53 @@ struct FrameWriteFailure {
     error: io::Error,
 }
 
+/// Default I/O timeout for a single frame write+flush (30 seconds).
+const WRITE_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Counts successful bytes so zero is provable while partial/unknown writes remain ambiguous.
+/// Each write() and flush() call is individually wrapped in a timeout.
 async fn write_complete_frame<W>(writer: &mut W, frame: &[u8]) -> Result<(), FrameWriteFailure>
 where
     W: AsyncWrite + Unpin,
 {
     let mut written = 0_usize;
     while written < frame.len() {
-        match writer.write(&frame[written..]).await {
-            Ok(0) => {
+        let write_result = tokio::time::timeout(WRITE_FRAME_TIMEOUT, writer.write(&frame[written..]))
+            .await;
+        match write_result {
+            Err(_elapsed) => {
                 return Err(FrameWriteFailure {
                     bytes_written: Some(written),
-                    error: io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "plugin stdin wrote zero bytes",
-                    ),
+                    error: io::Error::new(io::ErrorKind::TimedOut, "frame write timed out"),
                 });
             }
-            Ok(bytes) => written += bytes,
-            Err(error) => {
+            Ok(Err(error)) => {
                 return Err(FrameWriteFailure {
                     bytes_written: Some(written),
                     error,
                 });
             }
+            Ok(Ok(0)) => {
+                return Err(FrameWriteFailure {
+                    bytes_written: Some(written),
+                    error: io::Error::new(io::ErrorKind::WriteZero, "plugin stdin wrote zero bytes"),
+                });
+            }
+            Ok(Ok(bytes)) => written += bytes,
         }
     }
-    writer.flush().await.map_err(|error| FrameWriteFailure {
-        bytes_written: Some(written),
-        error,
-    })
+    let flush_result = tokio::time::timeout(WRITE_FRAME_TIMEOUT, writer.flush()).await;
+    match flush_result {
+        Err(_elapsed) => Err(FrameWriteFailure {
+            bytes_written: Some(written),
+            error: io::Error::new(io::ErrorKind::TimedOut, "frame flush timed out"),
+        }),
+        Ok(Err(error)) => Err(FrameWriteFailure {
+            bytes_written: Some(written),
+            error,
+        }),
+        Ok(Ok(())) => Ok(()),
+    }
 }
 
 /// FIFO reader events keep all complete frames before the boundary EOF from being overtaken.
@@ -329,10 +346,7 @@ async fn run_reader<R>(mut stdout: R, maximum_json_depth: usize, events: mpsc::S
 where
     R: AsyncRead + Unpin,
 {
-    let mut decoder = match FrameDecoder::new(MAX_FRAME_BYTES) {
-        Ok(decoder) => decoder,
-        Err(_) => return,
-    };
+    let mut decoder = FrameDecoder::new(MAX_FRAME_BYTES);
     let mut chunk = vec![0_u8; READ_CHUNK_BYTES];
     loop {
         let bytes = match stdout.read(&mut chunk).await {

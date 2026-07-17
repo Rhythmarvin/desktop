@@ -388,8 +388,10 @@ mod tests {
     /// Applies both the caller's page limit and a tightened initialize limit.
     #[test]
     fn validates_dynamic_page_limits() {
-        let limits = InitializeLimits::new(8, 4096, 4096, 4096, 4, 1)
-            .unwrap_or_else(|error| panic!("expected limits: {error}"));
+        let limits = InitializeLimits {
+            max_page_items: 1,
+            ..InitializeLimits::v1_defaults()
+        };
         let request = AgentRequest::ListSkills(ListSkillsRequest {
             provider_id: provider_id(),
             installation_id: AgentInstallationId::parse("installation-1")

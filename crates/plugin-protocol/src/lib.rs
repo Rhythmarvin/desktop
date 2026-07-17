@@ -1,18 +1,18 @@
-mod agent;
-mod fixtures;
-mod frame;
-mod identity;
-mod json_rpc;
-mod lifecycle;
-mod manifest;
+pub mod agent;
+pub mod frame;
+pub mod identity;
+pub mod json_rpc;
+pub mod lifecycle;
+pub mod limits;
+pub mod manifest;
 mod strict_json;
 
 pub use agent::*;
-pub use fixtures::*;
 pub use frame::*;
 pub use identity::*;
 pub use json_rpc::*;
 pub use lifecycle::*;
+pub use limits::*;
 pub use manifest::*;
 pub use strict_json::*;
 
@@ -33,7 +33,6 @@ pub fn export_runtime_typescript_bindings_to(
     write_typescript_bindings(output_directory.as_ref(), true)
 }
 
-/// Renders one self-contained module so ts-rs never creates fragile cross-file merge imports.
 fn write_typescript_bindings(
     output_directory: &Path,
     include_lifecycle: bool,
@@ -124,8 +123,6 @@ fn write_typescript_bindings(
         AgentFinishReason,
         CancelConversationResponse,
         CancelDisposition,
-        AgentMethod,
-        InvocationSemantics,
         AgentBusinessFailureKind,
         AgentBusinessErrorData,
     );
@@ -139,10 +136,9 @@ fn write_typescript_bindings(
             InitializeLimits,
             InitializeResult,
             InitializeResultPlugin,
-            ActivationReason,
             ActivateParams,
             ActivateResult,
-            DeactivationReason,
+            ActivateProvider,
             DeactivateParams,
             CancelRequestParams,
             StreamParams,
@@ -163,7 +159,6 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Verifies SDK protocol bindings are written only to the caller-selected package directory.
     #[test]
     fn exports_public_and_private_typescript_bindings() {
         let output_directory = TempDir::new().unwrap_or_else(|error| {

@@ -1,6 +1,6 @@
 use crate::{
     CompatibilityReason, InstallReceipt, InstalledRecord, IntegrityStatus, ManifestValidity,
-    PackageFsError, PackageTreeMode, PluginDiagnostic, PluginDiagnosticCode, PluginLimits,
+    PackageFsError, PackageTreeMode, PluginDiagnostic, PluginDiagnosticCode, PluginFsLimits,
     RuntimeCompatibility, RuntimeSupport, TreeDigestProof, compute_tree_digest,
 };
 use ora_plugin_protocol::{
@@ -44,14 +44,14 @@ pub struct ValidatedPackage {
 /// Performs the same package proof for candidate, staging, installed scan, enable, and start.
 #[derive(Debug, Clone)]
 pub struct PackageValidator {
-    limits: PluginLimits,
+    limits: PluginFsLimits,
     host_version: PluginVersion,
     bun_version: PluginVersion,
 }
 
 impl PackageValidator {
     pub fn new(
-        limits: PluginLimits,
+        limits: PluginFsLimits,
         host_version: PluginVersion,
         bun_version: PluginVersion,
     ) -> Self {
@@ -403,7 +403,7 @@ fn diagnostics_for(
 #[cfg(test)]
 mod tests {
     use super::{PackageValidator, ValidationTarget};
-    use crate::{IntegrityStatus, PluginLimits, RuntimeSupport};
+    use crate::{IntegrityStatus, PluginFsLimits, RuntimeSupport};
     use ora_plugin_protocol::{PluginKind, PluginVersion};
     use pretty_assertions::assert_eq;
     use std::fs;
@@ -427,7 +427,7 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("expected manifest write: {error}"));
         let validator = PackageValidator::new(
-            PluginLimits::default(),
+            PluginFsLimits::default(),
             PluginVersion::parse("0.1.0")
                 .unwrap_or_else(|error| panic!("expected Host version: {error}")),
             PluginVersion::parse("1.3.14")

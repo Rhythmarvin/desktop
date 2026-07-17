@@ -338,6 +338,10 @@ where
             .await
             .closed_admission
             .remove(plugin_id);
+        // Propagate to per-plugin supervisor if one exists.
+        if let Some(runtime) = self.existing(plugin_id).await {
+            runtime.open_admission(plugin_id).await?;
+        }
         Ok(())
     }
 

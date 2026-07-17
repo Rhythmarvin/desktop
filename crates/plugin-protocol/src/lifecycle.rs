@@ -1,31 +1,41 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::identity::{AgentProviderId, PluginId};
+use crate::agent::{AgentEvent, HostResolvedAbsolutePath, JsonSafeU64};
+use crate::identity::{AgentProviderId, ContentOwnerId, PluginId, PluginVersion};
+use crate::manifest::PluginKind;
+
+// ── A-side compat aliases ──────────────────────────────────────
+pub type InitializePlugin = InitializePluginIdentity;
+pub type InitializeResultPlugin = InitializePluginEcho;
 
 // ── $/initialize ──────────────────────────────────────────────────
 
-/// Parameters sent by Host in `$/initialize` request (17 fields).
+/// Parameters sent by Host in `$/initialize` request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin-protocol.ts")]
 pub struct InitializeParams {
-    /// Frame-layer protocol version. Host compile-time locked. NOT the same as pluginApi.
     pub wire_version: u32,
-    /// Ora application version.
-    pub host_version: String,
-    /// Private runtime/bootstrap version.
-    pub runtime_version: String,
-    /// CSPRNG per-generation session identifier, never reused.
+    pub host_version: PluginVersion,
+    pub runtime_version: PluginVersion,
     pub session_id: String,
-    /// Verified plugin identity from manifest + receipt.
     pub plugin: InitializePluginIdentity,
-    /// Managed paths computed by Host from installation proof.
     pub paths: InitializePaths,
-    /// Agents declared in manifest's `contributes.agents`.
     pub declared_agents: Vec<DeclaredAgent>,
-    /// Dynamic limits for this generation (7 values, cannot exceed v1 hard caps).
     pub limits: InitializeLimits,
+}
+
+impl InitializeParams {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.wire_version != 1 {
+            return Err("unsupported wire version".into());
+        }
+        if self.plugin.plugin_api != 1 {
+            return Err("unsupported plugin API version".into());
+        }
+        Ok(())
+    }
 }
 
 /// Plugin identity block in `$/initialize`.
@@ -34,10 +44,10 @@ pub struct InitializeParams {
 #[ts(export_to = "plugin-protocol.ts")]
 pub struct InitializePluginIdentity {
     pub id: PluginId,
-    pub version: String,
-    pub kind: String,
+    pub version: PluginVersion,
+    pub kind: PluginKind,
     pub plugin_api: u32,
-    pub content_owner: String,
+    pub content_owner: ContentOwnerId,
 }
 
 /// Managed paths block in `$/initialize`.
@@ -45,12 +55,9 @@ pub struct InitializePluginIdentity {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin-protocol.ts")]
 pub struct InitializePaths {
-    /// Managed code root directory (plugin cwd).
-    pub extension_path: String,
-    /// Verified absolute entry path for `import()`. Must be under extensionPath.
-    pub entry_path: String,
-    /// Content-owner scoped mutable data directory.
-    pub storage_path: String,
+    pub extension_path: HostResolvedAbsolutePath,
+    pub entry_path: HostResolvedAbsolutePath,
+    pub storage_path: HostResolvedAbsolutePath,
 }
 
 /// A declared agent entry from the manifest.
@@ -83,13 +90,47 @@ pub struct InitializeLimits {
     pub max_page_items: u32,
 }
 
+impl InitializeLimits {
+    pub fn v1_defaults() -> Self {
+        Self {
+            max_frame_bytes: 8_388_608,
+            max_pending_requests: 128,
+            max_agent_event_bytes: 262_144,
+            max_agent_result_bytes: 1_048_576,
+            max_agent_prompt_bytes: 1_048_576,
+            max_active_turns: 64,
+            max_page_items: 100,
+        }
+    }
+
+    pub fn new(
+        max_frame_bytes: u32,
+        max_pending_requests: u32,
+        max_agent_event_bytes: u32,
+        max_agent_result_bytes: u32,
+        max_agent_prompt_bytes: u32,
+        max_active_turns: u32,
+        max_page_items: u32,
+    ) -> Self {
+        Self {
+            max_frame_bytes,
+            max_pending_requests,
+            max_agent_event_bytes,
+            max_agent_result_bytes,
+            max_agent_prompt_bytes,
+            max_active_turns,
+            max_page_items,
+        }
+    }
+}
+
 /// Bootstrap response to `$/initialize` — echoes identity for cross-check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin-protocol.ts")]
 pub struct InitializeResult {
     pub wire_version: u32,
-    pub runtime_version: String,
+    pub runtime_version: PluginVersion,
     pub session_id: String,
     pub plugin: InitializePluginEcho,
 }
@@ -100,7 +141,7 @@ pub struct InitializeResult {
 #[ts(export_to = "plugin-protocol.ts")]
 pub struct InitializePluginEcho {
     pub id: PluginId,
-    pub version: String,
+    pub version: PluginVersion,
 }
 
 // ── $/activate ────────────────────────────────────────────────────
@@ -142,6 +183,30 @@ pub struct ActivateResult {
 pub struct ActivateProvider {
     pub id: AgentProviderId,
     pub contract_version: u32,
+}
+
+impl ActivateResult {
+    pub fn validate_declared_providers(
+        &self,
+        declared_agents: &[DeclaredAgent],
+    ) -> Result<(), String> {
+        if self.providers.len() != declared_agents.len() {
+            return Err("provider count mismatch".into());
+        }
+        for (p, d) in self.providers.iter().zip(declared_agents.iter()) {
+            if p.id != d.id {
+                return Err(format!(
+                    "provider id mismatch: {} vs {}",
+                    p.id.as_str(),
+                    d.id.as_str()
+                ));
+            }
+            if p.contract_version != d.contract_version {
+                return Err("contract version mismatch".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 // ── $/deactivate ──────────────────────────────────────────────────
@@ -187,14 +252,11 @@ pub struct CancelRequestParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin-protocol.ts")]
 pub struct StreamParams {
-    /// The request id this stream event belongs to.
     pub id: String,
-    /// Strictly increasing sequence number starting at 1.
     #[ts(type = "number")]
-    pub seq: u64,
-    /// Typed stream-event discriminated union value.
+    pub seq: JsonSafeU64,
     #[ts(type = "any")]
-    pub value: serde_json::Value,
+    pub value: AgentEvent,
 }
 
 #[cfg(test)]
@@ -216,7 +278,7 @@ mod tests {
                 "version": "0.1.0",
                 "kind": "agent",
                 "pluginApi": 1,
-                "contentOwner": "sha256-abc123"
+                "contentOwner": "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             },
             "paths": {
                 "extensionPath": "D:\\plugins\\ora.claude-code",
@@ -253,11 +315,11 @@ mod tests {
     fn initialize_result_serde() {
         let result = InitializeResult {
             wire_version: 1,
-            runtime_version: "0.1.0".to_string(),
+            runtime_version: PluginVersion::parse("0.1.0").unwrap(),
             session_id: "session-abc-123".to_string(),
             plugin: InitializePluginEcho {
-                id: PluginId::new("ora.claude-code").unwrap(),
-                version: "0.1.0".to_string(),
+                id: PluginId::parse("ora.claude-code").unwrap(),
+                version: PluginVersion::parse("0.1.0").unwrap(),
             },
         };
 
@@ -286,7 +348,7 @@ mod tests {
     fn activate_result_serde() {
         let result = ActivateResult {
             providers: vec![ActivateProvider {
-                id: AgentProviderId::new("claude-code").unwrap(),
+                id: AgentProviderId::parse("claude-code").unwrap(),
                 contract_version: 1,
             }],
         };
@@ -328,10 +390,13 @@ mod tests {
 
     #[test]
     fn stream_params_serde() {
+        let value_json =
+            serde_json::json!({"kind": "textDelta", "channel": "assistant", "text": "hello"});
+        let value: AgentEvent = serde_json::from_value(value_json).unwrap();
         let params = StreamParams {
             id: "h:1".to_string(),
-            seq: 1,
-            value: serde_json::json!({"kind": "textDelta", "text": "hello"}),
+            seq: JsonSafeU64::new(1).unwrap(),
+            value,
         };
         let json = serde_json::to_value(&params).unwrap();
         assert_eq!(json["seq"], 1);
@@ -346,5 +411,131 @@ mod tests {
         let agent: DeclaredAgent = serde_json::from_value(json).unwrap();
         assert_eq!(agent.id.as_str(), "claude-code");
         assert_eq!(agent.contract_version, 1);
+    }
+
+    // ── InitializeParams::validate ─────────────────────────────────
+
+    fn make_valid_params() -> InitializeParams {
+        InitializeParams {
+            wire_version: 1,
+            host_version: PluginVersion::parse("0.1.0").unwrap(),
+            runtime_version: PluginVersion::parse("0.1.0").unwrap(),
+            session_id: "s".into(),
+            plugin: InitializePluginIdentity {
+                id: PluginId::parse("ora.test").unwrap(),
+                version: PluginVersion::parse("0.1.0").unwrap(),
+                kind: PluginKind::Agent,
+                plugin_api: 1,
+                content_owner: ContentOwnerId::parse(format!(
+                    "sha256-{}",
+                    "a".repeat(64)
+                ))
+                .unwrap(),
+            },
+            paths: InitializePaths {
+                extension_path: HostResolvedAbsolutePath::parse("D:\\ext").unwrap(),
+                entry_path: HostResolvedAbsolutePath::parse("D:\\ext\\index.js").unwrap(),
+                storage_path: HostResolvedAbsolutePath::parse("D:\\data").unwrap(),
+            },
+            declared_agents: vec![],
+            limits: InitializeLimits::v1_defaults(),
+        }
+    }
+
+    #[test]
+    fn initialize_params_validate_wire_version_rejected() {
+        let mut params = make_valid_params();
+        params.wire_version = 2;
+        assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn initialize_params_validate_plugin_api_rejected() {
+        let mut params = make_valid_params();
+        params.plugin.plugin_api = 2;
+        assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn initialize_params_validate_v1_passes() {
+        let params = make_valid_params();
+        assert!(params.validate().is_ok());
+    }
+
+    // ── ActivateResult::validate_declared_providers ────────────────
+
+    #[test]
+    fn activate_result_validate_providers_match() {
+        let declared = vec![DeclaredAgent {
+            id: AgentProviderId::parse("claude-code").unwrap(),
+            contract_version: 1,
+        }];
+        let result = ActivateResult {
+            providers: vec![ActivateProvider {
+                id: AgentProviderId::parse("claude-code").unwrap(),
+                contract_version: 1,
+            }],
+        };
+        assert!(result.validate_declared_providers(&declared).is_ok());
+    }
+
+    #[test]
+    fn activate_result_validate_count_mismatch() {
+        let declared = vec![
+            DeclaredAgent {
+                id: AgentProviderId::parse("a").unwrap(),
+                contract_version: 1,
+            },
+            DeclaredAgent {
+                id: AgentProviderId::parse("b").unwrap(),
+                contract_version: 1,
+            },
+        ];
+        let result = ActivateResult {
+            providers: vec![ActivateProvider {
+                id: AgentProviderId::parse("a").unwrap(),
+                contract_version: 1,
+            }],
+        };
+        assert!(result.validate_declared_providers(&declared).is_err());
+    }
+
+    #[test]
+    fn activate_result_validate_id_mismatch() {
+        let declared = vec![DeclaredAgent {
+            id: AgentProviderId::parse("expected").unwrap(),
+            contract_version: 1,
+        }];
+        let result = ActivateResult {
+            providers: vec![ActivateProvider {
+                id: AgentProviderId::parse("actual").unwrap(),
+                contract_version: 1,
+            }],
+        };
+        assert!(result.validate_declared_providers(&declared).is_err());
+    }
+
+    #[test]
+    fn activate_result_validate_contract_version_mismatch() {
+        let declared = vec![DeclaredAgent {
+            id: AgentProviderId::parse("p").unwrap(),
+            contract_version: 1,
+        }];
+        let result = ActivateResult {
+            providers: vec![ActivateProvider {
+                id: AgentProviderId::parse("p").unwrap(),
+                contract_version: 2,
+            }],
+        };
+        assert!(result.validate_declared_providers(&declared).is_err());
+    }
+
+    #[test]
+    fn activate_result_validate_empty_both() {
+        assert!(ActivateResult {
+            providers: vec![]
+        }
+        .validate_declared_providers(&[])
+        .is_ok());
     }
 }

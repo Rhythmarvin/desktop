@@ -15,7 +15,7 @@ use crate::{
     ActorSequence, AgentContractFailure, AgentInvocationHandle, AgentInvocationResult,
     DrainTrigger, FatalSettlementCause, GenerationProcessEvent, GenerationTransport,
     HandshakeProof, PendingInvocation, PendingTransitionError, PendingWireState, PluginDeadlines,
-    PluginError, PluginLimits, ProtocolFailure, ReaderEvent, SessionControlKind, StopReason,
+    PluginError, PluginFsLimits, ProtocolFailure, ReaderEvent, SessionControlKind, StopReason,
     TerminationIntent, TerminationIntentKind, TransportFailureStage, ValidatedLaunchDescriptor,
     WriteCertainty, WriterCommandOwner, WriterCompletion, WriterLane, parse_agent_terminal,
     settle_fatal_invocation, settle_termination_intent,
@@ -93,7 +93,7 @@ pub(crate) fn spawn_generation_actor<Controller>(
     descriptor: ValidatedLaunchDescriptor,
     transport: GenerationTransport<Controller>,
     proof: HandshakeProof,
-    limits: PluginLimits,
+    limits: PluginFsLimits,
     deadlines: PluginDeadlines,
 ) -> GenerationActorHandle
 where
@@ -151,7 +151,7 @@ struct GenerationActor<Controller> {
     cancel_tx: mpsc::Sender<String>,
     cancel_rx: mpsc::Receiver<String>,
     completed_tx: Option<oneshot::Sender<GenerationExit>>,
-    limits: PluginLimits,
+    limits: PluginFsLimits,
     deadlines: PluginDeadlines,
     next_request_sequence: u64,
     actor_sequence: u64,

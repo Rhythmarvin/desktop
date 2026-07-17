@@ -433,15 +433,21 @@ where
                 .ok_or_else(|| PluginError::Internal {
                     message: "unknown discovery root".to_string(),
                 })?;
-            for entry in std::fs::read_dir(root).map_err(internal_io)? {
-                let entry = entry.map_err(internal_io)?;
-                if entry.file_type().map_err(internal_io)?.is_dir() {
-                    selections.push(self.authority.register_selection(
-                        session.clone(),
-                        &entry.path(),
-                        new_audit_id(),
-                    )?);
-                }
+            let (discovered, diagnostics) =
+                crate::discover_candidates(root, &self.config.limits)?;
+            for _diag in &diagnostics {
+                tracing::debug!(
+                    "discovery diagnostic: {} ({:?})",
+                    _diag.path.display(),
+                    _diag.reason
+                );
+            }
+            for entry in discovered {
+                selections.push(self.authority.register_selection(
+                    session.clone(),
+                    &entry.path,
+                    new_audit_id(),
+                )?);
             }
         }
         Ok(selections)

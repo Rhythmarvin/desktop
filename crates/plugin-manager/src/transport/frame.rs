@@ -90,7 +90,11 @@ impl From<proto::FrameError> for FrameError {
 ///
 /// Validates: payload non-empty, ≤ MAX_PAYLOAD_BYTES, valid frame type.
 pub fn encode_frame(frame_type: FrameType, payload_str: &str) -> Result<Vec<u8>, FrameError> {
-    Ok(proto::encode_frame(frame_type, payload_str.as_bytes())?)
+    Ok(proto::encode_frame(
+        frame_type,
+        payload_str.as_bytes(),
+        MAX_PAYLOAD_BYTES,
+    )?)
 }
 
 /// Decode a frame header from 5 bytes. Returns (payload_length, frame_type).

@@ -2,7 +2,9 @@
 //!
 //! State machine: AwaitingHeader → AwaitingPayload → dispatch → AwaitingHeader.
 
-use super::frame::{decode_header, FrameError, FrameReadStage, FrameType, HEADER_LEN, MAX_PAYLOAD_BYTES};
+use super::frame::{
+    FrameError, FrameReadStage, FrameType, HEADER_LEN, MAX_PAYLOAD_BYTES, decode_header,
+};
 
 /// A decoded frame ready for dispatch.
 #[derive(Debug, Clone)]
@@ -65,8 +67,7 @@ impl FrameReader {
                         self.state = ParseState::AwaitingHeader;
                         break;
                     }
-                    let header: [u8; HEADER_LEN] =
-                        self.buffer[..HEADER_LEN].try_into().unwrap();
+                    let header: [u8; HEADER_LEN] = self.buffer[..HEADER_LEN].try_into().unwrap();
                     let (length, frame_type) = decode_header(&header)?;
 
                     self.buffer.drain(..HEADER_LEN);
@@ -90,8 +91,8 @@ impl FrameReader {
                         // Payload complete — validate UTF-8 and JSON
                         self.state = ParseState::AwaitingHeader;
 
-                        let payload = String::from_utf8(buffer)
-                            .map_err(|_| FrameError::InvalidUtf8)?;
+                        let payload =
+                            String::from_utf8(buffer).map_err(|_| FrameError::InvalidUtf8)?;
 
                         let payload_json: serde_json::Value = serde_json::from_str(&payload)
                             .map_err(|e| FrameError::EnvelopeError {
@@ -135,14 +136,14 @@ impl FrameReader {
                     stage: FrameReadStage::Header,
                 })
             }
-            ParseState::AwaitingPayload { expected, buffer, .. } => {
-                Err(FrameError::UnexpectedEof {
-                    stage: FrameReadStage::Payload {
-                        expected: *expected,
-                        read: buffer.len() as u32,
-                    },
-                })
-            }
+            ParseState::AwaitingPayload {
+                expected, buffer, ..
+            } => Err(FrameError::UnexpectedEof {
+                stage: FrameReadStage::Payload {
+                    expected: *expected,
+                    read: buffer.len() as u32,
+                },
+            }),
         }
     }
 
@@ -174,7 +175,10 @@ mod tests {
 
     #[test]
     fn reads_single_complete_frame() {
-        let frame = make_frame(FrameType::Request, r#"{"jsonrpc":"2.0","id":"h:1","method":"ping"}"#);
+        let frame = make_frame(
+            FrameType::Request,
+            r#"{"jsonrpc":"2.0","id":"h:1","method":"ping"}"#,
+        );
         let mut reader = FrameReader::new();
         let frames = reader.feed(&frame).unwrap();
         assert_eq!(frames.len(), 1);
@@ -185,8 +189,14 @@ mod tests {
 
     #[test]
     fn reads_multiple_frames_in_one_chunk() {
-        let f1 = make_frame(FrameType::Request, r#"{"jsonrpc":"2.0","id":"h:1","method":"a"}"#);
-        let f2 = make_frame(FrameType::Response, r#"{"jsonrpc":"2.0","id":"h:1","result":"ok"}"#);
+        let f1 = make_frame(
+            FrameType::Request,
+            r#"{"jsonrpc":"2.0","id":"h:1","method":"a"}"#,
+        );
+        let f2 = make_frame(
+            FrameType::Response,
+            r#"{"jsonrpc":"2.0","id":"h:1","result":"ok"}"#,
+        );
         let combined = [f1, f2].concat();
 
         let mut reader = FrameReader::new();
@@ -198,7 +208,10 @@ mod tests {
 
     #[test]
     fn handles_byte_by_byte_feed() {
-        let full = make_frame(FrameType::Notification, r#"{"jsonrpc":"2.0","method":"$/exit"}"#);
+        let full = make_frame(
+            FrameType::Notification,
+            r#"{"jsonrpc":"2.0","method":"$/exit"}"#,
+        );
         let mut reader = FrameReader::new();
 
         // Feed one byte at a time
@@ -227,7 +240,10 @@ mod tests {
 
     #[test]
     fn handles_partial_payload() {
-        let frame = make_frame(FrameType::Request, r#"{"jsonrpc":"2.0","id":"h:1","method":"ping"}"#);
+        let frame = make_frame(
+            FrameType::Request,
+            r#"{"jsonrpc":"2.0","id":"h:1","method":"ping"}"#,
+        );
         let split = HEADER_LEN + 10; // header + 10 bytes of payload
         let mut reader = FrameReader::new();
 
@@ -282,18 +298,18 @@ mod tests {
     fn fuzz_arbitrary_bytes_no_panic() {
         // Feed random byte sequences — must never panic, overflow, or allocate beyond budget
         let test_inputs: &[&[u8]] = &[
-            &[],                                                           // empty
-            &[0x00],                                                       // partial header
-            &[0x00, 0x00, 0x00, 0x00, 0x01],                              // zero length
-            &[0xff, 0xff, 0xff, 0xff, 0x01],                              // negative
-            &[0x00, 0x80, 0x00, 0x01, 0x01],                              // over limit
-            &[0x00, 0x00, 0x00, 0x02, 0x7f],                              // unknown type
-            &[0x00, 0x00, 0x00, 0x02, 0x7f, 0x7b, 0x7d],                  // unknown type + payload
-            &[0xFF, 0xFE, 0xFD, 0xFC, 0x01],                              // garbled header
-            &[0x00, 0x00, 0x00, 0x0a, 0x01, 0xFF, 0xFE, 0xFD],            // invalid UTF-8 payload
-            &[0x00, 0x00, 0x00, 0x01, 0x01, 0x00],                        // NUL byte in payload
-            &[0x7f, 0xff, 0xff, 0xff, 0x01],                              // max i32
-            &[0x00, 0x00, 0x00, 0x64, 0x01],                              // declared 100 bytes but stream ends
+            &[],                                               // empty
+            &[0x00],                                           // partial header
+            &[0x00, 0x00, 0x00, 0x00, 0x01],                   // zero length
+            &[0xff, 0xff, 0xff, 0xff, 0x01],                   // negative
+            &[0x00, 0x80, 0x00, 0x01, 0x01],                   // over limit
+            &[0x00, 0x00, 0x00, 0x02, 0x7f],                   // unknown type
+            &[0x00, 0x00, 0x00, 0x02, 0x7f, 0x7b, 0x7d],       // unknown type + payload
+            &[0xFF, 0xFE, 0xFD, 0xFC, 0x01],                   // garbled header
+            &[0x00, 0x00, 0x00, 0x0a, 0x01, 0xFF, 0xFE, 0xFD], // invalid UTF-8 payload
+            &[0x00, 0x00, 0x00, 0x01, 0x01, 0x00],             // NUL byte in payload
+            &[0x7f, 0xff, 0xff, 0xff, 0x01],                   // max i32
+            &[0x00, 0x00, 0x00, 0x64, 0x01],                   // declared 100 bytes but stream ends
         ];
 
         for (i, input) in test_inputs.iter().enumerate() {
@@ -304,7 +320,10 @@ mod tests {
             if let Err(e) = &result {
                 // Errors must be descriptive, not generic panics
                 let msg = e.to_string();
-                assert!(!msg.is_empty(), "input [{i}]: error message must not be empty");
+                assert!(
+                    !msg.is_empty(),
+                    "input [{i}]: error message must not be empty"
+                );
             }
             // finish() must also not panic
             let _ = reader.finish();

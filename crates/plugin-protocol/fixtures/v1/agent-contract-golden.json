@@ -87,11 +87,11 @@
     "errors": {
       "businessError": {
         "json": "{\"code\":-32000,\"message\":\"Access denied\",\"data\":{\"kind\":\"permissionDenied\"}}",
-        "rust_type": "AgentBusinessError"
+        "rust_type": "AgentBusinessErrorData"
       },
       "providerFailure": {
         "json": "{\"code\":-32000,\"message\":\"Internal error\",\"data\":{\"kind\":\"providerFailure\"}}",
-        "rust_type": "ProviderFailure"
+        "rust_type": "AgentBusinessFailureKind"
       }
     }
   }

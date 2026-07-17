@@ -2,9 +2,13 @@ use ora_plugin_protocol::{InitializeLimits, PluginVersion};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Centralizes all filesystem, protocol, queue, and lifecycle safety budgets.
+/// Filesystem budget limits for plugin packages and discovery roots.
+///
+/// Distinct from `ora_plugin_protocol::PluginLimits` (which holds the full 24-field
+/// budget catalog). This struct manages filesystem-specific budgets and delegates
+/// runtime budgets to `InitializeLimits`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginLimits {
+pub struct PluginFsLimits {
     pub maximum_file_count: u64,
     pub maximum_file_bytes: u64,
     pub maximum_total_bytes: u64,
@@ -12,7 +16,7 @@ pub struct PluginLimits {
     pub runtime: InitializeLimits,
 }
 
-impl Default for PluginLimits {
+impl Default for PluginFsLimits {
     fn default() -> Self {
         Self {
             maximum_file_count: 10_000,
@@ -62,7 +66,7 @@ pub struct PluginManagerConfig {
     data_dir: PathBuf,
     pub host_version: PluginVersion,
     pub bun_version: PluginVersion,
-    pub limits: PluginLimits,
+    pub limits: PluginFsLimits,
     pub deadlines: PluginDeadlines,
     pub selection_ttl: Duration,
     pub candidate_ttl: Duration,
@@ -77,7 +81,7 @@ impl PluginManagerConfig {
             data_dir: data_dir.into(),
             host_version: parse_static_version("0.1.0"),
             bun_version: parse_static_version("1.3.14"),
-            limits: PluginLimits::default(),
+            limits: PluginFsLimits::default(),
             deadlines: PluginDeadlines::default(),
             selection_ttl: Duration::from_secs(5 * 60),
             candidate_ttl: Duration::from_secs(10 * 60),

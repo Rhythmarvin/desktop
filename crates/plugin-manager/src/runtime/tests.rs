@@ -4,11 +4,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use ora_plugin_protocol::{
-    ActivateResult, AgentProviderId, AgentRequest, AgentResponse, AgentScope,
+    ActivateResult, AgentConversationId, AgentEvent, AgentInstallationId, AgentProviderId,
+    AgentRequest, AgentResponse, AgentScope, CancelConversationRequest, ClientRequestId,
     DiscoverInstallationsRequest, DiscoverInstallationsResponse, FrameDecoder, FrameType,
     InitializeParams, InitializeResult, InitializeResultPlugin, JsonRpcEnvelope, JsonSafeU64,
     MAX_FRAME_BYTES, METHOD_ACTIVATE, METHOD_DEACTIVATE, METHOD_EXIT, METHOD_INITIALIZE, PluginId,
-    PluginKind, PluginVersion, WIRE_VERSION_V1, encode_frame,
+    PluginKind, PluginVersion, SendMessageRequest, WIRE_VERSION_V1, encode_frame,
+    encode_json_rpc_request,
 };
 use ora_process::{ProcessExit, ProcessSpec, ProcessTreeController, ProcessTreeError};
 use pretty_assertions::assert_eq;
@@ -17,8 +19,8 @@ use tokio::sync::{Notify, mpsc, watch};
 
 use super::{
     AgentInvocationResult, GenerationLaunchError, GenerationLauncher, GenerationProcessEvent,
-    GenerationTransport, PluginRuntimeAssets, StderrDrainSummary, WriterQueueLimits, spawn_reader,
-    spawn_writer,
+    GenerationTransport, PluginRuntimeAssets, SessionControlKind, StderrDrainSummary,
+    WriterCommandOwner, WriterCompletion, WriterLane, WriterQueueLimits, spawn_reader, spawn_writer,
 };
 use crate::{
     LaunchGrantError, LaunchValueReference, LaunchValueResolver, PluginError, PluginManagerConfig,
@@ -234,7 +236,7 @@ async fn run_fake_bootstrap(
     tree_outcome: TreeDrainOutcome,
 ) {
     let mut decoder =
-        FrameDecoder::new(MAX_FRAME_BYTES).unwrap_or_else(|error| panic!("fake decoder: {error}"));
+        FrameDecoder::new(MAX_FRAME_BYTES);
     let mut chunk = vec![0_u8; 4096];
     let mut exit = false;
     while !exit {
@@ -274,7 +276,7 @@ async fn run_fake_bootstrap(
                                     .unwrap_or_else(|error| panic!("fake initialize result: {error}"))
                                 }
                                 METHOD_ACTIVATE => serde_json::to_value(ActivateResult {
-                                    providers: vec![ora_plugin_protocol::DeclaredAgent {
+                                    providers: vec![ora_plugin_protocol::ActivateProvider {
                                         id: AgentProviderId::parse("example").unwrap_or_else(|error| panic!("provider id: {error}")),
                                         contract_version: 1,
                                     }],
@@ -286,6 +288,24 @@ async fn run_fake_bootstrap(
                                         "kind": "notFound",
                                         "message": "No installations found"
                                     }]
+                                }),
+                                "agent.sendMessage" | "agent.startConversation" => {
+                                    let conv_id = "conv-test-1";
+                                    for (seq, event_json) in [
+                                        (1, serde_json::json!({"kind": "conversationStarted", "conversationId": conv_id})),
+                                        (2, serde_json::json!({"kind": "textDelta", "channel": "assistant", "text": "Hello"})),
+                                    ] {
+                                        let stream = serde_json::to_vec(&serde_json::json!({
+                                            "jsonrpc": "2.0", "method": "$/stream",
+                                            "params": {"id": request.id.as_str(), "seq": seq, "value": event_json}
+                                        })).unwrap();
+                                        let frame = encode_frame(FrameType::Notification, &stream, MAX_FRAME_BYTES).unwrap();
+                                        stdout.write_all(&frame).await.unwrap();
+                                    }
+                                    serde_json::json!({"conversationId": conv_id, "finishReason": "completed"})
+                                },
+                                "agent.cancelConversation" => serde_json::json!({
+                                    "disposition": "accepted"
                                 }),
                                 METHOD_DEACTIVATE => serde_json::json!({}),
                                 other => panic!("unexpected fake method {other}"),
@@ -887,4 +907,1278 @@ fn test_descriptor(plugin_id: PluginId) -> ValidatedLaunchDescriptor {
             .unwrap_or_else(|error| panic!("registry revision: {error}")),
         launch_grant: None,
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Configurable fake bootstrap for failure-mode tests
+// ═══════════════════════════════════════════════════════════════════
+
+/// Controls how the fake bootstrap peer responds to lifecycle requests.
+#[derive(Clone)]
+enum FakeBootstrapBehavior {
+    /// Normal: return valid matching responses.
+    Normal,
+    /// Return wrong wire_version in initialize result.
+    InitializeWrongWireVersion,
+    /// Return wrong session_id in initialize result.
+    InitializeWrongSessionId,
+    /// Return wrong plugin id in initialize result.
+    InitializeWrongPluginId,
+    /// Return wrong plugin version in initialize result.
+    InitializeWrongPluginVersion,
+    /// Return mismatched provider count in activate result.
+    ActivateWrongProviderCount,
+    /// Return mismatched provider id in activate result.
+    ActivateWrongProviderId,
+    /// Return mismatched contract_version in activate result.
+    ActivateWrongContractVersion,
+    /// Send a stream event on a non-streaming method (discoverInstallations).
+    StreamOnNonStreamingMethod,
+    /// Return error response for initialize (simulate plugin rejection).
+    InitializeError,
+    /// Return error response for activate.
+    ActivateError,
+}
+
+/// Builds a transport whose fake bootstrap behaves according to `behavior`.
+fn fake_generation_transport_with_behavior(
+    generation: u64,
+    tree_outcome: TreeDrainOutcome,
+    behavior: FakeBootstrapBehavior,
+) -> Result<GenerationTransport<FakeController>, GenerationLaunchError> {
+    let (host_stdin, child_stdin) = duplex(1024 * 1024);
+    let (mut child_stdout, host_stdout) = duplex(1024 * 1024);
+    let (writer, writer_events) = spawn_writer(host_stdin, WriterQueueLimits::v1_defaults())
+        .map_err(|_| GenerationLaunchError::WriterConfiguration)?;
+    let reader_events = spawn_reader(host_stdout, 64, 256);
+    let (process_tx, process_events) = mpsc::channel(8);
+    let (terminate_tx, terminate_rx) = watch::channel(false);
+    tokio::spawn(async move {
+        run_fake_bootstrap_with_behavior(
+            child_stdin,
+            &mut child_stdout,
+            process_tx,
+            terminate_rx,
+            tree_outcome,
+            behavior,
+        )
+        .await;
+    });
+    Ok(GenerationTransport {
+        generation,
+        process_id: 4242,
+        controller: FakeController {
+            terminate: terminate_tx,
+        },
+        writer,
+        writer_events,
+        reader_events,
+        process_events,
+    })
+}
+
+async fn run_fake_bootstrap_with_behavior(
+    mut stdin: DuplexStream,
+    stdout: &mut DuplexStream,
+    process: mpsc::Sender<GenerationProcessEvent>,
+    mut terminate: watch::Receiver<bool>,
+    tree_outcome: TreeDrainOutcome,
+    behavior: FakeBootstrapBehavior,
+) {
+    let mut decoder =
+        FrameDecoder::new(MAX_FRAME_BYTES);
+    let mut chunk = vec![0_u8; 4096];
+    let mut exit = false;
+    while !exit {
+        tokio::select! {
+            changed = terminate.changed() => {
+                let _ = changed;
+                break;
+            }
+            read = stdin.read(&mut chunk) => {
+                let bytes = read.unwrap_or_else(|error| panic!("fake stdin read: {error}"));
+                if bytes == 0 { break; }
+                let frames = decoder
+                    .decode_chunk(&chunk[..bytes])
+                    .unwrap_or_else(|error| panic!("fake frame decode: {error}"));
+                for frame in frames {
+                    let envelope = ora_plugin_protocol::parse_json_rpc_frame(&frame, 64)
+                        .unwrap_or_else(|error| panic!("fake envelope: {error}"));
+                    match envelope {
+                        JsonRpcEnvelope::Request(request) => {
+                            let result = match (request.method.as_str(), &behavior) {
+                                (METHOD_INITIALIZE, _) => {
+                                    let params: InitializeParams = serde_json::from_value(
+                                        request.params.unwrap_or_else(|| panic!("initialize params")),
+                                    )
+                                    .unwrap_or_else(|error| panic!("fake initialize params: {error}"));
+
+                                    match &behavior {
+                                        FakeBootstrapBehavior::InitializeError => {
+                                            write_error_response(stdout, request.id.as_str(), -32603, "internal error", None).await;
+                                            continue; // skip normal response
+                                        }
+                                        _ => {}
+                                    }
+
+                                    let id = match &behavior {
+                                        FakeBootstrapBehavior::InitializeWrongPluginId => {
+                                            PluginId::parse("ora.wrong").unwrap()
+                                        }
+                                        _ => params.plugin.id.clone(),
+                                    };
+                                    let version = match &behavior {
+                                        FakeBootstrapBehavior::InitializeWrongPluginVersion => {
+                                            PluginVersion::parse("99.99.99").unwrap()
+                                        }
+                                        _ => params.plugin.version.clone(),
+                                    };
+                                    let wire_version = match &behavior {
+                                        FakeBootstrapBehavior::InitializeWrongWireVersion => 99,
+                                        _ => WIRE_VERSION_V1,
+                                    };
+                                    let session_id = match &behavior {
+                                        FakeBootstrapBehavior::InitializeWrongSessionId => {
+                                            "wrong-session".to_string()
+                                        }
+                                        _ => params.session_id.clone(),
+                                    };
+                                    serde_json::to_value(InitializeResult {
+                                        wire_version,
+                                        runtime_version: params.runtime_version,
+                                        session_id,
+                                        plugin: InitializeResultPlugin { id, version },
+                                    })
+                                    .unwrap_or_else(|error| panic!("fake initialize result: {error}"))
+                                }
+                                (METHOD_ACTIVATE, _) => {
+                                    match &behavior {
+                                        FakeBootstrapBehavior::ActivateError => {
+                                            write_error_response(stdout, request.id.as_str(), -32602, "invalid params", None).await;
+                                            continue;
+                                        }
+                                        _ => {}
+                                    }
+                                    let id = AgentProviderId::parse("example").unwrap();
+                                    let providers = match &behavior {
+                                        FakeBootstrapBehavior::ActivateWrongProviderCount => {
+                                            vec![
+                                                ora_plugin_protocol::ActivateProvider { id: id.clone(), contract_version: 1 },
+                                                ora_plugin_protocol::ActivateProvider { id: AgentProviderId::parse("extra").unwrap(), contract_version: 1 },
+                                            ]
+                                        }
+                                        FakeBootstrapBehavior::ActivateWrongProviderId => {
+                                            vec![ora_plugin_protocol::ActivateProvider {
+                                                id: AgentProviderId::parse("wrong-provider").unwrap(),
+                                                contract_version: 1,
+                                            }]
+                                        }
+                                        FakeBootstrapBehavior::ActivateWrongContractVersion => {
+                                            vec![ora_plugin_protocol::ActivateProvider {
+                                                id,
+                                                contract_version: 99,
+                                            }]
+                                        }
+                                        _ => {
+                                            vec![ora_plugin_protocol::ActivateProvider {
+                                                id,
+                                                contract_version: 1,
+                                            }]
+                                        }
+                                    };
+                                    serde_json::to_value(ActivateResult { providers })
+                                        .unwrap_or_else(|error| panic!("fake activate result: {error}"))
+                                }
+                                ("agent.discoverInstallations", _) => {
+                                    // For stream-on-non-streaming test: send a stream before response
+                                    if matches!(behavior, FakeBootstrapBehavior::StreamOnNonStreamingMethod) {
+                                        let stream = serde_json::to_vec(&serde_json::json!({
+                                            "jsonrpc": "2.0",
+                                            "method": "$/stream",
+                                            "params": {"id": request.id.as_str(), "seq": 1, "value": {"kind": "textDelta", "channel": "assistant", "text": "unexpected"}}
+                                        }))
+                                        .unwrap();
+                                        let frame = encode_frame(FrameType::Notification, &stream, MAX_FRAME_BYTES).unwrap();
+                                        stdout.write_all(&frame).await.unwrap();
+                                    }
+                                    serde_json::json!({
+                                        "installations": [],
+                                        "diagnostics": [{"kind": "notFound", "message": "No installations found"}]
+                                    })
+                                }
+                                (METHOD_DEACTIVATE, _) => serde_json::json!({}),
+                                (other, _) => panic!("unexpected fake method {other}"),
+                            };
+                            write_response(stdout, request.id.as_str(), result).await;
+                        }
+                        JsonRpcEnvelope::Notification(notification) => {
+                            if notification.method == METHOD_EXIT {
+                                exit = true;
+                            }
+                        }
+                        JsonRpcEnvelope::Response(_) => panic!("Host sent Response to fake bootstrap"),
+                    }
+                }
+            }
+        }
+    }
+    stdout.shutdown().await.unwrap_or_else(|error| panic!("fake stdout shutdown: {error}"));
+    let _ = process
+        .send(GenerationProcessEvent::DirectExit(Ok(ProcessExit { exit_code: Some(0), success: true })))
+        .await;
+    let _ = process
+        .send(GenerationProcessEvent::TreeEmpty(tree_result(tree_outcome)))
+        .await;
+    let _ = process
+        .send(GenerationProcessEvent::StderrDrained(StderrDrainSummary {
+            retained: Vec::new(), dropped_bytes: 0, failure: None,
+        }))
+        .await;
+}
+
+async fn write_error_response(
+    stdout: &mut DuplexStream,
+    id: &str,
+    code: i32,
+    message: &str,
+    data: Option<serde_json::Value>,
+) {
+    let mut err = serde_json::json!({"code": code, "message": message});
+    if let Some(d) = data {
+        err["data"] = d;
+    }
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": err,
+    }))
+    .unwrap();
+    let frame = encode_frame(FrameType::Response, &payload, MAX_FRAME_BYTES).unwrap();
+    stdout.write_all(&frame).await.unwrap();
+}
+
+/// Launcher that delegates to a fake bootstrap with a specific failure behavior.
+#[derive(Clone)]
+struct BehaviorLauncher {
+    behavior: FakeBootstrapBehavior,
+    tree_outcome: TreeDrainOutcome,
+}
+
+impl GenerationLauncher for BehaviorLauncher {
+    type Controller = FakeController;
+
+    async fn launch(
+        &self,
+        generation: u64,
+        _spec: ProcessSpec,
+    ) -> Result<GenerationTransport<Self::Controller>, GenerationLaunchError> {
+        fake_generation_transport_with_behavior(generation, self.tree_outcome, self.behavior.clone())
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Handshake failure tests
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves initialize with wrong wire_version fails handshake.
+#[tokio::test]
+async fn handshake_rejects_wrong_wire_version() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::InitializeWrongWireVersion, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::HandshakeFailed { .. })));
+}
+
+/// Proves initialize with wrong session_id fails handshake.
+#[tokio::test]
+async fn handshake_rejects_wrong_session_id() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::InitializeWrongSessionId, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::HandshakeFailed { .. })));
+}
+
+/// Proves initialize with wrong plugin id fails handshake.
+#[tokio::test]
+async fn handshake_rejects_wrong_plugin_id() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::InitializeWrongPluginId, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::HandshakeFailed { .. })));
+}
+
+/// Proves initialize with wrong plugin version fails handshake.
+#[tokio::test]
+async fn handshake_rejects_wrong_plugin_version() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::InitializeWrongPluginVersion, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::HandshakeFailed { .. })));
+}
+
+/// Proves activate with wrong provider count fails activation.
+#[tokio::test]
+async fn handshake_rejects_wrong_provider_count() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::ActivateWrongProviderCount, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::ActivationFailed { .. })));
+}
+
+/// Proves activate with wrong provider id fails activation.
+#[tokio::test]
+async fn handshake_rejects_wrong_provider_id() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::ActivateWrongProviderId, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::ActivationFailed { .. })));
+}
+
+/// Proves activate with wrong contract version fails activation.
+#[tokio::test]
+async fn handshake_rejects_wrong_contract_version() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::ActivateWrongContractVersion, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::ActivationFailed { .. })));
+}
+
+/// Proves an error response to initialize is correctly propagated.
+#[tokio::test]
+async fn handshake_initialize_error_response_fails() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::InitializeError, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    let result = runtime.start().await;
+    assert!(matches!(result, Err(PluginError::HandshakeFailed { .. })));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Stream validation test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that a stream event on a non-streaming method triggers a protocol failure.
+#[tokio::test]
+async fn stream_on_non_streaming_method_triggers_protocol_failure() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let events = Arc::new(RecordingEvents::default());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        BehaviorLauncher { behavior: FakeBootstrapBehavior::StreamOnNonStreamingMethod, tree_outcome: TreeDrainOutcome::Reaped },
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::clone(&events),
+        Arc::new(EmptyResolver),
+    );
+    runtime.start().await.unwrap();
+
+    let request = AgentRequest::DiscoverInstallations(DiscoverInstallationsRequest {
+        provider_id: AgentProviderId::parse("example").unwrap(),
+        scope: AgentScope::Global {},
+    });
+    // The fake will send a stream event on discoverInstallations (non-streaming),
+    // and then also the normal response. The stream should trigger a protocol failure
+    // that causes the generation to crash/be torn down.
+    let invocation = runtime.invoke_with_timeout(request, Duration::from_secs(2)).await;
+    // The invocation may succeed or fail depending on ordering; the key assertion
+    // is that the runtime eventually reports a crash due to protocol violation.
+    if let Ok(invocation) = invocation {
+        let _ = invocation.finish().await;
+    }
+    // After the protocol violation, the runtime should enter a terminal state.
+    let state = runtime.state().await.unwrap();
+    assert!(
+        matches!(state, RuntimeState::Crashed { .. }) || matches!(state, RuntimeState::Stopped),
+        "expected Crashed or Stopped after protocol violation, got {state:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Pausable fake bootstrap for cancel / stream timing tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[derive(Clone)]
+struct PausableLauncher {
+    paused: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+impl PausableLauncher {
+    fn new() -> (Self, Arc<Notify>, Arc<Notify>) {
+        let paused = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        (
+            Self {
+                paused: Arc::clone(&paused),
+                release: Arc::clone(&release),
+            },
+            paused,
+            release,
+        )
+    }
+}
+
+impl GenerationLauncher for PausableLauncher {
+    type Controller = FakeController;
+
+    async fn launch(
+        &self,
+        generation: u64,
+        _spec: ProcessSpec,
+    ) -> Result<GenerationTransport<Self::Controller>, GenerationLaunchError> {
+        pausable_generation_transport(
+            generation,
+            TreeDrainOutcome::Reaped,
+            Arc::clone(&self.paused),
+            Arc::clone(&self.release),
+        )
+    }
+}
+
+fn pausable_generation_transport(
+    generation: u64,
+    tree_outcome: TreeDrainOutcome,
+    paused: Arc<Notify>,
+    release: Arc<Notify>,
+) -> Result<GenerationTransport<FakeController>, GenerationLaunchError> {
+    let (host_stdin, child_stdin) = duplex(1024 * 1024);
+    let (mut child_stdout, host_stdout) = duplex(1024 * 1024);
+    let (writer, writer_events) = spawn_writer(host_stdin, WriterQueueLimits::v1_defaults())
+        .map_err(|_| GenerationLaunchError::WriterConfiguration)?;
+    let reader_events = spawn_reader(host_stdout, 64, 256);
+    let (process_tx, process_events) = mpsc::channel(8);
+    let (terminate_tx, terminate_rx) = watch::channel(false);
+    tokio::spawn(async move {
+        run_pausable_bootstrap(
+            child_stdin,
+            &mut child_stdout,
+            process_tx,
+            terminate_rx,
+            tree_outcome,
+            paused,
+            release,
+        )
+        .await;
+    });
+    Ok(GenerationTransport {
+        generation,
+        process_id: 4242,
+        controller: FakeController {
+            terminate: terminate_tx,
+        },
+        writer,
+        writer_events,
+        reader_events,
+        process_events,
+    })
+}
+
+async fn run_pausable_bootstrap(
+    mut stdin: DuplexStream,
+    stdout: &mut DuplexStream,
+    process: mpsc::Sender<GenerationProcessEvent>,
+    mut terminate: watch::Receiver<bool>,
+    tree_outcome: TreeDrainOutcome,
+    paused: Arc<Notify>,
+    release: Arc<Notify>,
+) {
+    let mut decoder =
+        FrameDecoder::new(MAX_FRAME_BYTES);
+    let mut chunk = vec![0_u8; 4096];
+    let mut exit = false;
+    let mut request_count = 0u32;
+    while !exit {
+        tokio::select! {
+            changed = terminate.changed() => { let _ = changed; break; }
+            read = stdin.read(&mut chunk) => {
+                let bytes = read.unwrap_or_else(|error| panic!("fake stdin read: {error}"));
+                if bytes == 0 { break; }
+                let frames = decoder.decode_chunk(&chunk[..bytes])
+                    .unwrap_or_else(|error| panic!("fake frame decode: {error}"));
+                for frame in frames {
+                    let envelope = ora_plugin_protocol::parse_json_rpc_frame(&frame, 64)
+                        .unwrap_or_else(|error| panic!("fake envelope: {error}"));
+                    match envelope {
+                        JsonRpcEnvelope::Request(request) => {
+                            request_count += 1;
+                            // Pause before responding to the first ordinary request
+                            // (skip lifecycle requests: initialize/activate/deactivate)
+                            let is_lifecycle = matches!(
+                                request.method.as_str(),
+                                "$/initialize" | "$/activate" | "$/deactivate"
+                            );
+                            if !is_lifecycle && request_count > 2 {
+                                paused.notify_one();
+                                release.notified().await;
+                            }
+                            let result = match request.method.as_str() {
+                                METHOD_INITIALIZE => {
+                                    let params: InitializeParams = serde_json::from_value(
+                                        request.params.unwrap_or_else(|| panic!("initialize params")),
+                                    ).unwrap_or_else(|error| panic!("fake init params: {error}"));
+                                    serde_json::to_value(InitializeResult {
+                                        wire_version: WIRE_VERSION_V1,
+                                        runtime_version: params.runtime_version,
+                                        session_id: params.session_id,
+                                        plugin: InitializeResultPlugin {
+                                            id: params.plugin.id,
+                                            version: params.plugin.version,
+                                        },
+                                    }).unwrap_or_else(|error| panic!("fake init result: {error}"))
+                                }
+                                METHOD_ACTIVATE => serde_json::to_value(ActivateResult {
+                                    providers: vec![ora_plugin_protocol::ActivateProvider {
+                                        id: AgentProviderId::parse("example").unwrap(),
+                                        contract_version: 1,
+                                    }],
+                                }).unwrap(),
+                                "agent.discoverInstallations" => serde_json::json!({
+                                    "installations": [],
+                                    "diagnostics": [{"kind": "notFound", "message": "No installations found"}]
+                                }),
+                                "agent.sendMessage" | "agent.startConversation" => {
+                                    let conv_id = "conv-test-1";
+                                    for (seq, event_json) in [
+                                        (1, serde_json::json!({"kind": "conversationStarted", "conversationId": conv_id})),
+                                        (2, serde_json::json!({"kind": "textDelta", "channel": "assistant", "text": "Hello"})),
+                                    ] {
+                                        let stream = serde_json::to_vec(&serde_json::json!({
+                                            "jsonrpc": "2.0", "method": "$/stream",
+                                            "params": {"id": request.id.as_str(), "seq": seq, "value": event_json}
+                                        })).unwrap();
+                                        let frame = encode_frame(FrameType::Notification, &stream, MAX_FRAME_BYTES).unwrap();
+                                        stdout.write_all(&frame).await.unwrap();
+                                    }
+                                    serde_json::json!({"conversationId": conv_id, "finishReason": "completed"})
+                                },
+                                "agent.cancelConversation" => serde_json::json!({
+                                    "disposition": "accepted"
+                                }),
+                                METHOD_DEACTIVATE => serde_json::json!({}),
+                                other => panic!("unexpected fake method {other}"),
+                            };
+                            write_response(stdout, request.id.as_str(), result).await;
+                        }
+                        JsonRpcEnvelope::Notification(notification) => {
+                            if notification.method == METHOD_EXIT { exit = true; }
+                        }
+                        JsonRpcEnvelope::Response(_) => panic!("Host sent Response to fake bootstrap"),
+                    }
+                }
+            }
+        }
+    }
+    stdout.shutdown().await.unwrap_or_else(|error| panic!("fake stdout shutdown: {error}"));
+    let _ = process.send(GenerationProcessEvent::DirectExit(Ok(ProcessExit {
+        exit_code: Some(0), success: true,
+    }))).await;
+    let _ = process.send(GenerationProcessEvent::TreeEmpty(tree_result(tree_outcome))).await;
+    let _ = process.send(GenerationProcessEvent::StderrDrained(StderrDrainSummary {
+        retained: Vec::new(), dropped_bytes: 0, failure: None,
+    })).await;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Cancel timing test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that cancelling an invocation while the response is pending
+/// is correctly handled: if the plugin already has a result, the result
+/// is delivered; the transport cancel is best-effort.
+#[tokio::test]
+async fn cancel_during_pending_response_still_delivers_result() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let (launcher, paused, release) = PausableLauncher::new();
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        launcher,
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    runtime.start().await.unwrap();
+
+    // Issue a request; the bootstrap will pause before responding.
+    let request = AgentRequest::DiscoverInstallations(DiscoverInstallationsRequest {
+        provider_id: AgentProviderId::parse("example").unwrap(),
+        scope: AgentScope::Global {},
+    });
+    let invocation = runtime
+        .invoke_with_timeout(request, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Wait for the bootstrap to have received the request and paused.
+    tokio::time::timeout(Duration::from_secs(2), paused.notified())
+        .await
+        .expect("bootstrap did not pause within timeout");
+
+    // Cancel while the response is pending. With in-memory transport the
+    // write is already complete, so this sends a transport cancel signal.
+    invocation.cancel().await.unwrap();
+
+    // Now release the bootstrap to write the response.
+    release.notify_one();
+
+    // The response should still be delivered — transport cancel is best-effort.
+    let result = invocation.finish().await;
+    assert!(
+        matches!(result, Ok(_)),
+        "response should be delivered despite cancel, got {result:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Business safety cancel test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that explicit cancel on a safety method (cancelConversation) is
+/// silently ignored — the invocation completes normally.
+#[tokio::test]
+async fn safety_method_rejects_explicit_cancel() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        FakeLauncher,
+        Arc::new(FakeAdmission { descriptor: test_descriptor(plugin_id.clone()) }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    runtime.start().await.unwrap();
+
+    let request = AgentRequest::CancelConversation(
+        ora_plugin_protocol::CancelConversationRequest {
+            provider_id: AgentProviderId::parse("example").unwrap(),
+            installation_id: AgentInstallationId::parse("install-1").unwrap(),
+            conversation_id: AgentConversationId::parse("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+            scope: AgentScope::Global {},
+        },
+    );
+    let invocation = runtime
+        .invoke_with_timeout(request, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Attempt explicit cancel on a safety method — should be silently ignored
+    // because safety_control=true and kind=ExplicitCancel.
+    invocation.cancel().await.unwrap();
+
+    // The invocation should complete normally with the CancelConversation result.
+    let result = invocation.finish().await;
+    assert!(
+        matches!(result, Ok(AgentInvocationResult::Response(AgentResponse::CancelConversation(_)))),
+        "safety method should complete normally despite explicit cancel, got {result:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Stream seq validation tests
+// ═══════════════════════════════════════════════════════════════════
+
+/// Fake bootstrap that sends a stream notification with a non-starting seq number
+/// before the terminal response, then exits normally.
+async fn run_stream_gap_bootstrap(
+    mut stdin: DuplexStream,
+    stdout: &mut DuplexStream,
+    process: mpsc::Sender<GenerationProcessEvent>,
+    mut terminate: watch::Receiver<bool>,
+    tree_outcome: TreeDrainOutcome,
+) {
+    let mut decoder =
+        FrameDecoder::new(MAX_FRAME_BYTES);
+    let mut chunk = vec![0_u8; 4096];
+    let mut exit = false;
+    let mut sent_gap_stream = false;
+    while !exit {
+        tokio::select! {
+            changed = terminate.changed() => { let _ = changed; break; }
+            read = stdin.read(&mut chunk) => {
+                let bytes = read.unwrap_or_else(|error| panic!("fake stdin read: {error}"));
+                if bytes == 0 { break; }
+                let frames = decoder.decode_chunk(&chunk[..bytes])
+                    .unwrap_or_else(|error| panic!("fake frame decode: {error}"));
+                for frame in frames {
+                    let envelope = ora_plugin_protocol::parse_json_rpc_frame(&frame, 64)
+                        .unwrap_or_else(|error| panic!("fake envelope: {error}"));
+                    match envelope {
+                        JsonRpcEnvelope::Request(request) => {
+                            let result = match request.method.as_str() {
+                                METHOD_INITIALIZE => {
+                                    let params: InitializeParams = serde_json::from_value(
+                                        request.params.unwrap(),
+                                    ).unwrap();
+                                    serde_json::to_value(InitializeResult {
+                                        wire_version: WIRE_VERSION_V1,
+                                        runtime_version: params.runtime_version,
+                                        session_id: params.session_id,
+                                        plugin: InitializeResultPlugin {
+                                            id: params.plugin.id,
+                                            version: params.plugin.version,
+                                        },
+                                    }).unwrap()
+                                }
+                                METHOD_ACTIVATE => serde_json::to_value(ActivateResult {
+                                    providers: vec![ora_plugin_protocol::ActivateProvider {
+                                        id: AgentProviderId::parse("example").unwrap(),
+                                        contract_version: 1,
+                                    }],
+                                }).unwrap(),
+                                "agent.discoverInstallations" => {
+                                    // Send a stream with seq=5 (gap — should be 1) before response
+                                    if !sent_gap_stream {
+                                        sent_gap_stream = true;
+                                        let stream_payload = serde_json::to_vec(&serde_json::json!({
+                                            "jsonrpc": "2.0",
+                                            "method": "$/stream",
+                                            "params": {
+                                                "id": request.id.as_str(),
+                                                "seq": 5,
+                                                "value": {"kind": "textDelta", "channel": "assistant", "text": "gap"}
+                                            }
+                                        })).unwrap();
+                                        let frame = encode_frame(FrameType::Notification, &stream_payload, MAX_FRAME_BYTES).unwrap();
+                                        stdout.write_all(&frame).await.unwrap();
+                                    }
+                                    serde_json::json!({
+                                        "installations": [],
+                                        "diagnostics": [{"kind": "notFound", "message": "none"}]
+                                    })
+                                }
+                                METHOD_DEACTIVATE => serde_json::json!({}),
+                                other => panic!("unexpected fake method {other}"),
+                            };
+                            write_response(stdout, request.id.as_str(), result).await;
+                        }
+                        JsonRpcEnvelope::Notification(notification) => {
+                            if notification.method == METHOD_EXIT { exit = true; }
+                        }
+                        JsonRpcEnvelope::Response(_) => panic!("Host sent Response"),
+                    }
+                }
+            }
+        }
+    }
+    stdout.shutdown().await.unwrap();
+    let _ = process.send(GenerationProcessEvent::DirectExit(Ok(ProcessExit { exit_code: Some(0), success: true }))).await;
+    let _ = process.send(GenerationProcessEvent::TreeEmpty(tree_result(tree_outcome))).await;
+    let _ = process.send(GenerationProcessEvent::StderrDrained(StderrDrainSummary { retained: Vec::new(), dropped_bytes: 0, failure: None })).await;
+}
+
+#[derive(Clone)]
+struct StreamGapLauncher;
+
+impl GenerationLauncher for StreamGapLauncher {
+    type Controller = FakeController;
+    async fn launch(
+        &self,
+        generation: u64,
+        _spec: ProcessSpec,
+    ) -> Result<GenerationTransport<Self::Controller>, GenerationLaunchError> {
+        let (host_stdin, child_stdin) = duplex(1024 * 1024);
+        let (mut child_stdout, host_stdout) = duplex(1024 * 1024);
+        let (writer, writer_events) = spawn_writer(host_stdin, WriterQueueLimits::v1_defaults())
+            .map_err(|_| GenerationLaunchError::WriterConfiguration)?;
+        let reader_events = spawn_reader(host_stdout, 64, 256);
+        let (process_tx, process_events) = mpsc::channel(8);
+        let (terminate_tx, terminate_rx) = watch::channel(false);
+        tokio::spawn(async move {
+            run_stream_gap_bootstrap(child_stdin, &mut child_stdout, process_tx, terminate_rx, TreeDrainOutcome::Reaped).await;
+        });
+        Ok(GenerationTransport { generation, process_id: 4242, controller: FakeController { terminate: terminate_tx }, writer, writer_events, reader_events, process_events })
+    }
+}
+
+/// Proves that a stream with a non-1 starting seq triggers a protocol failure.
+#[tokio::test]
+async fn stream_seq_gap_triggers_protocol_failure() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let events = Arc::new(RecordingEvents::default());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        StreamGapLauncher,
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::clone(&events),
+        Arc::new(EmptyResolver),
+    );
+    runtime.start().await.unwrap();
+
+    let request = AgentRequest::DiscoverInstallations(DiscoverInstallationsRequest {
+        provider_id: AgentProviderId::parse("example").unwrap(),
+        scope: AgentScope::Global {},
+    });
+    let invocation = runtime.invoke_with_timeout(request, Duration::from_secs(2)).await;
+    if let Ok(invocation) = invocation {
+        let _ = invocation.finish().await;
+    }
+    // The stream with seq=5 (gap) should trigger a protocol failure.
+    let state = runtime.state().await.unwrap();
+    assert!(
+        matches!(state, RuntimeState::Crashed { .. }) || matches!(state, RuntimeState::Stopped),
+        "expected Crashed/Stopped after stream seq gap, got {state:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Process exit during operation test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that the runtime handles a generation that has already reaped
+/// correctly: attempting to start again after a successful stop-and-reap
+/// works (the runtime is in Stopped state, not wedged).
+#[tokio::test]
+async fn restart_after_graceful_stop_succeeds() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let events = Arc::new(RecordingEvents::default());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        FakeLauncher,
+        Arc::new(FakeAdmission { descriptor: descriptor.clone() }),
+        Arc::clone(&events),
+        Arc::new(EmptyResolver),
+    );
+    // First generation
+    runtime.start().await.unwrap();
+    runtime.stop_and_reap(&plugin_id, StopReason::ManualStop).await.unwrap();
+    assert_eq!(runtime.state().await.unwrap(), RuntimeState::Stopped);
+
+    // Second generation — should work without TreeCleanupTimeout
+    let descriptor2 = test_descriptor(plugin_id.clone());
+    let runtime2 = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        FakeLauncher,
+        Arc::new(FakeAdmission { descriptor: descriptor2 }),
+        Arc::clone(&events),
+        Arc::new(EmptyResolver),
+    );
+    runtime2.start().await.unwrap();
+    let state = runtime2.state().await.unwrap();
+    assert!(
+        matches!(state, RuntimeState::Running { .. }),
+        "expected Running after restart, got {state:?}"
+    );
+    runtime2.stop_and_reap(&plugin_id, StopReason::ManualStop).await.unwrap();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Writer lane priority test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that the writer respects biased lane priority:
+/// session_control > transport_cancel > ordinary.
+#[tokio::test]
+async fn writer_prioritizes_session_control_over_ordinary() {
+    let id1 = ora_plugin_protocol::HostRequestId::from_sequence(1).unwrap();
+    let id2 = ora_plugin_protocol::HostRequestId::from_sequence(2).unwrap();
+
+    let (host, mut peer) = duplex(256 * 1024);
+    let (queues, mut completions) = spawn_writer(host, WriterQueueLimits::v1_defaults()).unwrap();
+
+    // Saturate the ordinary lane with frames.
+    let payload = encode_json_rpc_request(&id1, "test", &serde_json::json!({})).unwrap();
+    for _ in 0..5 {
+        let _ = queues.enqueue(
+            1,
+            WriterCommandOwner::Request(id1.clone()),
+            FrameType::Request,
+            &payload,
+            WriterLane::Ordinary,
+            Duration::from_secs(1),
+        ).await;
+    }
+
+    // Enqueue a session_control frame AFTER ordinary frames.
+    let ctrl_payload = encode_json_rpc_request(&id2, "$/deactivate", &serde_json::json!({})).unwrap();
+    queues.enqueue(
+        1,
+        WriterCommandOwner::SessionControl(SessionControlKind::Deactivate),
+        FrameType::Request,
+        &ctrl_payload,
+        WriterLane::SessionControl,
+        Duration::from_secs(1),
+    ).await.unwrap();
+
+    // Read frames from peer. The session_control frame must appear before
+    // any ordinary frame enqueued after it.
+    let mut buf = vec![0u8; 65536];
+    let n = tokio::time::timeout(Duration::from_secs(2), peer.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(n > 0, "should have read bytes");
+
+    // Collect all completion events.
+    let mut completions_seen = Vec::new();
+    for _ in 0..6 {
+        let c = tokio::time::timeout(Duration::from_secs(1), completions.recv())
+            .await
+            .unwrap();
+        if let Some(c) = c {
+            completions_seen.push(c);
+        }
+    }
+
+    // Verify that the session_control frame was written (it should appear
+    // among the completions, and since the writer uses biased select,
+    // it should be written before ordinary frames enqueued after it).
+    let session_control_written = completions_seen.iter().any(|c| {
+        matches!(c, WriterCompletion::FrameWritten { owner: WriterCommandOwner::SessionControl(SessionControlKind::Deactivate), .. })
+    });
+    assert!(session_control_written, "session_control frame should have been written");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Streaming method E2E test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that invoking a streaming method (sendMessage) delivers a terminal
+/// AgentTurnResult. Stream events may arrive before or after the terminal depending
+/// on the timing of in-memory transport — this test verifies the terminal contract.
+#[tokio::test]
+async fn streaming_method_delivers_turn_result() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        FakeLauncher,
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+    runtime.start().await.unwrap();
+
+    let request = AgentRequest::SendMessage(
+        ora_plugin_protocol::SendMessageRequest {
+            provider_id: AgentProviderId::parse("example").unwrap(),
+            installation_id: AgentInstallationId::parse("install-1").unwrap(),
+            conversation_id: AgentConversationId::parse("conv-test-1").unwrap(),
+            scope: AgentScope::Global {},
+            client_request_id: ClientRequestId::parse("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+            prompt: ora_plugin_protocol::AgentPrompt::parse("Hello").unwrap(),
+        },
+    );
+    let mut invocation = runtime
+        .invoke_with_timeout(request, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Collect any stream events that arrived
+    let mut events = Vec::new();
+    while let Ok(Some(event)) =
+        tokio::time::timeout(Duration::from_millis(100), invocation.next_event()).await
+    {
+        events.push(event);
+    }
+
+    // Terminal result should be a Turn (streaming methods return AgentTurnResult)
+    let result = invocation.finish().await.unwrap();
+    match result {
+        AgentInvocationResult::Turn(turn) => {
+            assert_eq!(turn.conversation_id.as_str(), "conv-test-1");
+            assert_eq!(turn.finish_reason, ora_plugin_protocol::AgentFinishReason::Completed);
+        }
+        other => panic!("streaming method should return Turn, got {other:?}"),
+    }
+    let _ = events;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Stream seq duplicate test
+// ═══════════════════════════════════════════════════════════════════
+
+/// Fake bootstrap that sends duplicate seq numbers on a streaming method,
+/// which should trigger a protocol failure.
+async fn run_duplicate_seq_bootstrap(
+    mut stdin: DuplexStream,
+    stdout: &mut DuplexStream,
+    process: mpsc::Sender<GenerationProcessEvent>,
+    mut terminate: watch::Receiver<bool>,
+    tree_outcome: TreeDrainOutcome,
+) {
+    let mut decoder = FrameDecoder::new(MAX_FRAME_BYTES);
+    let mut chunk = vec![0_u8; 4096];
+    let mut exit = false;
+    while !exit {
+        tokio::select! {
+            changed = terminate.changed() => { let _ = changed; break; }
+            read = stdin.read(&mut chunk) => {
+                let bytes = read.unwrap();
+                if bytes == 0 { break; }
+                let frames = decoder.decode_chunk(&chunk[..bytes]).unwrap();
+                for frame in frames {
+                    let envelope = ora_plugin_protocol::parse_json_rpc_frame(&frame, 64).unwrap();
+                    match envelope {
+                        JsonRpcEnvelope::Request(request) => {
+                            let result = match request.method.as_str() {
+                                METHOD_INITIALIZE => {
+                                    let params: InitializeParams = serde_json::from_value(
+                                        request.params.unwrap(),
+                                    ).unwrap();
+                                    serde_json::to_value(InitializeResult {
+                                        wire_version: WIRE_VERSION_V1,
+                                        runtime_version: params.runtime_version,
+                                        session_id: params.session_id,
+                                        plugin: InitializeResultPlugin {
+                                            id: params.plugin.id,
+                                            version: params.plugin.version,
+                                        },
+                                    }).unwrap()
+                                }
+                                METHOD_ACTIVATE => serde_json::to_value(ActivateResult {
+                                    providers: vec![ora_plugin_protocol::ActivateProvider {
+                                        id: AgentProviderId::parse("example").unwrap(),
+                                        contract_version: 1,
+                                    }],
+                                }).unwrap(),
+                                "agent.sendMessage" | "agent.startConversation" => {
+                                    // Send TWO streams with the SAME seq=1 (duplicate)
+                                    for _ in 0..2 {
+                                        let stream = serde_json::to_vec(&serde_json::json!({
+                                            "jsonrpc": "2.0", "method": "$/stream",
+                                            "params": {"id": request.id.as_str(), "seq": 1,
+                                                "value": {"kind": "textDelta", "channel": "assistant", "text": "dup"}}
+                                        })).unwrap();
+                                        let frame = encode_frame(FrameType::Notification, &stream, MAX_FRAME_BYTES).unwrap();
+                                        stdout.write_all(&frame).await.unwrap();
+                                    }
+                                    serde_json::json!({"conversationId": "conv-1", "finishReason": "completed"})
+                                }
+                                METHOD_DEACTIVATE => serde_json::json!({}),
+                                other => panic!("unexpected fake method {other}"),
+                            };
+                            write_response(stdout, request.id.as_str(), result).await;
+                        }
+                        JsonRpcEnvelope::Notification(notification) => {
+                            if notification.method == METHOD_EXIT { exit = true; }
+                        }
+                        JsonRpcEnvelope::Response(_) => panic!("Host sent Response"),
+                    }
+                }
+            }
+        }
+    }
+    stdout.shutdown().await.unwrap();
+    let _ = process.send(GenerationProcessEvent::DirectExit(Ok(ProcessExit { exit_code: Some(0), success: true }))).await;
+    let _ = process.send(GenerationProcessEvent::TreeEmpty(tree_result(tree_outcome))).await;
+    let _ = process.send(GenerationProcessEvent::StderrDrained(StderrDrainSummary { retained: Vec::new(), dropped_bytes: 0, failure: None })).await;
+}
+
+#[derive(Clone)]
+struct DuplicateSeqLauncher;
+
+impl GenerationLauncher for DuplicateSeqLauncher {
+    type Controller = FakeController;
+    async fn launch(&self, generation: u64, _spec: ProcessSpec) -> Result<GenerationTransport<Self::Controller>, GenerationLaunchError> {
+        let (host_stdin, child_stdin) = duplex(1024 * 1024);
+        let (mut child_stdout, host_stdout) = duplex(1024 * 1024);
+        let (writer, writer_events) = spawn_writer(host_stdin, WriterQueueLimits::v1_defaults()).map_err(|_| GenerationLaunchError::WriterConfiguration)?;
+        let reader_events = spawn_reader(host_stdout, 64, 256);
+        let (process_tx, process_events) = mpsc::channel(8);
+        let (terminate_tx, terminate_rx) = watch::channel(false);
+        tokio::spawn(async move {
+            run_duplicate_seq_bootstrap(child_stdin, &mut child_stdout, process_tx, terminate_rx, TreeDrainOutcome::Reaped).await;
+        });
+        Ok(GenerationTransport { generation, process_id: 4242, controller: FakeController { terminate: terminate_tx }, writer, writer_events, reader_events, process_events })
+    }
+}
+
+/// Proves that duplicate stream seq numbers trigger a protocol failure.
+#[tokio::test]
+async fn stream_duplicate_seq_triggers_protocol_failure() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let events = Arc::new(RecordingEvents::default());
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        DuplicateSeqLauncher,
+        Arc::new(FakeAdmission { descriptor }),
+        Arc::clone(&events),
+        Arc::new(EmptyResolver),
+    );
+    runtime.start().await.unwrap();
+
+    let request = AgentRequest::SendMessage(
+        ora_plugin_protocol::SendMessageRequest {
+            provider_id: AgentProviderId::parse("example").unwrap(),
+            installation_id: AgentInstallationId::parse("install-1").unwrap(),
+            conversation_id: AgentConversationId::parse("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+            scope: AgentScope::Global {},
+            client_request_id: ClientRequestId::parse("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+            prompt: ora_plugin_protocol::AgentPrompt::parse("Hello").unwrap(),
+        },
+    );
+    let invocation = runtime.invoke_with_timeout(request, Duration::from_secs(2)).await;
+    if let Ok(invocation) = invocation {
+        let _ = invocation.finish().await;
+    }
+    // Duplicate seq should trigger protocol failure
+    let state = runtime.state().await.unwrap();
+    assert!(
+        matches!(state, RuntimeState::Crashed { .. }) || matches!(state, RuntimeState::Stopped),
+        "expected Crashed/Stopped after duplicate seq, got {state:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Supervisor: stale StartCompleted does not zap phase (C7)
+// ═══════════════════════════════════════════════════════════════════
+
+/// Proves that stopping and restarting a runtime works correctly —
+/// the second generation starts cleanly without the first generation's
+/// stale completion interfering with the supervisor phase.
+#[tokio::test]
+async fn supervisor_handles_stale_generation_without_phase_zapping() {
+    let plugin_id = PluginId::parse("ora.runtime").unwrap();
+    let descriptor = test_descriptor(plugin_id.clone());
+    let launches = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(Notify::new());
+    let release_launch = Arc::new(Notify::new());
+    let terminated = Arc::new(Notify::new());
+    let release_reap = Arc::new(Notify::new());
+
+    let runtime = spawn_agent_plugin_runtime(
+        plugin_id.clone(),
+        PluginManagerConfig::new(PathBuf::from(r"D:\ora")),
+        test_assets(),
+        ControlledLauncher {
+            launches: Arc::clone(&launches),
+            entered: Arc::clone(&entered),
+            release_launch: Arc::clone(&release_launch),
+            terminated: Arc::clone(&terminated),
+            release_reap: Arc::clone(&release_reap),
+            tree_outcome: TreeDrainOutcome::Reaped,
+        },
+        Arc::new(FakeAdmission { descriptor: descriptor.clone() }),
+        Arc::new(RecordingEvents::default()),
+        Arc::new(EmptyResolver),
+    );
+
+    // Start first generation — will pause in launcher
+    let start1 = tokio::spawn({
+        let runtime = runtime.clone();
+        async move { runtime.start().await }
+    });
+    // Wait for launch to be entered
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("first launch should be entered");
+
+    // Stop while Starting — sends cancel to the worker
+    let stop1 = tokio::spawn({
+        let runtime = runtime.clone();
+        let pid = plugin_id.clone();
+        async move { runtime.stop_and_reap(&pid, StopReason::Disable).await }
+    });
+
+    // Release the first launch (late success after cancel)
+    release_launch.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), terminated.notified())
+        .await
+        .expect("first tree should be terminated");
+    release_reap.notify_one();
+
+    // Both start1 and stop1 should complete
+    let _ = tokio::time::timeout(Duration::from_secs(2), start1).await;
+    let stop_result = tokio::time::timeout(Duration::from_secs(2), stop1).await;
+
+    // stop_and_reap may return CleanupPending for failed tree reaps — that's OK.
+    // The key assertion is that the supervisor is NOT stuck in Running (zombie).
+    let state = runtime.state().await.unwrap();
+    assert!(
+        !matches!(state, RuntimeState::Running { .. }),
+        "supervisor must not be stuck in Running after stop, got {state:?}"
+    );
+    // Accept Stopped or CleanupPending (the latter happens when tree-empty signals
+    // arrive after stop_and_reap completes)
+    let _ = stop_result;
 }

@@ -1,4 +1,4 @@
-use crate::{PluginLimits, SafeDeleteError, audit_no_named_streams};
+use crate::{PluginFsLimits, SafeDeleteError, audit_no_named_streams};
 use ora_plugin_protocol::ContentDigest;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,7 +59,7 @@ pub enum PackageTreeMode {
 /// Computes the design-specified tree digest over sorted regular package files.
 pub fn compute_tree_digest(
     root: &Path,
-    limits: &PluginLimits,
+    limits: &PluginFsLimits,
     mode: PackageTreeMode,
 ) -> Result<TreeDigestProof, PackageFsError> {
     let root_metadata = std::fs::symlink_metadata(root).map_err(io_error)?;
@@ -312,7 +312,7 @@ fn io_error(error: io::Error) -> PackageFsError {
 #[cfg(test)]
 mod tests {
     use super::{PackageFsError, PackageTreeMode, compute_tree_digest};
-    use crate::PluginLimits;
+    use crate::PluginFsLimits;
     use pretty_assertions::assert_eq;
     use std::fs;
     use tempfile::TempDir;
@@ -333,7 +333,7 @@ mod tests {
         fs::write(second.path().join("b.txt"), b"b")
             .unwrap_or_else(|error| panic!("expected second b write: {error}"));
 
-        let limits = PluginLimits::default();
+        let limits = PluginFsLimits::default();
         let first_proof = compute_tree_digest(first.path(), &limits, PackageTreeMode::Candidate)
             .unwrap_or_else(|error| panic!("expected first digest: {error}"));
         let second_proof = compute_tree_digest(second.path(), &limits, PackageTreeMode::Candidate)
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(
             compute_tree_digest(
                 root.path(),
-                &PluginLimits::default(),
+                &PluginFsLimits::default(),
                 PackageTreeMode::Candidate
             ),
             Err(PackageFsError::ReservedOraDirectory)

@@ -73,7 +73,7 @@ pub struct JsonRpcErrorBody {
 }
 
 /// A JSON-RPC 2.0 Notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JsonRpcNotification {
     pub jsonrpc: String,
     pub method: String,
@@ -236,7 +236,10 @@ pub fn build_fatal_diagnostic(code: i32, message: &str) -> serde_json::Value {
 
 /// Recursively check a `serde_json::Value` for duplicate keys up to `max_depth`.
 /// Returns the first duplicate found or `Ok(())`.
-pub fn check_duplicate_keys(value: &serde_json::Value, max_depth: usize) -> Result<(), RpcValidationError> {
+pub fn check_duplicate_keys(
+    value: &serde_json::Value,
+    max_depth: usize,
+) -> Result<(), RpcValidationError> {
     check_duplicate_keys_impl(value, max_depth, 0, "$")
 }
 
@@ -263,7 +266,12 @@ fn check_duplicate_keys_impl(
                 });
             }
             // Recurse into values
-            check_duplicate_keys_impl(&map[key], max_depth, current_depth + 1, &format!("{path}.{key}"))?;
+            check_duplicate_keys_impl(
+                &map[key],
+                max_depth,
+                current_depth + 1,
+                &format!("{path}.{key}"),
+            )?;
         }
     }
     // Arrays
@@ -282,15 +290,10 @@ pub fn validate_request_envelope(
     value: &serde_json::Value,
     frame_type_label: &'static str,
 ) -> Result<(), RpcValidationError> {
-    let obj = value
-        .as_object()
-        .ok_or(RpcValidationError::NotObject)?;
+    let obj = value.as_object().ok_or(RpcValidationError::NotObject)?;
 
     // Must have jsonrpc
-    let version = obj
-        .get("jsonrpc")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let version = obj.get("jsonrpc").and_then(|v| v.as_str()).unwrap_or("");
     if version != "2.0" {
         return Err(RpcValidationError::InvalidVersion {
             found: version.to_string(),
@@ -343,15 +346,10 @@ pub fn validate_response_envelope(
     value: &serde_json::Value,
     frame_type_label: &'static str,
 ) -> Result<(), RpcValidationError> {
-    let obj = value
-        .as_object()
-        .ok_or(RpcValidationError::NotObject)?;
+    let obj = value.as_object().ok_or(RpcValidationError::NotObject)?;
 
     // Must have jsonrpc
-    let version = obj
-        .get("jsonrpc")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let version = obj.get("jsonrpc").and_then(|v| v.as_str()).unwrap_or("");
     if version != "2.0" {
         return Err(RpcValidationError::InvalidVersion {
             found: version.to_string(),
@@ -411,15 +409,10 @@ pub fn validate_notification_envelope(
     value: &serde_json::Value,
     frame_type_label: &'static str,
 ) -> Result<(), RpcValidationError> {
-    let obj = value
-        .as_object()
-        .ok_or(RpcValidationError::NotObject)?;
+    let obj = value.as_object().ok_or(RpcValidationError::NotObject)?;
 
     // Must have jsonrpc
-    let version = obj
-        .get("jsonrpc")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let version = obj.get("jsonrpc").and_then(|v| v.as_str()).unwrap_or("");
     if version != "2.0" {
         return Err(RpcValidationError::InvalidVersion {
             found: version.to_string(),
@@ -581,7 +574,8 @@ mod tests {
 
     #[test]
     fn valid_request_passes() {
-        let val = json!({"jsonrpc":"2.0","id":"h:1","method":"agent.discoverInstallations","params":{}});
+        let val =
+            json!({"jsonrpc":"2.0","id":"h:1","method":"agent.discoverInstallations","params":{}});
         assert!(validate_request_envelope(&val, "Request").is_ok());
     }
 
@@ -607,7 +601,10 @@ mod tests {
     fn request_with_result_field_fails() {
         let val = json!({"jsonrpc":"2.0","id":"h:1","method":"ping","result":"ok"});
         let err = validate_request_envelope(&val, "Request").unwrap_err();
-        assert!(matches!(err, RpcValidationError::TypeEnvelopeMismatch { .. }));
+        assert!(matches!(
+            err,
+            RpcValidationError::TypeEnvelopeMismatch { .. }
+        ));
     }
 
     #[test]
@@ -648,7 +645,8 @@ mod tests {
 
     #[test]
     fn response_with_both_result_and_error_fails() {
-        let val = json!({"jsonrpc":"2.0","id":"h:1","result":"ok","error":{"code":-1,"message":"x"}});
+        let val =
+            json!({"jsonrpc":"2.0","id":"h:1","result":"ok","error":{"code":-1,"message":"x"}});
         let err = validate_response_envelope(&val, "Response").unwrap_err();
         assert!(matches!(err, RpcValidationError::BothResultAndError));
     }
@@ -664,12 +662,16 @@ mod tests {
     fn response_with_method_fails() {
         let val = json!({"jsonrpc":"2.0","id":"h:1","result":"ok","method":"ping"});
         let err = validate_response_envelope(&val, "Response").unwrap_err();
-        assert!(matches!(err, RpcValidationError::TypeEnvelopeMismatch { .. }));
+        assert!(matches!(
+            err,
+            RpcValidationError::TypeEnvelopeMismatch { .. }
+        ));
     }
 
     #[test]
     fn response_null_id_passes() {
-        let val = json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}});
+        let val =
+            json!({"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}});
         assert!(validate_response_envelope(&val, "Response").is_ok());
     }
 
@@ -685,14 +687,20 @@ mod tests {
     fn notification_with_id_fails() {
         let val = json!({"jsonrpc":"2.0","id":"h:1","method":"$/exit"});
         let err = validate_notification_envelope(&val, "Notification").unwrap_err();
-        assert!(matches!(err, RpcValidationError::TypeEnvelopeMismatch { .. }));
+        assert!(matches!(
+            err,
+            RpcValidationError::TypeEnvelopeMismatch { .. }
+        ));
     }
 
     #[test]
     fn notification_with_result_fails() {
         let val = json!({"jsonrpc":"2.0","method":"$/exit","result":"ok"});
         let err = validate_notification_envelope(&val, "Notification").unwrap_err();
-        assert!(matches!(err, RpcValidationError::TypeEnvelopeMismatch { .. }));
+        assert!(matches!(
+            err,
+            RpcValidationError::TypeEnvelopeMismatch { .. }
+        ));
     }
 
     // ── Batch rejection ───────────────────────────────────────

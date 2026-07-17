@@ -1,417 +1,345 @@
-//! Invocation outcomes — stream validation, backpressure, cancel/deadline settlement,
-//! and the complete outcome matrix for all combinations of write state, idempotency,
-//! and fatal cause.
+use ora_plugin_protocol::{InvocationSemantics, PluginId};
 
-use super::pending::{FatalSettlementCause, TerminationIntent, WriteState};
-use super::state::Generation;
+use crate::PluginError;
 
-// ── Invocation outcome (the caller-facing result) ────────────────
-
-/// The final outcome of an invocation, surfaced to the API caller.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InvocationOutcome {
-    /// Successful completion with a typed result.
-    Success,
-    /// Agent business error (code -32000).
-    BusinessError {
-        kind: String,
-        message: String,
-        retryable: bool,
-    },
-    /// Transport failure (connection lost before write or before response).
-    TransportFailed {
-        stage: String,
-    },
-    /// The plugin process exited before the response.
-    PluginExited {
-        exit_code: Option<i32>,
-    },
-    /// The request was cancelled before reaching the plugin.
-    Cancelled,
-    /// The request timed out before reaching the plugin.
-    RequestTimedOut,
-    /// Backpressure exceeded — consumer channel full.
-    BackpressureExceeded,
-    /// Non-idempotent request: written but no terminal (UnknownOutcome).
-    UnknownOutcome {
-        cause: UnknownOutcomeCause,
-    },
-    /// Safety cancelConversation: cancellation result unconfirmed.
-    CancellationUnconfirmed,
+/// Stable transport stages exposed without attacker-controlled I/O text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportFailureStage {
+    RequestWrite,
+    TransportCancelWrite,
+    ResponseRead,
+    SessionDrain,
 }
 
-/// Why a non-idempotent request ended in UnknownOutcome.
+/// Write-once cause captured for requests that had no earlier termination intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FatalSettlementCause {
+    ConnectionLost { stage: TransportFailureStage },
+    ProcessExited { exit_code: Option<i32> },
+}
+
+/// Closed ambiguity reasons returned only when a non-idempotent action may have executed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnknownOutcomeCause {
-    CancellationUnconfirmed,
     DeadlineExceeded,
+    CancellationUnconfirmed,
     ConnectionLost,
     ProcessExited,
 }
 
-impl std::fmt::Display for UnknownOutcomeCause {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CancellationUnconfirmed => write!(f, "CancellationUnconfirmed"),
-            Self::DeadlineExceeded => write!(f, "DeadlineExceeded"),
-            Self::ConnectionLost => write!(f, "ConnectionLost"),
-            Self::ProcessExited => write!(f, "ProcessExited"),
-        }
-    }
+/// The Host's final knowledge about whether a complete request frame reached the local pipe API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteCertainty {
+    NotWritten,
+    Written,
+    PossiblyWritten,
 }
 
-// ── Stream event ─────────────────────────────────────────────────
-
-/// A single stream event from a streaming method.
-#[derive(Debug, Clone)]
-pub struct StreamEvent {
-    /// The request id this event belongs to.
-    pub request_id: String,
-    /// Monotonically increasing sequence number (starting at 1).
-    pub seq: u64,
-    /// The event value (typed stream-event discriminant).
-    pub value: serde_json::Value,
+/// The first valid caller/session intent whose sequence freezes fallback classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminationIntentKind {
+    ExplicitCancel,
+    HostStop,
+    Backpressure,
+    HardDeadline,
 }
 
-// ── Stream validation ────────────────────────────────────────────
-
-/// Validate a `$/stream` notification for seq ordering.
-#[derive(Debug, Clone)]
-pub struct StreamValidator {
-    /// The last seen seq for this request.
-    last_seq: u64,
-    /// Has the terminal response already been sent?
-    terminal_sent: bool,
-}
-
-impl StreamValidator {
-    pub fn new() -> Self {
-        Self {
-            last_seq: 0,
-            terminal_sent: false,
-        }
-    }
-
-    /// Validate the next seq. Returns Ok if valid, Err if gap/duplicate/after-terminal.
-    pub fn validate_seq(&mut self, seq: u64) -> Result<(), StreamError> {
-        if self.terminal_sent {
-            return Err(StreamError::StreamAfterTerminal);
-        }
-        if seq == 0 {
-            return Err(StreamError::SeqMustStartAtOne);
-        }
-        let expected = self.last_seq + 1;
-        if seq < expected {
-            return Err(StreamError::DuplicateOrOutOfOrder {
-                expected,
-                actual: seq,
-            });
-        }
-        if seq > expected {
-            return Err(StreamError::Gap {
-                expected,
-                actual: seq,
-            });
-        }
-        self.last_seq = seq;
-        Ok(())
-    }
-
-    /// Mark the terminal as sent — any further stream events are fatal.
-    pub fn mark_terminal(&mut self) {
-        self.terminal_sent = true;
-    }
-
-    /// Current seq (used for `causal_after_seq`).
-    pub fn current_seq(&self) -> u64 {
-        self.last_seq
-    }
-}
-
-impl Default for StreamValidator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Stream validation errors — all are fatal protocol violations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StreamError {
-    /// seq did not start at 1.
-    SeqMustStartAtOne,
-    /// A seq was skipped (gap).
-    Gap { expected: u64, actual: u64 },
-    /// A seq was duplicated or out of order.
-    DuplicateOrOutOfOrder { expected: u64, actual: u64 },
-    /// A stream event arrived after the terminal response.
-    StreamAfterTerminal,
-    /// A non-streaming method tried to send stream events.
-    MethodNotStreaming,
-}
-
-impl std::fmt::Display for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SeqMustStartAtOne => write!(f, "stream seq must start at 1"),
-            Self::Gap { expected, actual } => {
-                write!(f, "stream seq gap: expected {expected}, got {actual}")
-            }
-            Self::DuplicateOrOutOfOrder { expected, actual } => {
-                write!(
-                    f,
-                    "stream seq duplicate/out-of-order: expected {expected}, got {actual}"
-                )
-            }
-            Self::StreamAfterTerminal => {
-                write!(f, "stream event after terminal response")
-            }
-            Self::MethodNotStreaming => {
-                write!(f, "stream events not allowed for non-streaming method")
-            }
-        }
-    }
-}
-
-// ── Outcome settlement ───────────────────────────────────────────
-
-/// Determine the invocation outcome from write state, idempotency, and fatal cause.
-///
-/// This implements the fatal-settlement matrix from design-v3.md §12.6 and
-/// plugin_sdk_final_design_cn.md Appendix D.
-pub fn settle_outcome(
-    write_state: WriteState,
-    idempotent: bool,
-    intent: Option<TerminationIntent>,
-    fatal_cause: Option<&FatalSettlementCause>,
-) -> InvocationOutcome {
-    // ── Has a termination intent? Use the first-intent matrix ────
-    if let Some(intent) = intent {
-        return match intent {
-            TerminationIntent::ExplicitCancel | TerminationIntent::HostStop => {
-                if matches!(write_state, WriteState::Queued) {
-                    InvocationOutcome::Cancelled
-                } else if idempotent {
-                    InvocationOutcome::Cancelled
-                } else {
-                    InvocationOutcome::UnknownOutcome {
-                        cause: UnknownOutcomeCause::CancellationUnconfirmed,
-                    }
-                }
-            }
-            TerminationIntent::Backpressure => {
-                if matches!(write_state, WriteState::Queued) {
-                    InvocationOutcome::BackpressureExceeded
-                } else if idempotent {
-                    InvocationOutcome::BackpressureExceeded
-                } else {
-                    InvocationOutcome::UnknownOutcome {
-                        cause: UnknownOutcomeCause::CancellationUnconfirmed,
-                    }
-                }
-            }
-            TerminationIntent::HardDeadline => {
-                if matches!(write_state, WriteState::Queued) {
-                    InvocationOutcome::RequestTimedOut
-                } else if idempotent {
-                    InvocationOutcome::RequestTimedOut
-                } else {
-                    InvocationOutcome::UnknownOutcome {
-                        cause: UnknownOutcomeCause::DeadlineExceeded,
-                    }
-                }
-            }
+/// Maps a no-intent fatal drain through the only allowed idempotency/write-certainty matrix.
+pub fn settle_fatal_invocation(
+    plugin_id: PluginId,
+    request_id: String,
+    semantics: InvocationSemantics,
+    certainty: WriteCertainty,
+    cause: FatalSettlementCause,
+) -> PluginError {
+    if semantics == InvocationSemantics::NonIdempotent && certainty != WriteCertainty::NotWritten {
+        let cause = match cause {
+            FatalSettlementCause::ConnectionLost { .. } => UnknownOutcomeCause::ConnectionLost,
+            FatalSettlementCause::ProcessExited { .. } => UnknownOutcomeCause::ProcessExited,
+        };
+        return PluginError::UnknownOutcome {
+            plugin_id,
+            request_id,
+            cause,
         };
     }
 
-    // ── No intent — use fatal cause ─────────────────────────────
-    if let Some(cause) = fatal_cause {
-        return match cause {
-            FatalSettlementCause::ConnectionLost { stage } => {
-                if matches!(write_state, WriteState::Queued) {
-                    InvocationOutcome::TransportFailed {
-                        stage: format!("{stage:?}"),
-                    }
-                } else if idempotent {
-                    InvocationOutcome::TransportFailed {
-                        stage: format!("{stage:?}"),
-                    }
-                } else {
-                    InvocationOutcome::UnknownOutcome {
-                        cause: UnknownOutcomeCause::ConnectionLost,
-                    }
-                }
-            }
-            FatalSettlementCause::ProcessExited { exit_code } => {
-                if matches!(write_state, WriteState::Queued) {
-                    InvocationOutcome::PluginExited {
-                        exit_code: *exit_code,
-                    }
-                } else if idempotent {
-                    InvocationOutcome::PluginExited {
-                        exit_code: *exit_code,
-                    }
-                } else {
-                    InvocationOutcome::UnknownOutcome {
-                        cause: UnknownOutcomeCause::ProcessExited,
-                    }
-                }
-            }
-        };
+    match cause {
+        FatalSettlementCause::ConnectionLost { stage } => PluginError::TransportFailed {
+            plugin_id,
+            request_id,
+            stage,
+        },
+        FatalSettlementCause::ProcessExited { exit_code } => PluginError::PluginExited {
+            plugin_id,
+            exit_code,
+        },
     }
+}
 
-    // ── No intent, no fatal cause — should not happen ───────────
-    InvocationOutcome::TransportFailed {
-        stage: "unknown".to_string(),
+/// Maps first-intent fallback without allowing a later deadline or fatal event to rewrite it.
+pub fn settle_termination_intent(
+    plugin_id: PluginId,
+    request_id: String,
+    semantics: InvocationSemantics,
+    certainty: WriteCertainty,
+    intent: TerminationIntentKind,
+) -> PluginError {
+    match intent {
+        TerminationIntentKind::HardDeadline => {
+            if semantics == InvocationSemantics::NonIdempotent
+                && certainty != WriteCertainty::NotWritten
+            {
+                PluginError::UnknownOutcome {
+                    plugin_id,
+                    request_id,
+                    cause: UnknownOutcomeCause::DeadlineExceeded,
+                }
+            } else {
+                PluginError::RequestTimedOut {
+                    plugin_id,
+                    request_id,
+                }
+            }
+        }
+        TerminationIntentKind::Backpressure => {
+            if semantics == InvocationSemantics::NonIdempotent
+                && certainty != WriteCertainty::NotWritten
+            {
+                PluginError::UnknownOutcome {
+                    plugin_id,
+                    request_id,
+                    cause: UnknownOutcomeCause::CancellationUnconfirmed,
+                }
+            } else {
+                PluginError::BackpressureExceeded {
+                    plugin_id,
+                    request_id,
+                }
+            }
+        }
+        TerminationIntentKind::ExplicitCancel | TerminationIntentKind::HostStop => {
+            if semantics == InvocationSemantics::NonIdempotent
+                && certainty != WriteCertainty::NotWritten
+            {
+                PluginError::UnknownOutcome {
+                    plugin_id,
+                    request_id,
+                    cause: UnknownOutcomeCause::CancellationUnconfirmed,
+                }
+            } else {
+                PluginError::Cancelled {
+                    plugin_id,
+                    request_id,
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::pending::ConnectionStage;
+    use ora_plugin_protocol::{InvocationSemantics, PluginId};
     use pretty_assertions::assert_eq;
 
-    #[test]
-    fn stream_validator_normal_flow() {
-        let mut sv = StreamValidator::new();
-        assert!(sv.validate_seq(1).is_ok());
-        assert!(sv.validate_seq(2).is_ok());
-        assert!(sv.validate_seq(3).is_ok());
-        assert_eq!(sv.current_seq(), 3);
+    use super::{
+        FatalSettlementCause, TerminationIntentKind, TransportFailureStage, UnknownOutcomeCause,
+        WriteCertainty, settle_fatal_invocation, settle_termination_intent,
+    };
+    use crate::PluginError;
+
+    fn plugin_id() -> PluginId {
+        PluginId::parse("ora.runtime").unwrap_or_else(|error| panic!("test plugin id: {error}"))
     }
 
+    /// Freezes the non-idempotent ambiguity boundary for every local write classification.
     #[test]
-    fn stream_validator_rejects_gap() {
-        let mut sv = StreamValidator::new();
-        sv.validate_seq(1).unwrap();
-        let err = sv.validate_seq(3).unwrap_err();
-        assert!(matches!(err, StreamError::Gap { .. }));
-    }
-
-    #[test]
-    fn stream_validator_rejects_duplicate() {
-        let mut sv = StreamValidator::new();
-        sv.validate_seq(1).unwrap();
-        let err = sv.validate_seq(1).unwrap_err();
-        assert!(matches!(err, StreamError::DuplicateOrOutOfOrder { .. }));
-    }
-
-    #[test]
-    fn stream_validator_rejects_after_terminal() {
-        let mut sv = StreamValidator::new();
-        sv.validate_seq(1).unwrap();
-        sv.mark_terminal();
-        let err = sv.validate_seq(2).unwrap_err();
-        assert!(matches!(err, StreamError::StreamAfterTerminal));
-    }
-
-    #[test]
-    fn stream_validator_rejects_zero() {
-        let mut sv = StreamValidator::new();
-        let err = sv.validate_seq(0).unwrap_err();
-        assert!(matches!(err, StreamError::SeqMustStartAtOne));
-    }
-
-    #[test]
-    fn settle_queued_cancelled() {
-        let outcome = settle_outcome(
-            WriteState::Queued,
-            true,
-            Some(TerminationIntent::ExplicitCancel),
-            None,
-        );
-        assert_eq!(outcome, InvocationOutcome::Cancelled);
-    }
-
-    #[test]
-    fn settle_written_non_idempotent_no_terminal() {
-        let outcome = settle_outcome(
-            WriteState::Written,
-            false,
-            Some(TerminationIntent::HostStop),
-            None,
-        );
+    fn fatal_matrix_never_replays_or_claims_a_written_non_idempotent_result() {
+        let cause = FatalSettlementCause::ConnectionLost {
+            stage: TransportFailureStage::ResponseRead,
+        };
         assert_eq!(
-            outcome,
-            InvocationOutcome::UnknownOutcome {
+            settle_fatal_invocation(
+                plugin_id(),
+                "h:1".to_owned(),
+                InvocationSemantics::NonIdempotent,
+                WriteCertainty::NotWritten,
+                cause,
+            ),
+            PluginError::TransportFailed {
+                plugin_id: plugin_id(),
+                request_id: "h:1".to_owned(),
+                stage: TransportFailureStage::ResponseRead,
+            }
+        );
+        for certainty in [WriteCertainty::Written, WriteCertainty::PossiblyWritten] {
+            assert_eq!(
+                settle_fatal_invocation(
+                    plugin_id(),
+                    "h:1".to_owned(),
+                    InvocationSemantics::NonIdempotent,
+                    certainty,
+                    cause,
+                ),
+                PluginError::UnknownOutcome {
+                    plugin_id: plugin_id(),
+                    request_id: "h:1".to_owned(),
+                    cause: UnknownOutcomeCause::ConnectionLost,
+                }
+            );
+        }
+    }
+
+    /// Ensures a cancellation accepted before the hard deadline keeps cancellation semantics.
+    #[test]
+    fn first_intent_controls_fallback() {
+        assert_eq!(
+            settle_termination_intent(
+                plugin_id(),
+                "h:2".to_owned(),
+                InvocationSemantics::NonIdempotent,
+                WriteCertainty::Written,
+                TerminationIntentKind::ExplicitCancel,
+            ),
+            PluginError::UnknownOutcome {
+                plugin_id: plugin_id(),
+                request_id: "h:2".to_owned(),
                 cause: UnknownOutcomeCause::CancellationUnconfirmed,
             }
         );
     }
 
+    /// Exhausts both fatal causes across every semantics and local write-certainty combination.
     #[test]
-    fn settle_written_idempotent_connection_lost() {
-        let outcome = settle_outcome(
-            WriteState::Written,
-            true,
-            None,
-            Some(&FatalSettlementCause::ConnectionLost {
-                stage: ConnectionStage::ResponseRead,
-            }),
-        );
-        assert_eq!(
-            outcome,
-            InvocationOutcome::TransportFailed {
-                stage: "ResponseRead".to_string()
+    fn fatal_settlement_matrix_is_exhaustive() {
+        let causes = [
+            FatalSettlementCause::ConnectionLost {
+                stage: TransportFailureStage::RequestWrite,
+            },
+            FatalSettlementCause::ProcessExited { exit_code: Some(9) },
+        ];
+        for cause in causes {
+            for semantics in [
+                InvocationSemantics::Idempotent,
+                InvocationSemantics::NonIdempotent,
+            ] {
+                for certainty in [
+                    WriteCertainty::NotWritten,
+                    WriteCertainty::Written,
+                    WriteCertainty::PossiblyWritten,
+                ] {
+                    let ambiguous = semantics == InvocationSemantics::NonIdempotent
+                        && certainty != WriteCertainty::NotWritten;
+                    let expected = match (ambiguous, cause) {
+                        (true, FatalSettlementCause::ConnectionLost { .. }) => {
+                            PluginError::UnknownOutcome {
+                                plugin_id: plugin_id(),
+                                request_id: "h:matrix".to_owned(),
+                                cause: UnknownOutcomeCause::ConnectionLost,
+                            }
+                        }
+                        (true, FatalSettlementCause::ProcessExited { .. }) => {
+                            PluginError::UnknownOutcome {
+                                plugin_id: plugin_id(),
+                                request_id: "h:matrix".to_owned(),
+                                cause: UnknownOutcomeCause::ProcessExited,
+                            }
+                        }
+                        (false, FatalSettlementCause::ConnectionLost { stage }) => {
+                            PluginError::TransportFailed {
+                                plugin_id: plugin_id(),
+                                request_id: "h:matrix".to_owned(),
+                                stage,
+                            }
+                        }
+                        (false, FatalSettlementCause::ProcessExited { exit_code }) => {
+                            PluginError::PluginExited {
+                                plugin_id: plugin_id(),
+                                exit_code,
+                            }
+                        }
+                    };
+                    assert_eq!(
+                        settle_fatal_invocation(
+                            plugin_id(),
+                            "h:matrix".to_owned(),
+                            semantics,
+                            certainty,
+                            cause,
+                        ),
+                        expected
+                    );
+                }
             }
-        );
+        }
     }
 
+    /// Exhausts every first-intent fallback across semantics and local write certainty.
     #[test]
-    fn settle_queued_process_exited() {
-        let outcome = settle_outcome(
-            WriteState::Queued,
-            true,
-            None,
-            Some(&FatalSettlementCause::ProcessExited {
-                exit_code: Some(1),
-            }),
-        );
-        assert_eq!(
-            outcome,
-            InvocationOutcome::PluginExited {
-                exit_code: Some(1)
+    fn termination_intent_matrix_is_exhaustive() {
+        for intent in [
+            TerminationIntentKind::ExplicitCancel,
+            TerminationIntentKind::HostStop,
+            TerminationIntentKind::Backpressure,
+            TerminationIntentKind::HardDeadline,
+        ] {
+            for semantics in [
+                InvocationSemantics::Idempotent,
+                InvocationSemantics::NonIdempotent,
+            ] {
+                for certainty in [
+                    WriteCertainty::NotWritten,
+                    WriteCertainty::Written,
+                    WriteCertainty::PossiblyWritten,
+                ] {
+                    let ambiguous = semantics == InvocationSemantics::NonIdempotent
+                        && certainty != WriteCertainty::NotWritten;
+                    let expected = if ambiguous {
+                        PluginError::UnknownOutcome {
+                            plugin_id: plugin_id(),
+                            request_id: "h:intent".to_owned(),
+                            cause: match intent {
+                                TerminationIntentKind::HardDeadline => {
+                                    UnknownOutcomeCause::DeadlineExceeded
+                                }
+                                TerminationIntentKind::ExplicitCancel
+                                | TerminationIntentKind::HostStop
+                                | TerminationIntentKind::Backpressure => {
+                                    UnknownOutcomeCause::CancellationUnconfirmed
+                                }
+                            },
+                        }
+                    } else {
+                        match intent {
+                            TerminationIntentKind::HardDeadline => PluginError::RequestTimedOut {
+                                plugin_id: plugin_id(),
+                                request_id: "h:intent".to_owned(),
+                            },
+                            TerminationIntentKind::Backpressure => {
+                                PluginError::BackpressureExceeded {
+                                    plugin_id: plugin_id(),
+                                    request_id: "h:intent".to_owned(),
+                                }
+                            }
+                            TerminationIntentKind::ExplicitCancel
+                            | TerminationIntentKind::HostStop => PluginError::Cancelled {
+                                plugin_id: plugin_id(),
+                                request_id: "h:intent".to_owned(),
+                            },
+                        }
+                    };
+                    assert_eq!(
+                        settle_termination_intent(
+                            plugin_id(),
+                            "h:intent".to_owned(),
+                            semantics,
+                            certainty,
+                            intent,
+                        ),
+                        expected
+                    );
+                }
             }
-        );
-    }
-
-    #[test]
-    fn settle_written_non_idempotent_process_exited() {
-        let outcome = settle_outcome(
-            WriteState::Written,
-            false,
-            None,
-            Some(&FatalSettlementCause::ProcessExited {
-                exit_code: Some(1),
-            }),
-        );
-        assert_eq!(
-            outcome,
-            InvocationOutcome::UnknownOutcome {
-                cause: UnknownOutcomeCause::ProcessExited,
-            }
-        );
-    }
-
-    #[test]
-    fn settle_queued_hard_deadline() {
-        let outcome = settle_outcome(
-            WriteState::Queued,
-            true,
-            Some(TerminationIntent::HardDeadline),
-            None,
-        );
-        assert_eq!(outcome, InvocationOutcome::RequestTimedOut);
-    }
-
-    #[test]
-    fn settle_queued_backpressure() {
-        let outcome = settle_outcome(
-            WriteState::Queued,
-            false,
-            Some(TerminationIntent::Backpressure),
-            None,
-        );
-        assert_eq!(outcome, InvocationOutcome::BackpressureExceeded);
+        }
     }
 }

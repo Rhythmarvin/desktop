@@ -4,7 +4,7 @@
 //! complete frame commands through an mpsc channel; the writer task encodes
 //! and writes them sequentially, reporting `FrameWritten` or `WriteFailed` back.
 
-use super::frame::{encode_frame, FrameType};
+use super::frame::{FrameType, encode_frame};
 
 /// A command to write one complete frame to the child process stdin.
 #[derive(Debug)]
@@ -114,7 +114,12 @@ mod tests {
     impl MockStdio {
         fn new() -> (Self, std::sync::Arc<std::sync::Mutex<Vec<u8>>>) {
             let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            (Self { written: buf.clone() }, buf)
+            (
+                Self {
+                    written: buf.clone(),
+                },
+                buf,
+            )
         }
     }
 
@@ -172,7 +177,10 @@ mod tests {
         let (mock, _buf) = MockStdio::new();
         let (writer, _handle) = FrameWriter::new(mock, 16);
 
-        let result = writer.write(FrameType::Request, String::new()).await.unwrap();
+        let result = writer
+            .write(FrameType::Request, String::new())
+            .await
+            .unwrap();
         assert!(matches!(result, WriteResult::WriteFailed { .. }));
     }
 

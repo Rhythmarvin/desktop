@@ -88,19 +88,25 @@ impl std::fmt::Display for FrameError {
     }
 }
 
+impl std::error::Error for FrameError {}
+
 /// Encode a complete frame: 5-byte header + payload bytes.
 ///
-/// Validates: payload non-empty, payload ≤ MAX_PAYLOAD_BYTES, valid frame type.
-pub fn encode_frame(frame_type: FrameType, payload_bytes: &[u8]) -> Result<Vec<u8>, FrameError> {
+/// Validates: payload non-empty, payload ≤ max_bytes, valid frame type.
+pub fn encode_frame(
+    frame_type: FrameType,
+    payload_bytes: &[u8],
+    max_bytes: u32,
+) -> Result<Vec<u8>, FrameError> {
     let payload_len = payload_bytes.len();
 
     if payload_len == 0 {
         return Err(FrameError::EmptyPayload);
     }
-    if payload_len > MAX_PAYLOAD_BYTES as usize {
+    if payload_len > max_bytes as usize {
         return Err(FrameError::PayloadTooLarge {
             length: payload_len as u32,
-            max: MAX_PAYLOAD_BYTES,
+            max: max_bytes,
         });
     }
 
@@ -168,7 +174,7 @@ mod tests {
     #[test]
     fn encode_request_frame() {
         let payload = br#"{"jsonrpc":"2.0","id":"h:1","method":"ping","params":{}}"#;
-        let frame = encode_frame(FrameType::Request, payload).unwrap();
+        let frame = encode_frame(FrameType::Request, payload, MAX_PAYLOAD_BYTES).unwrap();
 
         assert_eq!(frame.len(), HEADER_LEN + payload.len());
         // Verify header
@@ -181,7 +187,7 @@ mod tests {
     #[test]
     fn encode_response_frame() {
         let payload = br#"{"jsonrpc":"2.0","id":"h:1","result":"ok"}"#;
-        let frame = encode_frame(FrameType::Response, payload).unwrap();
+        let frame = encode_frame(FrameType::Response, payload, MAX_PAYLOAD_BYTES).unwrap();
 
         assert_eq!(frame.len(), HEADER_LEN + payload.len());
         assert_eq!(&frame[0..4], &42i32.to_be_bytes());
@@ -191,7 +197,7 @@ mod tests {
     #[test]
     fn encode_notification_frame() {
         let payload = br#"{"jsonrpc":"2.0","method":"$/exit"}"#;
-        let frame = encode_frame(FrameType::Notification, payload).unwrap();
+        let frame = encode_frame(FrameType::Notification, payload, MAX_PAYLOAD_BYTES).unwrap();
 
         assert_eq!(frame.len(), HEADER_LEN + payload.len());
         assert_eq!(&frame[0..4], &35i32.to_be_bytes());
@@ -252,7 +258,7 @@ mod tests {
 
     #[test]
     fn encode_rejects_empty_payload() {
-        let err = encode_frame(FrameType::Request, b"").unwrap_err();
+        let err = encode_frame(FrameType::Request, b"", MAX_PAYLOAD_BYTES).unwrap_err();
         assert!(matches!(err, FrameError::EmptyPayload));
     }
 
@@ -264,7 +270,7 @@ mod tests {
         let payload_bytes = payload.as_bytes();
         assert_eq!(payload_bytes.len(), 56);
 
-        let frame = encode_frame(FrameType::Request, payload_bytes).unwrap();
+        let frame = encode_frame(FrameType::Request, payload_bytes, MAX_PAYLOAD_BYTES).unwrap();
         let header_hex_str = hex::encode(&frame[..HEADER_LEN]);
         assert_eq!(header_hex_str, "0000003801");
 
@@ -280,7 +286,7 @@ mod tests {
         let payload_bytes = payload.as_bytes();
         assert_eq!(payload_bytes.len(), 42);
 
-        let frame = encode_frame(FrameType::Response, payload_bytes).unwrap();
+        let frame = encode_frame(FrameType::Response, payload_bytes, MAX_PAYLOAD_BYTES).unwrap();
         let header_hex_str = hex::encode(&frame[..HEADER_LEN]);
         assert_eq!(header_hex_str, "0000002a02");
     }
@@ -291,7 +297,8 @@ mod tests {
         let payload_bytes = payload.as_bytes();
         assert_eq!(payload_bytes.len(), 35);
 
-        let frame = encode_frame(FrameType::Notification, payload_bytes).unwrap();
+        let frame =
+            encode_frame(FrameType::Notification, payload_bytes, MAX_PAYLOAD_BYTES).unwrap();
         let header_hex_str = hex::encode(&frame[..HEADER_LEN]);
         assert_eq!(header_hex_str, "0000002303");
     }
@@ -302,7 +309,8 @@ mod tests {
         let payload_bytes = payload.as_bytes();
         assert_eq!(payload_bytes.len(), 112);
 
-        let frame = encode_frame(FrameType::Notification, payload_bytes).unwrap();
+        let frame =
+            encode_frame(FrameType::Notification, payload_bytes, MAX_PAYLOAD_BYTES).unwrap();
         let header_hex_str = hex::encode(&frame[..HEADER_LEN]);
         assert_eq!(header_hex_str, "0000007003");
     }
