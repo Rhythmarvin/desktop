@@ -18,5 +18,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "time"] }
 
 [dev-dependencies]
+hex = "0.4"
 pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
