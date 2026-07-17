@@ -1,0 +1,98 @@
+{
+  "description": "Agent Contract v1 golden fixtures — one entry per request/result/event/error variant. Used for Rust↔TS round-trip verification.",
+  "version": 1,
+  "entries": {
+    "requests": {
+      "discoverInstallations": {
+        "json": "{\"providerId\":\"test-agent\",\"scope\":{\"type\":\"global\"}}",
+        "rust_type": "DiscoverInstallationsRequest"
+      },
+      "getConfigurationSummary": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"scope\":{\"type\":\"global\"}}",
+        "rust_type": "GetConfigurationSummaryRequest"
+      },
+      "listSkills": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"scope\":{\"type\":\"global\"},\"limit\":50}",
+        "rust_type": "ListSkillsRequest"
+      },
+      "listMcpServers": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"scope\":{\"type\":\"global\"},\"limit\":50}",
+        "rust_type": "ListMcpServersRequest"
+      },
+      "listConversations": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"scope\":{\"type\":\"global\"},\"cursor\":\"cursor-1\",\"limit\":50}",
+        "rust_type": "ListConversationsRequest"
+      },
+      "startConversation": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"scope\":{\"type\":\"project\",\"projectHandle\":\"proj-1\",\"workingDirectory\":\"D:\\\\work\"},\"clientRequestId\":\"550e8400-e29b-41d4-a716-446655440000\",\"prompt\":\"Hello, Claude!\"}",
+        "rust_type": "StartConversationRequest"
+      },
+      "sendMessage": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"conversationId\":\"conv-1\",\"scope\":{\"type\":\"global\"},\"clientRequestId\":\"550e8400-e29b-41d4-a716-446655440001\",\"prompt\":\"Continue.\"}",
+        "rust_type": "SendMessageRequest"
+      },
+      "cancelConversation": {
+        "json": "{\"providerId\":\"test-agent\",\"installationId\":\"inst-1\",\"conversationId\":\"conv-1\",\"scope\":{\"type\":\"global\"}}",
+        "rust_type": "CancelConversationRequest"
+      }
+    },
+    "results": {
+      "discoverInstallationsResponse": {
+        "json": "{\"installations\":[{\"installationId\":\"inst-1\",\"displayName\":\"Test Agent\",\"availability\":{\"type\":\"available\"}}],\"diagnostics\":[]}",
+        "rust_type": "DiscoverInstallationsResponse"
+      },
+      "agentTurnResult": {
+        "json": "{\"conversationId\":\"conv-1\",\"turnId\":\"turn-1\",\"finishReason\":\"completed\",\"usage\":{\"inputTokens\":1000,\"outputTokens\":500}}",
+        "rust_type": "AgentTurnResult"
+      },
+      "cancelResponseAccepted": {
+        "json": "{\"disposition\":\"accepted\"}",
+        "rust_type": "CancelConversationResponse"
+      },
+      "cancelResponseAlreadyStopped": {
+        "json": "{\"disposition\":\"alreadyStopped\"}",
+        "rust_type": "CancelConversationResponse"
+      },
+      "listSkillsResponse": {
+        "json": "{\"items\":[{\"id\":\"skill-1\",\"displayName\":\"Code Review\",\"source\":{\"type\":\"builtIn\"}}],\"nextCursor\":\"cursor-2\"}",
+        "rust_type": "ListSkillsResponse"
+      }
+    },
+    "events": {
+      "conversationStarted": {
+        "json": "{\"kind\":\"conversationStarted\",\"conversationId\":\"conv-1\"}",
+        "rust_type": "AgentEvent"
+      },
+      "textDelta": {
+        "json": "{\"kind\":\"textDelta\",\"channel\":\"assistant\",\"text\":\"Hello!\"}",
+        "rust_type": "AgentEvent"
+      },
+      "status": {
+        "json": "{\"kind\":\"status\",\"phase\":\"thinking\",\"message\":\"Analyzing code...\"}",
+        "rust_type": "AgentEvent"
+      },
+      "toolCall": {
+        "json": "{\"kind\":\"toolCall\",\"callId\":\"call-1\",\"name\":\"read_file\",\"summary\":\"Reading src/main.ts\"}",
+        "rust_type": "AgentEvent"
+      },
+      "toolResult": {
+        "json": "{\"kind\":\"toolResult\",\"callId\":\"call-1\",\"isError\":false,\"summary\":\"File contents returned\"}",
+        "rust_type": "AgentEvent"
+      },
+      "usage": {
+        "json": "{\"kind\":\"usage\",\"usage\":{\"inputTokens\":500,\"outputTokens\":200,\"costMicros\":1500}}",
+        "rust_type": "AgentEvent"
+      }
+    },
+    "errors": {
+      "businessError": {
+        "json": "{\"code\":-32000,\"message\":\"Access denied\",\"data\":{\"kind\":\"permissionDenied\"}}",
+        "rust_type": "AgentBusinessError"
+      },
+      "providerFailure": {
+        "json": "{\"code\":-32000,\"message\":\"Internal error\",\"data\":{\"kind\":\"providerFailure\"}}",
+        "rust_type": "ProviderFailure"
+      }
+    }
+  }
+}
