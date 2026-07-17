@@ -1,0 +1,15 @@
+{
+  "name": "@ora-space/plugin-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Host-owned plugin bootstrap — NOT importable by plugins",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.14"
+  }
+}
