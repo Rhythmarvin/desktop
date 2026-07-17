@@ -1,317 +1,296 @@
-use std::time::Duration;
+//! Handshake helpers — build `$/initialize` and `$/activate` messages and validate responses.
 
-use ora_plugin_protocol::{
-    ActivateParams, ActivateResult, ActivationReason, DeclaredAgent, FrameType, HostRequestId,
-    HostResolvedAbsolutePath, InitializeParams, InitializePaths, InitializePlugin,
-    InitializeResult, JsonRpcEnvelope, JsonRpcResponse, METHOD_ACTIVATE, METHOD_INITIALIZE,
-    PLUGIN_API_VERSION_V1, PluginKind, WIRE_VERSION_V1, encode_json_rpc_request,
-};
-use ora_process::ProcessTreeController;
+use crate::transport::frame::FrameType;
 
-use crate::{
-    ActivationFailure, GenerationProcessEvent, GenerationTransport, HandshakeFailure, PluginError,
-    PluginManagerConfig, PluginRuntimeAssets, ReaderEvent, RuntimeAdmissionProvider,
-    SessionControlKind, ValidatedLaunchDescriptor, WriterCommandOwner, WriterCompletion,
-    WriterLane,
-};
-
-/// Successful initialize/activate proof retained by the running generation actor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HandshakeProof {
+/// Result of the `$/initialize` handshake.
+#[derive(Debug, Clone)]
+pub struct InitializeOutcome {
+    pub wire_version: u32,
+    pub runtime_version: String,
     pub session_id: String,
-    pub next_request_sequence: u64,
-    pub declared_agents: Vec<DeclaredAgent>,
+    pub plugin_id: String,
+    pub plugin_version: String,
 }
 
-/// Performs both lifecycle round trips and the post-activate admission barrier.
-pub async fn perform_handshake<Controller, Admission>(
-    transport: &mut GenerationTransport<Controller>,
-    admission: &Admission,
-    descriptor: &ValidatedLaunchDescriptor,
-    config: &PluginManagerConfig,
-    assets: &PluginRuntimeAssets,
-    reason: ActivationReason,
-) -> Result<HandshakeProof, PluginError>
-where
-    Controller: ProcessTreeController,
-    Admission: RuntimeAdmissionProvider,
-{
-    if descriptor.kind != PluginKind::Agent {
-        return Err(PluginError::HandshakeFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: HandshakeFailure::IdentityMismatch,
-        });
-    }
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let declared_agents = descriptor
-        .declared_agents
+/// Result of the `$/activate` handshake.
+#[derive(Debug, Clone)]
+pub struct ActivateOutcome {
+    pub providers: Vec<ProviderDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderDescriptor {
+    pub id: String,
+    pub contract_version: u32,
+}
+
+/// Build the JSON-RPC request payload for `$/initialize`.
+pub fn build_initialize_request(
+    id: &str,
+    wire_version: u32,
+    host_version: &str,
+    runtime_version: &str,
+    session_id: &str,
+    plugin_id: &str,
+    plugin_version: &str,
+    plugin_kind: &str,
+    plugin_api: u32,
+    content_owner: &str,
+    extension_path: &str,
+    entry_path: &str,
+    storage_path: &str,
+    declared_agents: &[ProviderDescriptor],
+    limits: &InitializeLimits,
+) -> String {
+    let agents: Vec<serde_json::Value> = declared_agents
         .iter()
-        .cloned()
-        .map(|id| DeclaredAgent {
-            id,
-            contract_version: ora_plugin_protocol::AGENT_CONTRACT_VERSION_V1,
+        .map(|a| {
+            serde_json::json!({
+                "id": a.id,
+                "contractVersion": a.contract_version,
+            })
         })
-        .collect::<Vec<_>>();
-    let initialize = InitializeParams {
-        wire_version: WIRE_VERSION_V1,
-        host_version: config.host_version.clone(),
-        runtime_version: assets.runtime_version.clone(),
-        session_id: session_id.clone(),
-        plugin: InitializePlugin {
-            id: descriptor.plugin_id.clone(),
-            version: descriptor.plugin_version.clone(),
-            kind: descriptor.kind,
-            plugin_api: PLUGIN_API_VERSION_V1,
-            content_owner: descriptor.content_owner.clone(),
-        },
-        paths: InitializePaths {
-            extension_path: protocol_path(&descriptor.extension_path).map_err(|_| {
-                PluginError::HandshakeFailed {
-                    plugin_id: descriptor.plugin_id.clone(),
-                    reason: HandshakeFailure::IdentityMismatch,
-                }
-            })?,
-            entry_path: protocol_path(&descriptor.entry_path).map_err(|_| {
-                PluginError::HandshakeFailed {
-                    plugin_id: descriptor.plugin_id.clone(),
-                    reason: HandshakeFailure::IdentityMismatch,
-                }
-            })?,
-            storage_path: protocol_path(&descriptor.storage_path).map_err(|_| {
-                PluginError::HandshakeFailed {
-                    plugin_id: descriptor.plugin_id.clone(),
-                    reason: HandshakeFailure::IdentityMismatch,
-                }
-            })?,
-        },
-        declared_agents: declared_agents.clone(),
-        limits: config.limits.runtime.clone(),
-    };
-    initialize
-        .validate()
-        .map_err(|_| PluginError::HandshakeFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: HandshakeFailure::IdentityMismatch,
-        })?;
+        .collect();
 
-    let initialize_id = HostRequestId::from_sequence(1).map_err(|_| PluginError::Internal {
-        message: "static initialize request id is invalid".to_owned(),
-    })?;
-    let initialize_response = lifecycle_round_trip(
-        transport,
-        &initialize_id,
-        METHOD_INITIALIZE,
-        &initialize,
-        SessionControlKind::Initialize,
-        config.deadlines.initialize,
-    )
-    .await
-    .map_err(|failure| PluginError::HandshakeFailed {
-        plugin_id: descriptor.plugin_id.clone(),
-        reason: failure.as_handshake_failure(),
-    })?;
-    let initialize_result: InitializeResult = response_result(initialize_response)
-        .and_then(|value| {
-            serde_json::from_value(value).map_err(|_| LifecycleRoundTripFailure::InvalidResult)
-        })
-        .map_err(|failure| PluginError::HandshakeFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: failure.as_handshake_failure(),
-        })?;
-    if initialize_result.wire_version != WIRE_VERSION_V1
-        || initialize_result.runtime_version != assets.runtime_version
-        || initialize_result.session_id != session_id
-        || initialize_result.plugin.id != descriptor.plugin_id
-        || initialize_result.plugin.version != descriptor.plugin_version
-    {
-        return Err(PluginError::HandshakeFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: HandshakeFailure::IdentityMismatch,
-        });
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "$/initialize",
+        "params": {
+            "wireVersion": wire_version,
+            "hostVersion": host_version,
+            "runtimeVersion": runtime_version,
+            "sessionId": session_id,
+            "plugin": {
+                "id": plugin_id,
+                "version": plugin_version,
+                "kind": plugin_kind,
+                "pluginApi": plugin_api,
+                "contentOwner": content_owner,
+            },
+            "paths": {
+                "extensionPath": extension_path,
+                "entryPath": entry_path,
+                "storagePath": storage_path,
+            },
+            "declaredAgents": agents,
+            "limits": {
+                "maxFrameBytes": limits.max_frame_bytes,
+                "maxPendingRequests": limits.max_pending_requests,
+                "maxAgentEventBytes": limits.max_agent_event_bytes,
+                "maxAgentResultBytes": limits.max_agent_result_bytes,
+                "maxAgentPromptBytes": limits.max_agent_prompt_bytes,
+                "maxActiveTurns": limits.max_active_turns,
+                "maxPageItems": limits.max_page_items,
+            },
+        },
+    }))
+    .unwrap()
+}
+
+/// Dynamic limits sent in `$/initialize`.
+#[derive(Debug, Clone)]
+pub struct InitializeLimits {
+    pub max_frame_bytes: u32,
+    pub max_pending_requests: u32,
+    pub max_agent_event_bytes: u32,
+    pub max_agent_result_bytes: u32,
+    pub max_agent_prompt_bytes: u32,
+    pub max_active_turns: u32,
+    pub max_page_items: u32,
+}
+
+impl Default for InitializeLimits {
+    fn default() -> Self {
+        Self {
+            max_frame_bytes: 8_388_608,
+            max_pending_requests: 128,
+            max_agent_event_bytes: 262_144,
+            max_agent_result_bytes: 1_048_576,
+            max_agent_prompt_bytes: 1_048_576,
+            max_active_turns: 64,
+            max_page_items: 100,
+        }
     }
+}
 
-    let activate_id = HostRequestId::from_sequence(2).map_err(|_| PluginError::Internal {
-        message: "static activate request id is invalid".to_owned(),
-    })?;
-    let activate_response = lifecycle_round_trip(
-        transport,
-        &activate_id,
-        METHOD_ACTIVATE,
-        &ActivateParams { reason },
-        SessionControlKind::Activate,
-        config.deadlines.activate,
-    )
-    .await
-    .map_err(|failure| PluginError::ActivationFailed {
-        plugin_id: descriptor.plugin_id.clone(),
-        reason: failure.as_activation_failure(),
-    })?;
-    let activate_result: ActivateResult = response_result(activate_response)
-        .and_then(|value| {
-            serde_json::from_value(value).map_err(|_| LifecycleRoundTripFailure::InvalidResult)
-        })
-        .map_err(|failure| PluginError::ActivationFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: failure.as_activation_failure(),
-        })?;
-    activate_result
-        .validate_declared_providers(&declared_agents)
-        .map_err(|_| PluginError::ActivationFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: ActivationFailure::ProviderMismatch,
-        })?;
-    admission
-        .recheck_after_activate(descriptor)
-        .await
-        .map_err(|_| PluginError::ActivationFailed {
-            plugin_id: descriptor.plugin_id.clone(),
-            reason: ActivationFailure::AdmissionChanged,
-        })?;
+/// Build the response to `$/initialize` (identity echo).
+pub fn build_initialize_response(
+    id: &str,
+    wire_version: u32,
+    runtime_version: &str,
+    session_id: &str,
+    plugin_id: &str,
+    plugin_version: &str,
+) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": {
+            "wireVersion": wire_version,
+            "runtimeVersion": runtime_version,
+            "sessionId": session_id,
+            "plugin": {
+                "id": plugin_id,
+                "version": plugin_version,
+            },
+        },
+    }))
+    .unwrap()
+}
 
-    Ok(HandshakeProof {
+/// Build the JSON-RPC request for `$/activate`.
+pub fn build_activate_request(id: &str, reason: &str) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "$/activate",
+        "params": { "reason": reason },
+    }))
+    .unwrap()
+}
+
+/// Build the JSON-RPC request for `$/deactivate`.
+pub fn build_deactivate_request(id: &str, reason: &str) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "$/deactivate",
+        "params": { "reason": reason },
+    }))
+    .unwrap()
+}
+
+/// Build the `$/exit` notification.
+pub fn build_exit_notification() -> String {
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "$/exit",
+    }))
+    .unwrap()
+}
+
+/// Build a `$/cancelRequest` notification.
+pub fn build_cancel_request(id: &str) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "$/cancelRequest",
+        "params": { "id": id },
+    }))
+    .unwrap()
+}
+
+/// Parse the `$/initialize` response and extract the echoed identity.
+pub fn parse_initialize_response(
+    result: &serde_json::Value,
+) -> Result<InitializeOutcome, String> {
+    let wire_version = result["wireVersion"]
+        .as_u64()
+        .ok_or("missing wireVersion")? as u32;
+    let runtime_version = result["runtimeVersion"]
+        .as_str()
+        .ok_or("missing runtimeVersion")?
+        .to_string();
+    let session_id = result["sessionId"]
+        .as_str()
+        .ok_or("missing sessionId")?
+        .to_string();
+    let plugin = &result["plugin"];
+    let plugin_id = plugin["id"].as_str().ok_or("missing plugin.id")?.to_string();
+    let plugin_version = plugin["version"]
+        .as_str()
+        .ok_or("missing plugin.version")?
+        .to_string();
+
+    Ok(InitializeOutcome {
+        wire_version,
+        runtime_version,
         session_id,
-        next_request_sequence: 3,
-        declared_agents,
+        plugin_id,
+        plugin_version,
     })
 }
 
-/// Sends one lifecycle request and preserves response-before-writer-ack causal ordering.
-async fn lifecycle_round_trip<Controller, Params>(
-    transport: &mut GenerationTransport<Controller>,
-    id: &HostRequestId,
-    method: &str,
-    params: &Params,
-    control: SessionControlKind,
-    deadline: Duration,
-) -> Result<JsonRpcResponse, LifecycleRoundTripFailure>
-where
-    Controller: ProcessTreeController,
-    Params: serde::Serialize,
-{
-    let payload = encode_json_rpc_request(id, method, params)
-        .map_err(|_| LifecycleRoundTripFailure::LocalEncoding)?;
-    let owner = WriterCommandOwner::SessionControl(control);
-    transport
-        .writer
-        .enqueue(
-            transport.generation,
-            owner.clone(),
-            FrameType::Request,
-            &payload,
-            WriterLane::SessionControl,
-            deadline,
-        )
-        .await
-        .map_err(|_| LifecycleRoundTripFailure::WriterFailure)?;
-
-    let timeout = tokio::time::sleep(deadline);
-    tokio::pin!(timeout);
-    let mut frame_written = false;
-    let mut deferred_response = None;
-    loop {
-        tokio::select! {
-            _ = &mut timeout => return Err(LifecycleRoundTripFailure::DeadlineExceeded),
-            writer = transport.writer_events.recv() => {
-                match writer {
-                    Some(WriterCompletion::FrameWritten { generation, owner: actual })
-                        if generation == transport.generation && actual == owner => {
-                            frame_written = true;
-                            if let Some(response) = deferred_response.take() {
-                                return Ok(response);
-                            }
-                        }
-                    Some(WriterCompletion::WriteFailed { generation, owner: actual, .. })
-                        if generation == transport.generation && actual == owner => {
-                            return Err(LifecycleRoundTripFailure::WriterFailure);
-                        }
-                    Some(_) => return Err(LifecycleRoundTripFailure::Protocol),
-                    None => return Err(LifecycleRoundTripFailure::WriterFailure),
-                }
-            }
-            reader = transport.reader_events.recv() => {
-                match reader {
-                    Some(ReaderEvent::Envelope(JsonRpcEnvelope::Response(response)))
-                        if response_id(&response) == id => {
-                            if deferred_response.is_some() {
-                                return Err(LifecycleRoundTripFailure::Protocol);
-                            }
-                            if frame_written {
-                                return Ok(response);
-                            }
-                            deferred_response = Some(response);
-                        }
-                    Some(ReaderEvent::Envelope(_)) => return Err(LifecycleRoundTripFailure::Protocol),
-                    Some(ReaderEvent::BoundaryEof) | None => {
-                        return Err(LifecycleRoundTripFailure::ProcessExited);
-                    }
-                    Some(ReaderEvent::Failure(_)) => return Err(LifecycleRoundTripFailure::Protocol),
-                }
-            }
-            process = transport.process_events.recv() => {
-                match process {
-                    Some(GenerationProcessEvent::StderrDrained(_)) => {}
-                    Some(GenerationProcessEvent::DirectExit(_))
-                    | Some(GenerationProcessEvent::TreeEmpty(_))
-                    | None => return Err(LifecycleRoundTripFailure::ProcessExited),
-                }
-            }
-        }
-    }
+/// Parse the `$/activate` response and extract the provider list.
+pub fn parse_activate_response(
+    result: &serde_json::Value,
+) -> Result<ActivateOutcome, String> {
+    let providers = result["providers"]
+        .as_array()
+        .ok_or("missing providers array")?;
+    let parsed: Vec<ProviderDescriptor> = providers
+        .iter()
+        .map(|p| {
+            Ok(ProviderDescriptor {
+                id: p["id"].as_str().ok_or("missing provider id")?.to_string(),
+                contract_version: p["contractVersion"]
+                    .as_u64()
+                    .ok_or("missing contractVersion")? as u32,
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(ActivateOutcome { providers: parsed })
 }
 
-fn response_id(response: &JsonRpcResponse) -> &HostRequestId {
-    match response {
-        JsonRpcResponse::Success { id, .. } | JsonRpcResponse::Error { id, .. } => id,
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
 
-fn response_result(
-    response: JsonRpcResponse,
-) -> Result<serde_json::Value, LifecycleRoundTripFailure> {
-    match response {
-        JsonRpcResponse::Success { result, .. } => Ok(result),
-        JsonRpcResponse::Error { .. } => Err(LifecycleRoundTripFailure::RemoteError),
-    }
-}
-
-fn protocol_path(path: &std::path::Path) -> Result<HostResolvedAbsolutePath, ()> {
-    path.to_str()
-        .ok_or(())
-        .and_then(|value| HostResolvedAbsolutePath::parse(value).map_err(|_| ()))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LifecycleRoundTripFailure {
-    DeadlineExceeded,
-    LocalEncoding,
-    WriterFailure,
-    Protocol,
-    ProcessExited,
-    RemoteError,
-    InvalidResult,
-}
-
-impl LifecycleRoundTripFailure {
-    const fn as_handshake_failure(self) -> HandshakeFailure {
-        match self {
-            Self::DeadlineExceeded => HandshakeFailure::DeadlineExceeded,
-            Self::ProcessExited => HandshakeFailure::ProcessExited,
-            Self::LocalEncoding
-            | Self::WriterFailure
-            | Self::Protocol
-            | Self::RemoteError
-            | Self::InvalidResult => HandshakeFailure::FirstFrameMismatch,
-        }
+    #[test]
+    fn build_initialize_request_contains_all_fields() {
+        let req = build_initialize_request(
+            "h:1", 1, "0.1.0", "0.1.0", "sess-1",
+            "ora.test", "1.0.0", "agent", 1, "sha256-abc",
+            "/p/test", "/p/test/dist/index.js", "/d/test",
+            &[ProviderDescriptor { id: "agent1".into(), contract_version: 1 }],
+            &InitializeLimits::default(),
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(parsed["method"], "$/initialize");
+        assert_eq!(parsed["params"]["plugin"]["id"], "ora.test");
+        assert_eq!(parsed["params"]["limits"]["maxFrameBytes"], 8_388_608);
     }
 
-    const fn as_activation_failure(self) -> ActivationFailure {
-        match self {
-            Self::DeadlineExceeded => ActivationFailure::DeadlineExceeded,
-            Self::ProcessExited => ActivationFailure::ProcessExited,
-            Self::RemoteError => ActivationFailure::RemoteError,
-            Self::LocalEncoding | Self::WriterFailure | Self::Protocol | Self::InvalidResult => {
-                ActivationFailure::InvalidResult
-            }
-        }
+    #[test]
+    fn build_initialize_response_echoes_identity() {
+        let resp = build_initialize_response("h:1", 1, "0.1.0", "sess-1", "ora.test", "1.0.0");
+        let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
+        let result = &parsed["result"];
+        assert_eq!(result["plugin"]["id"], "ora.test");
+        assert_eq!(result["sessionId"], "sess-1");
+    }
+
+    #[test]
+    fn build_activate_has_reason() {
+        let req = build_activate_request("h:2", "lazyInvocation");
+        let parsed: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(parsed["method"], "$/activate");
+        assert_eq!(parsed["params"]["reason"], "lazyInvocation");
+    }
+
+    #[test]
+    fn parse_activate_response_extracts_providers() {
+        let json = serde_json::json!({
+            "providers": [
+                {"id": "agent1", "contractVersion": 1},
+                {"id": "agent2", "contractVersion": 1}
+            ]
+        });
+        let outcome = parse_activate_response(&json).unwrap();
+        assert_eq!(outcome.providers.len(), 2);
+        assert_eq!(outcome.providers[0].id, "agent1");
+    }
+
+    #[test]
+    fn build_deactivate_and_exit() {
+        let deact = build_deactivate_request("h:99", "shutdown");
+        let parsed: serde_json::Value = serde_json::from_str(&deact).unwrap();
+        assert_eq!(parsed["method"], "$/deactivate");
+
+        let exit = build_exit_notification();
+        let parsed: serde_json::Value = serde_json::from_str(&exit).unwrap();
+        assert_eq!(parsed["method"], "$/exit");
+        assert!(parsed.get("id").is_none());
     }
 }

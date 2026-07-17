@@ -1,338 +1,367 @@
-use ora_plugin_protocol::{AgentMethod, HostRequestId, JsonRpcResponse, StreamParams};
+//! Pending request table — tracks in-flight Host→Plugin RPC calls.
+//!
+//! Each request passes through states: Queued → WriteStarted → Written → Cancelling.
+//! A monotonic `actor_sequence` orders all events within a generation.
+//! Termination intents and fatal settlement causes are write-once to guarantee
+//! deterministic outcomes even under concurrent cancel/deadline/crash races.
 
-use super::{FatalSettlementCause, TerminationIntentKind, WriteCertainty};
+use super::state::Generation;
+use std::collections::HashMap;
 
-/// Monotonic order assigned only by the runtime actor when it accepts an event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ActorSequence(pub u64);
+// ── Actor sequence ──────────────────────────────────────────────
 
-/// The first termination intent and the actor turn that froze its fallback meaning.
+/// Monotonic sequence number for ordering events within a generation.
+pub type ActorSequence = u64;
+
+// ── Write state ──────────────────────────────────────────────────
+
+/// How far a request's frame got into the write pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TerminationIntent {
-    pub sequence: ActorSequence,
-    pub kind: TerminationIntentKind,
-}
-
-/// Events that arrived after write start but before local full-frame acknowledgement.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DeferredPendingEvent {
-    pub sequence: ActorSequence,
-    pub kind: DeferredPendingEventKind,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeferredPendingEventKind {
-    Terminal(JsonRpcResponse),
-    Stream(StreamParams),
-    Intent(TerminationIntentKind),
-}
-
-/// Causal wire state owned exclusively by the actor, never duplicated in the writer worker.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PendingWireState {
+pub enum WriteState {
+    /// Not yet picked up by the writer.
     Queued,
-    WriteStarted {
-        deferred_events: Vec<DeferredPendingEvent>,
-    },
+    /// Writer has started; partial bytes may have been written.
+    WriteStarted { bytes_written: usize },
+    /// The complete `5 + N` bytes were `write_all`-ed successfully.
     Written,
+    /// Cancellation is in progress after a Written frame.
     Cancelling,
-    WriteFailed {
-        certainty: WriteCertainty,
-    },
 }
 
-/// One pending request's immutable method identity and write-once settlement facts.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PendingInvocation {
-    pub id: HostRequestId,
-    pub method: AgentMethod,
-    pub wire: PendingWireState,
-    pub termination_intent: Option<TerminationIntent>,
+/// Result of a single frame write attempt.
+#[derive(Debug, Clone)]
+pub enum WriteAck {
+    /// The complete frame was written.
+    FrameWritten,
+    /// The write failed (0 = NotWritten, >0 = PossiblyWritten).
+    WriteFailed { bytes_written: usize },
+}
+
+// ── Termination intents ─────────────────────────────────────────
+
+/// Why this request is being terminated (first effective intent wins).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminationIntent {
+    /// Caller explicitly cancelled.
+    ExplicitCancel,
+    /// Host stop (disable/uninstall/shutdown).
+    HostStop,
+    /// Backpressure — consumer channel full.
+    Backpressure,
+    /// Invocation deadline expired.
+    HardDeadline,
+}
+
+impl TerminationIntent {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ExplicitCancel => "ExplicitCancel",
+            Self::HostStop => "HostStop",
+            Self::Backpressure => "Backpressure",
+            Self::HardDeadline => "HardDeadline",
+        }
+    }
+}
+
+// ── Fatal settlement ────────────────────────────────────────────
+
+/// Why the connection entered fatal drain (write-once per generation).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FatalSettlementCause {
+    /// Connection was lost at a specific stage.
+    ConnectionLost { stage: ConnectionStage },
+    /// The process exited with the given code.
+    ProcessExited { exit_code: Option<i32> },
+}
+
+/// Where in the connection lifecycle the failure occurred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionStage {
+    ResponseRead,
+    RequestWrite,
+    TransportCancelWrite,
+    SessionDrain,
+}
+
+// ── Request entry ───────────────────────────────────────────────
+
+/// One pending request tracked by the runtime actor.
+#[derive(Debug, Clone)]
+pub struct PendingEntry {
+    /// The JSON-RPC request id (e.g., "h:42").
+    pub request_id: String,
+    /// The method being invoked.
+    pub method: String,
+    /// Generation that owns this request.
+    pub generation: Generation,
+    /// Actor sequence when this entry was created.
+    pub created_at: ActorSequence,
+    /// Whether the method is idempotent.
+    pub idempotent: bool,
+    /// Whether this is a safety-control method (cancelConversation).
+    pub safety: bool,
+    /// Current write state.
+    pub write_state: WriteState,
+    /// First effective termination intent (write-once).
+    pub intent: Option<TerminationIntent>,
+    /// Sequence of the intent (for tiebreaking).
+    pub intent_sequence: Option<ActorSequence>,
+    /// Fatal cause if the session entered drain (write-once).
     pub fatal_cause: Option<FatalSettlementCause>,
-    pub next_stream_sequence: u64,
 }
 
-impl PendingInvocation {
-    pub fn new(id: HostRequestId, method: AgentMethod) -> Self {
+impl PendingEntry {
+    pub fn new(
+        request_id: String,
+        method: String,
+        generation: Generation,
+        sequence: ActorSequence,
+        idempotent: bool,
+        safety: bool,
+    ) -> Self {
         Self {
-            id,
+            request_id,
             method,
-            wire: PendingWireState::Queued,
-            termination_intent: None,
+            generation,
+            created_at: sequence,
+            idempotent,
+            safety,
+            write_state: WriteState::Queued,
+            intent: None,
+            intent_sequence: None,
             fatal_cause: None,
-            next_stream_sequence: 1,
         }
     }
 
-    /// Atomically transfers scheduler ownership to the single writer command.
-    pub fn start_write(&mut self) -> Result<(), PendingTransitionError> {
-        if self.wire != PendingWireState::Queued {
-            return Err(PendingTransitionError::WriteAlreadyStarted);
+    /// Lock a termination intent. Returns false if a different intent already exists.
+    pub fn set_intent(&mut self, intent: TerminationIntent, seq: ActorSequence) -> bool {
+        if let Some(existing) = &self.intent {
+            // Same intent type → merge (keep earlier sequence)
+            if *existing == intent {
+                return true;
+            }
+            // Different intent → first wins
+            return false;
         }
-        self.wire = PendingWireState::WriteStarted {
-            deferred_events: Vec::new(),
-        };
+        self.intent = Some(intent);
+        self.intent_sequence = Some(seq);
+        true
+    }
+
+    /// Lock a fatal settlement cause. Returns false if already set.
+    pub fn set_fatal_cause(&mut self, cause: FatalSettlementCause) -> bool {
+        if self.fatal_cause.is_some() {
+            return false;
+        }
+        self.fatal_cause = Some(cause);
+        true
+    }
+}
+
+// ── Pending table ───────────────────────────────────────────────
+
+/// The actor-owned pending request table.
+pub struct PendingTable {
+    entries: HashMap<String, PendingEntry>,
+    max_ordinary: usize,
+    next_sequence: ActorSequence,
+}
+
+impl PendingTable {
+    /// Create a new pending table with a max ordinary capacity.
+    pub fn new(max_ordinary: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            max_ordinary,
+            next_sequence: 0,
+        }
+    }
+
+    /// Allocate the next actor sequence number.
+    pub fn next_sequence(&mut self) -> ActorSequence {
+        self.next_sequence += 1;
+        self.next_sequence
+    }
+
+    /// Current sequence counter.
+    pub fn current_sequence(&self) -> ActorSequence {
+        self.next_sequence
+    }
+
+    /// Insert a new pending entry.
+    pub fn insert(&mut self, entry: PendingEntry) -> Result<(), &'static str> {
+        if self.entries.contains_key(&entry.request_id) {
+            return Err("duplicate request id");
+        }
+        let ordinary_count = self.entries.values().filter(|e| !e.safety).count();
+        if !entry.safety && ordinary_count >= self.max_ordinary {
+            return Err("ordinary pending table full");
+        }
+        self.entries.insert(entry.request_id.clone(), entry);
         Ok(())
     }
 
-    /// Defers correlated inbound data until the complete request frame is acknowledged locally.
-    pub fn defer_inbound(
-        &mut self,
-        event: DeferredPendingEvent,
-        maximum_events: usize,
-    ) -> Result<(), PendingTransitionError> {
-        match &mut self.wire {
-            PendingWireState::WriteStarted { deferred_events } => {
-                if deferred_events.len() >= maximum_events {
-                    return Err(PendingTransitionError::DeferredBudgetExceeded);
-                }
-                deferred_events.push(event);
-                Ok(())
-            }
-            PendingWireState::Written | PendingWireState::Cancelling => {
-                Err(PendingTransitionError::NoDeferralRequired)
-            }
-            PendingWireState::Queued | PendingWireState::WriteFailed { .. } => {
-                Err(PendingTransitionError::InboundBeforeWriteStart)
-            }
+    /// Get a mutable reference to an entry.
+    pub fn get_mut(&mut self, request_id: &str) -> Option<&mut PendingEntry> {
+        self.entries.get_mut(request_id)
+    }
+
+    /// Get a reference to an entry.
+    pub fn get(&self, request_id: &str) -> Option<&PendingEntry> {
+        self.entries.get(request_id)
+    }
+
+    /// Remove an entry (after terminal response).
+    pub fn remove(&mut self, request_id: &str) -> Option<PendingEntry> {
+        self.entries.remove(request_id)
+    }
+
+    /// Count of active entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Count of ordinary (non-safety) entries.
+    pub fn ordinary_count(&self) -> usize {
+        self.entries.values().filter(|e| !e.safety).count()
+    }
+
+    /// Count of safety entries.
+    pub fn safety_count(&self) -> usize {
+        self.entries.values().filter(|e| e.safety).count()
+    }
+
+    /// Check if there is capacity for a new ordinary request.
+    pub fn has_ordinary_capacity(&self) -> bool {
+        self.ordinary_count() < self.max_ordinary
+    }
+
+    /// Set the fatal cause on all entries that don't have one yet.
+    pub fn set_fatal_cause_all(&mut self, cause: FatalSettlementCause) {
+        for entry in self.entries.values_mut() {
+            entry.set_fatal_cause(cause.clone());
         }
     }
 
-    /// Opens the causal gate and returns deferred events in their original actor order.
-    pub fn frame_written(&mut self) -> Result<Vec<DeferredPendingEvent>, PendingTransitionError> {
-        let PendingWireState::WriteStarted { deferred_events } = &mut self.wire else {
-            return Err(PendingTransitionError::WriterAckWithoutWrite);
-        };
-        deferred_events.sort_by_key(|event| event.sequence);
-        let replay = std::mem::take(deferred_events);
-        self.wire = PendingWireState::Written;
-        Ok(replay)
+    /// Drain all entries (return them for settlement).
+    pub fn drain_all(&mut self) -> Vec<PendingEntry> {
+        self.entries.drain().map(|(_, v)| v).collect()
     }
-
-    /// Rejects deferred inbound evidence and records only zero-versus-possible write knowledge.
-    pub fn write_failed(
-        &mut self,
-        bytes_written: Option<usize>,
-    ) -> Result<WriteCertainty, PendingTransitionError> {
-        if !matches!(self.wire, PendingWireState::WriteStarted { .. }) {
-            return Err(PendingTransitionError::WriterAckWithoutWrite);
-        }
-        let certainty = match bytes_written {
-            Some(0) => WriteCertainty::NotWritten,
-            Some(_) | None => WriteCertainty::PossiblyWritten,
-        };
-        self.wire = PendingWireState::WriteFailed { certainty };
-        Ok(certainty)
-    }
-
-    /// Stores only the earliest valid intent; later cancel/deadline events cannot rewrite it.
-    pub fn record_intent(&mut self, intent: TerminationIntent) {
-        if self
-            .termination_intent
-            .is_none_or(|current| intent.sequence < current.sequence)
-        {
-            self.termination_intent = Some(intent);
-        }
-    }
-
-    /// Latches a fatal cause only for a no-intent request and never replaces prior evidence.
-    pub fn latch_fatal_cause(&mut self, cause: FatalSettlementCause) {
-        if self.termination_intent.is_none() && self.fatal_cause.is_none() {
-            self.fatal_cause = Some(cause);
-        }
-    }
-
-    /// Returns current local write certainty without pretending WriteStarted has completed.
-    pub const fn write_certainty(&self) -> Option<WriteCertainty> {
-        match self.wire {
-            PendingWireState::Queued => Some(WriteCertainty::NotWritten),
-            PendingWireState::Written | PendingWireState::Cancelling => {
-                Some(WriteCertainty::Written)
-            }
-            PendingWireState::WriteFailed { certainty } => Some(certainty),
-            PendingWireState::WriteStarted { .. } => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum PendingTransitionError {
-    #[error("request write already started")]
-    WriteAlreadyStarted,
-    #[error("inbound event arrived before request write start")]
-    InboundBeforeWriteStart,
-    #[error("request is already written and does not require deferral")]
-    NoDeferralRequired,
-    #[error("deferred event budget exceeded")]
-    DeferredBudgetExceeded,
-    #[error("writer completion did not match a write-started request")]
-    WriterAckWithoutWrite,
 }
 
 #[cfg(test)]
 mod tests {
-    use ora_plugin_protocol::{
-        AgentMethod, HostRequestId, JsonRpcResponse, JsonSafeU64, StreamParams,
-    };
+    use super::*;
     use pretty_assertions::assert_eq;
 
-    use super::{
-        ActorSequence, DeferredPendingEvent, DeferredPendingEventKind, PendingInvocation,
-        PendingWireState, TerminationIntent,
-    };
-    use crate::{TerminationIntentKind, WriteCertainty};
-
-    fn pending() -> PendingInvocation {
-        PendingInvocation::new(
-            HostRequestId::from_sequence(7)
-                .unwrap_or_else(|error| panic!("test request id: {error}")),
-            AgentMethod::StartConversation,
-        )
+    fn make_entry(id: &str) -> PendingEntry {
+        PendingEntry::new(id.to_string(), "agent.test".to_string(), 1, 1, true, false)
     }
 
-    /// Replays response-before-ack and deadline-before-response by actor sequence, not task order.
     #[test]
-    fn response_before_writer_ack_preserves_actor_order() {
-        let mut pending = pending();
-        pending
-            .start_write()
-            .unwrap_or_else(|error| panic!("start write: {error}"));
-        pending
-            .defer_inbound(
-                DeferredPendingEvent {
-                    sequence: ActorSequence(3),
-                    kind: DeferredPendingEventKind::Intent(TerminationIntentKind::HardDeadline),
-                },
-                8,
-            )
-            .unwrap_or_else(|error| panic!("defer deadline: {error}"));
-        pending
-            .defer_inbound(
-                DeferredPendingEvent {
-                    sequence: ActorSequence(2),
-                    kind: DeferredPendingEventKind::Terminal(JsonRpcResponse::Success {
-                        id: HostRequestId::from_sequence(7)
-                            .unwrap_or_else(|error| panic!("test response id: {error}")),
-                        result: serde_json::json!({"conversationId":"c","finishReason":"completed"}),
-                    }),
-                },
-                8,
-            )
-            .unwrap_or_else(|error| panic!("defer response: {error}"));
-
-        let replay = pending
-            .frame_written()
-            .unwrap_or_else(|error| panic!("writer ack: {error}"));
-        assert_eq!(
-            replay
-                .iter()
-                .map(|event| event.sequence)
-                .collect::<Vec<_>>(),
-            vec![ActorSequence(2), ActorSequence(3)]
-        );
-        assert_eq!(pending.wire, PendingWireState::Written);
+    fn insert_and_retrieve() {
+        let mut table = PendingTable::new(128);
+        let entry = make_entry("h:1");
+        assert!(table.insert(entry).is_ok());
+        assert_eq!(table.len(), 1);
+        assert!(table.get("h:1").is_some());
     }
 
-    /// Ensures a partial write discards deferred peer evidence and becomes PossiblyWritten.
     #[test]
-    fn partial_write_never_adopts_deferred_stream() {
-        let mut pending = pending();
-        pending
-            .start_write()
-            .unwrap_or_else(|error| panic!("start write: {error}"));
-        pending
-            .defer_inbound(
-                DeferredPendingEvent {
-                    sequence: ActorSequence(1),
-                    kind: DeferredPendingEventKind::Stream(StreamParams {
-                        id: "h:7".to_owned(),
-                        seq: JsonSafeU64::new(1)
-                            .unwrap_or_else(|error| panic!("test sequence: {error}")),
-                        value: ora_plugin_protocol::AgentEvent::Status {
-                            phase: "working".to_owned(),
-                            message: None,
-                        },
-                    }),
-                },
-                8,
-            )
-            .unwrap_or_else(|error| panic!("defer stream: {error}"));
-        assert_eq!(
-            pending
-                .write_failed(Some(3))
-                .unwrap_or_else(|error| panic!("write failure: {error}")),
-            WriteCertainty::PossiblyWritten
-        );
-        assert_eq!(
-            pending.wire,
-            PendingWireState::WriteFailed {
-                certainty: WriteCertainty::PossiblyWritten
-            }
-        );
+    fn duplicate_request_id_rejected() {
+        let mut table = PendingTable::new(128);
+        table.insert(make_entry("h:1")).unwrap();
+        assert!(table.insert(make_entry("h:1")).is_err());
     }
 
-    /// Keeps the earliest intent and refuses to latch a later fatal cause over it.
     #[test]
-    fn intent_and_fatal_causes_are_write_once() {
-        let mut pending = pending();
-        pending.record_intent(TerminationIntent {
-            sequence: ActorSequence(2),
-            kind: TerminationIntentKind::ExplicitCancel,
+    fn ordinary_capacity_enforced() {
+        let mut table = PendingTable::new(2);
+        table.insert(make_entry("h:1")).unwrap();
+        table.insert(make_entry("h:2")).unwrap();
+        assert!(table.insert(make_entry("h:3")).is_err());
+        assert!(!table.has_ordinary_capacity());
+    }
+
+    #[test]
+    fn safety_entries_dont_count_against_ordinary_capacity() {
+        let mut table = PendingTable::new(1);
+        // Fill the only ordinary slot
+        table.insert(make_entry("h:1")).unwrap();
+        // Safety entry should still work
+        let mut safety = make_entry("h:safe");
+        safety.safety = true;
+        assert!(table.insert(safety).is_ok());
+    }
+
+    #[test]
+    fn termination_intent_first_wins() {
+        let mut entry = make_entry("h:1");
+        assert!(entry.set_intent(TerminationIntent::ExplicitCancel, 1));
+        // Different intent should be rejected
+        assert!(!entry.set_intent(TerminationIntent::HostStop, 2));
+        assert_eq!(entry.intent, Some(TerminationIntent::ExplicitCancel));
+    }
+
+    #[test]
+    fn termination_intent_same_type_merges() {
+        let mut entry = make_entry("h:1");
+        assert!(entry.set_intent(TerminationIntent::ExplicitCancel, 1));
+        // Same type, later sequence → still accepted (merge)
+        assert!(entry.set_intent(TerminationIntent::ExplicitCancel, 2));
+        // Sequence stays at the earlier one
+        assert_eq!(entry.intent_sequence, Some(1));
+    }
+
+    #[test]
+    fn fatal_cause_write_once() {
+        let mut entry = make_entry("h:1");
+        assert!(entry.set_fatal_cause(FatalSettlementCause::ConnectionLost {
+            stage: ConnectionStage::ResponseRead,
+        }));
+        // Second write should be rejected
+        assert!(!entry.set_fatal_cause(FatalSettlementCause::ProcessExited {
+            exit_code: Some(1),
+        }));
+        assert!(matches!(
+            entry.fatal_cause,
+            Some(FatalSettlementCause::ConnectionLost { .. })
+        ));
+    }
+
+    #[test]
+    fn set_fatal_cause_all() {
+        let mut table = PendingTable::new(128);
+        table.insert(make_entry("h:1")).unwrap();
+        table.insert(make_entry("h:2")).unwrap();
+        table.set_fatal_cause_all(FatalSettlementCause::ProcessExited {
+            exit_code: Some(0),
         });
-        pending.record_intent(TerminationIntent {
-            sequence: ActorSequence(4),
-            kind: TerminationIntentKind::HardDeadline,
-        });
-        pending
-            .latch_fatal_cause(crate::FatalSettlementCause::ProcessExited { exit_code: Some(1) });
-        assert_eq!(
-            pending.termination_intent,
-            Some(TerminationIntent {
-                sequence: ActorSequence(2),
-                kind: TerminationIntentKind::ExplicitCancel,
-            })
-        );
-        assert_eq!(pending.fatal_cause, None);
+        assert!(matches!(
+            table.get("h:1").unwrap().fatal_cause,
+            Some(FatalSettlementCause::ProcessExited { .. })
+        ));
+        assert!(matches!(
+            table.get("h:2").unwrap().fatal_cause,
+            Some(FatalSettlementCause::ProcessExited { .. })
+        ));
     }
 
-    /// Freezes zero, partial, and unknown writer failures into the only three causal outcomes.
     #[test]
-    fn write_failure_certainty_matrix_is_exhaustive() {
-        let actual = [Some(0), Some(1), None]
-            .into_iter()
-            .map(|bytes_written| {
-                let mut pending = pending();
-                pending
-                    .start_write()
-                    .unwrap_or_else(|error| panic!("start write: {error}"));
-                let certainty = pending
-                    .write_failed(bytes_written)
-                    .unwrap_or_else(|error| panic!("write failure: {error}"));
-                (certainty, pending.wire)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            actual,
-            vec![
-                (
-                    WriteCertainty::NotWritten,
-                    PendingWireState::WriteFailed {
-                        certainty: WriteCertainty::NotWritten,
-                    },
-                ),
-                (
-                    WriteCertainty::PossiblyWritten,
-                    PendingWireState::WriteFailed {
-                        certainty: WriteCertainty::PossiblyWritten,
-                    },
-                ),
-                (
-                    WriteCertainty::PossiblyWritten,
-                    PendingWireState::WriteFailed {
-                        certainty: WriteCertainty::PossiblyWritten,
-                    },
-                ),
-            ]
-        );
+    fn sequence_monotonic() {
+        let mut table = PendingTable::new(128);
+        let s1 = table.next_sequence();
+        let s2 = table.next_sequence();
+        assert!(s2 > s1);
+    }
+
+    #[test]
+    fn drain_clears_table() {
+        let mut table = PendingTable::new(128);
+        table.insert(make_entry("h:1")).unwrap();
+        table.insert(make_entry("h:2")).unwrap();
+        let drained = table.drain_all();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(table.len(), 0);
     }
 }
