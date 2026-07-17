@@ -263,6 +263,8 @@ mod tests {
 
     /// Serializes one value and compares the full JSON payload so field names stay stable.
     fn assert_serialized_json(value: &impl Serialize, expected: Value) {
-        assert_eq!(serde_json::to_value(value).unwrap(), expected);
+        let actual = serde_json::to_value(value)
+            .unwrap_or_else(|error| panic!("expected serialization to succeed: {error}"));
+        assert_eq!(actual, expected);
     }
 }

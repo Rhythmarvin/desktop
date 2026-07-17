@@ -65,6 +65,22 @@ tasks:
     cmds:
       - cargo xtask export-plugin-sdk
 
+  prepare-plugin-runtime:
+    desc: Explicitly download, verify, bundle, and stage pinned plugin runtime resources
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-plugin-runtime.ps1
+
+  test-plugin-runtime-e2e:
+    desc: Run the real pinned Bun and Windows Job integration gates
+    cmds:
+      - powershell -NoProfile -Command "if (-not (Test-Path -LiteralPath 'runtime-assets/prepared/runtime-manifest.json')) { throw 'run task prepare-plugin-runtime before the real runtime E2E gate' }"
+      - pnpm --filter @ora-space/plugin-sdk build
+      - cargo test -p ora-process bun_stdio_round_trips_through_windows_job_pipes -- --ignored --test-threads=1
+      - cargo test -p ora-process abrupt_host_exit_closes_the_job_and_kills_descendants -- --ignored --test-threads=1
+      - cargo test -p ora-plugin-manager --test runtime_windows_e2e -- --ignored --test-threads=1
+      - cargo test -p ora-plugin-manager --test plugin_library_e2e -- --ignored --test-threads=1
+      - cargo test -p ora-web-server --test backend_runtime_windows_e2e -- --ignored --test-threads=1
+
   build:
     desc: Build all crates
     cmds:
@@ -78,7 +94,9 @@ tasks:
       - task: export-contracts
       - task: export-plugin-sdk
       - pnpm --filter @ora/contracts test
-      - pnpm --filter @ora/plugin-sdk test
+      - pnpm --filter @ora-space/plugin-sdk test
+      - pnpm --filter @ora-space/plugin-runtime test
+      - task: test-plugin-runtime-e2e
       - cargo test --workspace
 
   ###################################################

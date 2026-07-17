@@ -1,5 +1,6 @@
 use crate::app_state::AppState;
 use crate::handlers::{health, project_work_contexts, projects, sessions, tasks};
+use crate::plugin_api;
 use axum::Router;
 use axum::routing::{get, post};
 use ora_contracts::{
@@ -9,7 +10,7 @@ use ora_contracts::{
 
 /// Builds the top-level router for health checks and the persisted CRUD routes.
 pub fn build_router(app_state: AppState) -> Router {
-    Router::new()
+    let mut router = Router::new()
         .route("/health/live", get(health::liveness))
         .route("/health/ready", get(health::readiness))
         .route(
@@ -50,8 +51,11 @@ pub fn build_router(app_state: AppState) -> Router {
         .route(
             SESSION_TERMINAL_PATH,
             get(sessions::attach_terminal_session),
-        )
-        .with_state(app_state)
+        );
+    if let Some(plugin_router) = plugin_api::router(&app_state) {
+        router = router.merge(plugin_router);
+    }
+    router.with_state(app_state)
 }
 
 #[cfg(test)]

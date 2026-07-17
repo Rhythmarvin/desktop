@@ -1,4 +1,5 @@
 mod frontend;
+mod plugin;
 mod project;
 mod project_work_context;
 mod session;
@@ -9,6 +10,7 @@ pub use frontend::{
     PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH, SESSION_PATH,
     SESSION_TERMINAL_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, frontend_endpoints,
 };
+pub use plugin::*;
 pub use project::{
     CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse,
     GetProjectRequest, GetProjectResponse, ListProjectsRequest, ListProjectsResponse, Project,
@@ -84,6 +86,9 @@ pub fn export_typescript_bindings_to(
     UpdateTaskResponse::export(&config)?;
     DeleteTaskRequest::export(&config)?;
     DeleteTaskResponse::export(&config)?;
+
+    ora_plugin_protocol::export_public_typescript_bindings_to(output_directory.as_ref())?;
+    plugin::export_typescript_bindings_to(output_directory.as_ref())?;
 
     Ok(())
 }

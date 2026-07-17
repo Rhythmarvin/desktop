@@ -403,6 +403,8 @@ fn render_index_module() -> String {
     source.push_str("export * from \"./transport.js\";\n");
     source.push_str("export * from \"./project.js\";\n");
     source.push_str("export * from \"./project-work-context.js\";\n");
+    source.push_str("export * from \"./plugin-contracts.js\";\n");
+    source.push_str("export * from \"./plugin-protocol.js\";\n");
     source.push_str("export * from \"./session.js\";\n");
     source.push_str("export * from \"./task.js\";\n");
 
@@ -566,6 +568,8 @@ mod tests {
             "fetch.ts",
             "index.ts",
             "project.ts",
+            "plugin-contracts.ts",
+            "plugin-protocol.ts",
             "session.ts",
             "task.ts",
             "transport.ts",

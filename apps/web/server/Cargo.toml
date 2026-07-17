@@ -7,8 +7,15 @@ edition.workspace = true
 name = "ora_web_server"
 path = "src/main.rs"
 
+[lib]
+name = "ora_web_server"
+path = "src/lib.rs"
+
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
+futures-util = "0.3"
+getrandom = { workspace = true }
 gitlancer = { workspace = true }
 ora-application = { workspace = true }
 ora-db = { workspace = true }
@@ -16,6 +23,9 @@ ora-contracts = { workspace = true }
 ora-domain = { workspace = true }
 ora-logging = { workspace = true }
 ora-pty = { workspace = true }
+ora-plugin-manager = { workspace = true }
+ora-plugin-protocol = { workspace = true }
+ora-process = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -24,7 +34,6 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-futures-util = "0.3"
 pretty_assertions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = { workspace = true }

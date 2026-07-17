@@ -1,21 +1,16 @@
 use crate::error::WebBootstrapError;
 use ora_logging::{FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, RotationPolicy};
 use std::env;
-use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 const DATA_DIR_ENV_VAR: &str = "ORA_DATA_DIR";
 const PROJECT_NAME_ENV_VAR: &str = "ORA_PROJECT_NAME";
 const PROJECT_PATH_ENV_VAR: &str = "ORA_PROJECT_PATH";
-const HOST_ENV_VAR: &str = "ORA_HOST";
-const PORT_ENV_VAR: &str = "ORA_PORT";
 const LOG_LEVEL_ENV_VAR: &str = "ORA_LOG_LEVEL";
 const LOG_MODE_ENV_VAR: &str = "ORA_LOG_MODE";
 const LOG_MAX_DAYS_ENV_VAR: &str = "ORA_LOG_MAX_DAYS";
 
-const DEFAULT_HOST: &str = "0.0.0.0";
-const DEFAULT_PORT: u16 = 32578;
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_LOG_MODE: &str = "stdout";
 const DEFAULT_LOG_MAX_DAYS: &str = "3";
@@ -24,7 +19,6 @@ const DEFAULT_LOG_MAX_DAYS: &str = "3";
 pub struct RuntimeConfig {
     database: DatabaseConfig,
     project: ProjectConfig,
-    server: ServerConfig,
     logging: LoggingConfig,
 }
 
@@ -44,18 +38,21 @@ impl RuntimeConfig {
         &self.project
     }
 
-    /// Returns the server bind configuration used by the runtime.
-    pub fn server(&self) -> &ServerConfig {
-        &self.server
-    }
-
     /// Returns the shared logging configuration used during process bootstrap.
     pub fn logging(&self) -> &LoggingConfig {
         &self.logging
     }
 
+    /// Returns the single absolute data root shared by database and plugin subsystems.
+    pub fn data_dir(&self) -> &Path {
+        self.database
+            .path()
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+    }
+
     /// Loads the runtime configuration from a caller-provided variable reader for testability.
-    pub(crate) fn from_reader(
+    pub fn from_reader(
         mut read_variable: impl FnMut(&str) -> Option<String>,
     ) -> Result<Self, WebBootstrapError> {
         let database = DatabaseConfig::from_reader(&mut read_variable)?;
@@ -63,7 +60,6 @@ impl RuntimeConfig {
         Ok(Self {
             project: ProjectConfig::from_reader(&mut read_variable, &database)?,
             database,
-            server: ServerConfig::from_reader(&mut read_variable)?,
             logging: read_logging_config(&mut read_variable)?,
         })
     }
@@ -169,51 +165,6 @@ fn default_work_dir(database_path: &Path) -> PathBuf {
         .join("worktrees")
 }
 
-/// Describes the host and port that the HTTP server binds to.
-pub struct ServerConfig {
-    host: IpAddr,
-    port: u16,
-}
-
-impl ServerConfig {
-    /// Returns the bind host used by the HTTP listener.
-    pub fn host(&self) -> IpAddr {
-        self.host
-    }
-
-    /// Returns the bind port used by the HTTP listener.
-    pub fn port(&self) -> u16 {
-        self.port
-    }
-
-    /// Combines the configured host and port into the socket address consumed by Tokio.
-    pub fn socket_address(&self) -> SocketAddr {
-        SocketAddr::new(self.host, self.port)
-    }
-
-    /// Loads the bind host and port from a caller-provided variable reader for testability.
-    fn from_reader(
-        mut read_variable: impl FnMut(&str) -> Option<String>,
-    ) -> Result<Self, WebBootstrapError> {
-        let raw_host = read_variable(HOST_ENV_VAR).unwrap_or_else(|| DEFAULT_HOST.to_string());
-        let host = raw_host
-            .parse::<IpAddr>()
-            .map_err(|source| WebBootstrapError::InvalidHost {
-                value: raw_host.clone(),
-                source,
-            })?;
-        let raw_port = read_variable(PORT_ENV_VAR).unwrap_or_else(|| DEFAULT_PORT.to_string());
-        let port = raw_port
-            .parse::<u16>()
-            .map_err(|source| WebBootstrapError::InvalidPort {
-                value: raw_port.clone(),
-                source,
-            })?;
-
-        Ok(Self { host, port })
-    }
-}
-
 /// Loads the logging configuration from the environment contract defined for the web server bootstrap.
 fn read_logging_config(
     mut read_variable: impl FnMut(&str) -> Option<String>,
@@ -292,9 +243,8 @@ fn read_required_non_empty_variable(
 #[cfg(test)]
 mod tests {
     use super::{
-        DATA_DIR_ENV_VAR, DEFAULT_HOST, DEFAULT_PORT, DatabaseConfig, HOST_ENV_VAR,
-        LOG_MODE_ENV_VAR, PORT_ENV_VAR, PROJECT_NAME_ENV_VAR, PROJECT_PATH_ENV_VAR, ProjectConfig,
-        RuntimeConfig, ServerConfig,
+        DATA_DIR_ENV_VAR, DatabaseConfig, LOG_MODE_ENV_VAR, PROJECT_NAME_ENV_VAR,
+        PROJECT_PATH_ENV_VAR, ProjectConfig, RuntimeConfig,
     };
     use crate::error::WebBootstrapError;
     use pretty_assertions::assert_eq;
@@ -470,36 +420,7 @@ mod tests {
         }
     }
 
-    /// Verifies the server configuration defaults to the documented host and port.
-    #[test]
-    fn loads_default_server_configuration() {
-        let config = ServerConfig::from_reader(|_| None).unwrap_or_else(|error| {
-            panic!("expected default server configuration to load: {error}");
-        });
-
-        assert_eq!(config.host().to_string(), DEFAULT_HOST.to_string());
-        assert_eq!(config.port(), DEFAULT_PORT);
-    }
-
-    /// Verifies invalid port values fail with a typed bootstrap error.
-    #[test]
-    fn rejects_invalid_port_configuration() {
-        let error = match ServerConfig::from_reader(|key| match key {
-            HOST_ENV_VAR => Some(DEFAULT_HOST.to_string()),
-            PORT_ENV_VAR => Some("not-a-port".to_string()),
-            _ => None,
-        }) {
-            Ok(_) => panic!("expected invalid port configuration to fail"),
-            Err(error) => error,
-        };
-
-        assert!(matches!(
-            error,
-            WebBootstrapError::InvalidPort { value, .. } if value == "not-a-port"
-        ));
-    }
-
-    /// Verifies the runtime configuration loads both the server and logging contracts together.
+    /// Verifies the runtime configuration loads persistence, project, and logging together.
     #[test]
     fn loads_runtime_configuration() {
         let temp_dir = TempDir::new().unwrap();

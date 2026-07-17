@@ -11,7 +11,12 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-tokio = { workspace = true, features = ["io-util", "process", "rt", "sync"] }
+getrandom = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

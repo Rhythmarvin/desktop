@@ -5,6 +5,7 @@ The first `project` vertical slice is split across `ora-application`, `ora-contr
 ## Ownership
 
 - `ora-contracts` owns serialization-friendly request and response DTOs for `CreateProject`, `GetProject`, `ListProjects`, `UpdateProject`, `DeleteProject`, `OpenProjectWorkContext`, and `RenewProjectWorkContext`.
+- `ora-contracts` owns plugin HTTP paths, strict management DTOs, application-scope requests, launch-grant projections, and the NDJSON invocation envelope; it references `ora-plugin-protocol` Agent DTOs instead of duplicating their wire shapes.
 - `ora-contracts` also owns the terminal session create payloads and the shared WebSocket terminal protocol DTOs used by the web runtime and future Tauri clients.
 - `ora-contracts::Project` is the single shared app-facing project payload for the first slice. It exposes `id`, `name`, and `root_path` only.
 - `ora-contracts::CreateSessionRequest` now keeps terminal startup dimensions in an optional `terminal` object so non-terminal sessions stay on the same shared contract without exposing backend worktree paths.

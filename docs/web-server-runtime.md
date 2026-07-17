@@ -9,6 +9,7 @@
 - It serves persisted HTTP CRUD routes for `project`, `task`, and `session` by delegating to `ora-application`.
 - It provisions and cleans up task-owned linked worktrees as internal backend state during task lifecycle flows.
 - It owns the shared `ora-pty` runtime manager used to start, attach, stream, resize, kill, and tear down task terminal sessions.
+- It embeds the plugin management state writer, pinned Agent runtime supervisor, and authenticated loopback adapter in one `BackendRuntime`.
 
 ## Database Configuration
 
@@ -41,14 +42,16 @@ Startup reconciles this configured project into the `projects` table before the 
 
 ## Bind Configuration
 
-The web server reads its listener configuration from:
+`BackendRuntime` always binds the complete backend to `127.0.0.1:0`; the operating system chooses a
+fresh port on every start. There is no `ORA_HOST`/`ORA_PORT` override. Packaged Tauri receives the
+actual endpoint and a fresh 256-bit bearer through the in-process bootstrap command. The standalone
+browser composition logs the actual endpoint but omits every plugin and Agent-invocation route
+because it has no trusted bearer bootstrap channel.
 
-- `ORA_HOST`: bind host. Default: `0.0.0.0`
-- `ORA_PORT`: bind port. Default: `32578`
-
-When unset, the server binds `0.0.0.0:32578`.
-
-Invalid host or port values fail startup during bootstrap.
+Packaged plugin routes additionally require the exact runtime Host, an allowlisted non-null Origin,
+and `Authorization: Bearer`. CORS preflight omits the bearer but still enforces exact Host, Origin,
+route method, and the `Authorization`/`Content-Type` header allowlist. Success, error, and NDJSON
+stream responses echo only the accepted Origin and include `Vary: Origin`.
 
 ## Health Endpoints
 
@@ -89,6 +92,24 @@ The project work context routes provide the current backend-managed project sele
 - `open` creates or switches one `(surface, window_id)` context into a project and refreshes its lease immediately.
 - `renew` extends an existing context lease using backend time.
 - Occupied-project conflicts return a stable HTTP `409` error without exposing the owning surface or window id in the response.
+
+### Authenticated Plugin API
+
+Plugin paths and strict request/response DTOs are owned by `ora-contracts`; Agent domain/wire DTOs
+remain owned by `ora-plugin-protocol`. The adapter exposes catalog, configured-root scan, opaque
+selection/candidate identify and install, enable/disable/uninstall, launch grants, runtime start/stop,
+typed invocation, cancellation, and confirmed data removal. Client-provided local paths, content
+digests, executable paths, and working directories are never accepted as authority.
+
+Tauri native folder selection passes the operating-system path directly to the backend and returns
+only a session-bound, expiring, single-use `SelectionHandle`. Identify consumes it and mints a
+digest-bound `CandidateHandle`; install consumes that second handle. Project/worktree invocation
+scope identifiers are resolved through current SQLite membership before the Host constructs the
+canonical Agent scope.
+
+Runtime resources are supplied from the packaged `plugin-runtime/` resource directory. Development
+tests prepare the same strict layout explicitly with `task prepare-plugin-runtime`; normal build and
+test commands never fall back to `PATH` Bun.
 
 ## Terminal Runtime
 

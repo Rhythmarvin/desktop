@@ -4,22 +4,12 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2022",
-    "lib": [
-      "ES2022"
-    ],
-    "allowImportingTsExtensions": false,
-    "types": [
-      "node"
-    ],
-    "rootDir": ".",
-    "outDir": ".test-dist",
-    "noEmit": false,
-    "declaration": false,
-    "sourceMap": false,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true,
     "strict": true
   },
   "include": [
-    "src/**/*.ts",
-    "tests/**/*.ts"
+    "src/**/*.ts"
   ]
 }

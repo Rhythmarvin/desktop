@@ -2,7 +2,18 @@ use std::io;
 use std::process::ExitStatus;
 use std::time::Duration;
 
+#[cfg(windows)]
+use std::os::windows::io::{FromRawHandle, OwnedHandle};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+};
+
 use ora_process::{ManagedProcess, ProcessSpawner, ProcessSpec, ProcessStdio, TokioProcessSpawner};
+#[cfg(windows)]
+use ora_process::{ManagedProcessTree, ProcessTreeSpawner, WindowsJobProcessTreeSpawner};
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -38,7 +49,7 @@ fn process_spec_preserves_command_options_and_defaults() {
     assert_eq!(spec.stdin_policy(), ProcessStdio::Inherit);
     assert_eq!(spec.stdout_policy(), ProcessStdio::Piped);
     assert_eq!(spec.stderr_policy(), ProcessStdio::Null);
-    assert_eq!(spec.should_kill_on_drop(), false);
+    assert!(!spec.should_kill_on_drop());
 }
 
 #[test]
@@ -189,10 +200,191 @@ async fn wait_closes_unowned_stdin_so_stdin_readers_exit() {
     // Child::wait. Without the fix this hangs until the timeout elapses.
     let exit = tokio::time::timeout(Duration::from_secs(5), process.wait())
         .await
-        .expect("expected wait to return after closing stdin, but it hung");
+        .unwrap_or_else(|_| panic!("expected wait to return after closing stdin, but it hung"));
     let exit = exit.unwrap_or_else(|error| panic!("expected process wait to succeed: {error}"));
 
     assert!(exit.success());
+}
+
+/// Verifies that Bun can consume and produce byte streams through the exact Windows Job pipes.
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "run after `task prepare-plugin-runtime` to use the verified local Bun cache"]
+async fn bun_stdio_round_trips_through_windows_job_pipes() {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| panic!("expected workspace root"));
+    let runtime_assets = workspace.join("runtime-assets").join("prepared");
+    let bun = runtime_assets.join("bun.exe");
+    let script_root = tempfile::tempdir()
+        .unwrap_or_else(|error| panic!("expected temporary script root: {error}"));
+    let script = script_root.path().join("stdio.js");
+    std::fs::write(
+        &script,
+        r#"process.stderr.write("bun-stderr-ready\n");
+for await (const chunk of process.stdin) {
+  process.stdout.write(chunk);
+}
+"#,
+    )
+    .unwrap_or_else(|error| panic!("expected Bun script fixture: {error}"));
+
+    let mut bunfig_argument = std::ffi::OsString::from("--config=");
+    bunfig_argument.push(runtime_assets.join("empty-bunfig.toml"));
+    let mut spec = ProcessSpec::new(&bun)
+        .args([
+            bunfig_argument,
+            std::ffi::OsString::from("--no-env-file"),
+            std::ffi::OsString::from("run"),
+            std::ffi::OsString::from("--no-install"),
+            script.into_os_string(),
+        ])
+        .cwd(script_root.path())
+        .clear_and_allowlist_environment();
+    for key in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
+        spec = spec.env(
+            key,
+            std::env::var_os(key)
+                .unwrap_or_else(|| panic!("expected required Windows environment {key}")),
+        );
+    }
+
+    let tree = WindowsJobProcessTreeSpawner::new()
+        .spawn_tree(spec)
+        .unwrap_or_else(|error| panic!("expected contained Bun spawn: {error}"));
+    let parts = tree
+        .into_parts()
+        .unwrap_or_else(|error| panic!("expected process-tree capabilities: {error}"));
+    let mut stdin = parts.stdio.stdin;
+    let mut stdout = parts.stdio.stdout;
+    let mut stderr = parts.stdio.stderr;
+    stdin
+        .write_all(b"bun-stdin\n")
+        .await
+        .unwrap_or_else(|error| panic!("expected Bun stdin write: {error}"));
+    stdin
+        .shutdown()
+        .await
+        .unwrap_or_else(|error| panic!("expected Bun stdin shutdown: {error}"));
+    drop(stdin);
+
+    let result = tokio::time::timeout(Duration::from_secs(10), async move {
+        let mut stdout_bytes = Vec::new();
+        let mut stderr_bytes = Vec::new();
+        let (stdout_result, stderr_result, direct_exit, tree_empty) = tokio::join!(
+            stdout.read_to_end(&mut stdout_bytes),
+            stderr.read_to_end(&mut stderr_bytes),
+            parts.direct_exit,
+            parts.tree_empty,
+        );
+        (
+            stdout_result.map_err(|error| error.to_string()),
+            stderr_result.map_err(|error| error.to_string()),
+            direct_exit,
+            tree_empty,
+            String::from_utf8_lossy(&stdout_bytes).into_owned(),
+            String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        )
+    })
+    .await
+    .unwrap_or_else(|_| panic!("expected contained Bun to finish"));
+
+    assert_eq!(
+        result,
+        (
+            Ok(10),
+            Ok(17),
+            Ok(ora_process::ProcessExit {
+                exit_code: Some(0),
+                success: true,
+            }),
+            Ok(()),
+            "bun-stdin\n".to_owned(),
+            "bun-stderr-ready\n".to_owned(),
+        )
+    );
+}
+
+/// Verifies that Windows kills the direct plugin and its descendants when the Host disappears.
+#[cfg(windows)]
+#[test]
+#[ignore = "run in the real Windows process-tree E2E gate"]
+fn abrupt_host_exit_closes_the_job_and_kills_descendants() {
+    use std::io::{BufRead, Write};
+    use std::process::{Command, Stdio};
+
+    let mut helper = Command::new(env!("CARGO_BIN_EXE_windows_job_host_fixture"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("expected Host fixture to start: {error}"));
+    let mut reported_processes = String::new();
+    std::io::BufReader::new(
+        helper
+            .stdout
+            .take()
+            .unwrap_or_else(|| panic!("expected Host fixture stdout")),
+    )
+    .read_line(&mut reported_processes)
+    .unwrap_or_else(|error| panic!("expected Host fixture process IDs: {error}"));
+    let process_ids = reported_processes
+        .split_whitespace()
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .unwrap_or_else(|error| panic!("expected numeric process ID `{value}`: {error}"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        process_ids.len(),
+        2,
+        "fixture output: {reported_processes:?}"
+    );
+    let direct_process = open_process_for_wait(process_ids[0]);
+    let descendant_process = open_process_for_wait(process_ids[1]);
+
+    helper
+        .stdin
+        .take()
+        .unwrap_or_else(|| panic!("expected Host fixture stdin"))
+        .write_all(b"exit now\n")
+        .unwrap_or_else(|error| panic!("expected Host fixture acknowledgement: {error}"));
+    let status = helper
+        .wait()
+        .unwrap_or_else(|error| panic!("expected Host fixture exit: {error}"));
+
+    assert_eq!(status.code(), Some(23));
+    assert_process_exits(&direct_process, process_ids[0]);
+    assert_process_exits(&descendant_process, process_ids[1]);
+}
+
+/// Opens a stable synchronization handle before the fixture is allowed to terminate.
+#[cfg(windows)]
+fn open_process_for_wait(process_id: u32) -> OwnedHandle {
+    // SAFETY: OpenProcess owns no borrowed inputs; a successful handle is transferred to RAII.
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, process_id) };
+    assert!(
+        !handle.is_null(),
+        "failed to open process {process_id}: {}",
+        io::Error::last_os_error()
+    );
+    // SAFETY: the successful OpenProcess return is one uniquely owned live handle.
+    unsafe { OwnedHandle::from_raw_handle(handle.cast()) }
+}
+
+/// Waits a bounded interval for a process handle to become signaled after Job closure.
+#[cfg(windows)]
+fn assert_process_exits(process: &OwnedHandle, process_id: u32) {
+    use std::os::windows::io::AsRawHandle;
+
+    // SAFETY: the borrowed RAII handle remains valid throughout this bounded wait.
+    let wait = unsafe { WaitForSingleObject(process.as_raw_handle() as HANDLE, 10_000) };
+    assert_eq!(
+        wait, WAIT_OBJECT_0,
+        "process {process_id} survived Host exit"
+    );
 }
 
 fn spawn_with<S: ProcessSpawner>(spawner: &S, spec: ProcessSpec) -> io::Result<S::Process> {

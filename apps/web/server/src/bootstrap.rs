@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::config::{ProjectConfig, RuntimeConfig};
 use crate::error::WebBootstrapError;
+use crate::plugin_api::PluginScopeResolver;
 use crate::service::{ProjectApi, ProjectWorkContextApi, SessionApi, TaskApi};
 use ora_application::{
     Clock, OpenProjectWorkContextHandler, ProjectIdGenerator, ProjectRepository,
@@ -31,10 +32,11 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
             clock,
         )),
         Arc::new(SessionApi::new(
-            pool,
+            pool.clone(),
             runtime_config.project().work_dir().to_path_buf(),
             clock,
         )),
+        PluginScopeResolver::new(pool, runtime_config.project().work_dir().to_path_buf()),
     ))
 }
 
@@ -57,7 +59,8 @@ pub(crate) fn build_app_state_for_database(
             work_dir.to_path_buf(),
             clock,
         )),
-        Arc::new(SessionApi::new(pool, work_dir.to_path_buf(), clock)),
+        Arc::new(SessionApi::new(pool.clone(), work_dir.to_path_buf(), clock)),
+        PluginScopeResolver::new(pool, work_dir.to_path_buf()),
     ))
 }
 

@@ -34,7 +34,7 @@ pub struct TaskApi {
 
 impl TaskApi {
     /// Builds the task transport API from the shared repository pool and clock source.
-    pub fn new(
+    pub(crate) fn new(
         pool: RepositoryPool,
         project_root: PathBuf,
         work_dir: PathBuf,

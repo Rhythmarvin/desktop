@@ -51,7 +51,7 @@ pub struct SessionApi {
 
 impl SessionApi {
     /// Builds the session transport API from the shared repository pool and clock source.
-    pub fn new(pool: RepositoryPool, work_dir: PathBuf, clock: SystemClock) -> Self {
+    pub(crate) fn new(pool: RepositoryPool, work_dir: PathBuf, clock: SystemClock) -> Self {
         let repository = SqliteSessionRepository::new(pool.clone());
         let terminal_server_token = PtyServerToken::new();
         let runtime = WebTerminalRuntime::new(Arc::new(PtyRuntimeManager::new(

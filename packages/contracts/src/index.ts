@@ -4,5 +4,7 @@ export * from "./endpoints.js";
 export * from "./transport.js";
 export * from "./project.js";
 export * from "./project-work-context.js";
+export * from "./plugin-contracts.js";
+export * from "./plugin-protocol.js";
 export * from "./session.js";
 export * from "./task.js";

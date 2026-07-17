@@ -26,6 +26,10 @@ dist-ssr
 /target
 packages/contracts/.test-dist/
 packages/plugin-sdk/.test-dist/
+packages/plugin-runtime/.test-dist/
 /.data
 .tmp
 *.tsbuildinfo
+/.cache/plugin-runtime/
+/.cache/plugin-sdk-pack-tests/
+/runtime-assets/prepared/

@@ -156,10 +156,7 @@ mod tests {
                 context: context.clone(),
             }
             .context,
-            RenewProjectWorkContextResponse {
-                context: context.clone()
-            }
-            .context
+            RenewProjectWorkContextResponse { context }.context
         );
     }
 

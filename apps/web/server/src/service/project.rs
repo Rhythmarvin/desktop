@@ -22,7 +22,7 @@ pub struct ProjectApi {
 
 impl ProjectApi {
     /// Builds the project transport API from the shared repository pool and clock source.
-    pub fn new(pool: RepositoryPool, clock: SystemClock) -> Self {
+    pub(crate) fn new(pool: RepositoryPool, clock: SystemClock) -> Self {
         let repository = SqliteProjectRepository::new(pool);
 
         Self {

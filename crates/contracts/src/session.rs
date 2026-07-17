@@ -441,8 +441,8 @@ mod tests {
             rows: 45,
         };
 
-        assert_eq!(
-            serde_json::to_value(create_request).unwrap(),
+        assert_serialized_json(
+            &create_request,
             json!({
                 "taskId": "task-1",
                 "agentId": "terminal",
@@ -452,20 +452,22 @@ mod tests {
                     "cols": 90,
                     "rows": 28,
                 },
-            })
+            }),
         );
-        assert_eq!(
-            serde_json::to_value(resize_message).unwrap(),
+        assert_serialized_json(
+            &resize_message,
             json!({
                 "type": "resize",
                 "cols": 140,
                 "rows": 45,
-            })
+            }),
         );
     }
 
     /// Serializes one value and compares the full JSON payload so field names stay stable.
     fn assert_serialized_json(value: &impl Serialize, expected: Value) {
-        assert_eq!(serde_json::to_value(value).unwrap(), expected);
+        let actual = serde_json::to_value(value)
+            .unwrap_or_else(|error| panic!("expected serialization to succeed: {error}"));
+        assert_eq!(actual, expected);
     }
 }

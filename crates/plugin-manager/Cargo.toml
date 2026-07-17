@@ -11,12 +11,24 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
+deno_ast = { workspace = true }
+getrandom = { workspace = true }
 ora-process = { workspace = true }
 ora-plugin-protocol = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "time"] }
+time = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tempfile = { workspace = true }

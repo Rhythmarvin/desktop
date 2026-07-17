@@ -3,24 +3,13 @@ use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use ora_application::ApplicationError;
+use ora_plugin_manager::PluginError;
 use serde::Serialize;
 use thiserror::Error;
 
 /// Reports bootstrap-time configuration, listener, and logging failures for the web server entry point.
 #[derive(Debug, Error)]
 pub enum WebBootstrapError {
-    #[error("invalid ORA_HOST value `{value}`")]
-    InvalidHost {
-        value: String,
-        #[source]
-        source: std::net::AddrParseError,
-    },
-    #[error("invalid ORA_PORT value `{value}`")]
-    InvalidPort {
-        value: String,
-        #[source]
-        source: std::num::ParseIntError,
-    },
     #[error("invalid ORA_LOG_LEVEL value `{value}`")]
     InvalidLogLevel { value: String },
     #[error("invalid ORA_LOG_MODE value `{value}`")]
@@ -51,6 +40,14 @@ pub enum WebBootstrapError {
     Bind(#[source] std::io::Error),
     #[error("HTTP server exited unexpectedly")]
     Serve(#[source] std::io::Error),
+    #[error("plugin backend bootstrap failed")]
+    PluginBootstrap(#[source] ora_plugin_manager::PluginError),
+    #[error("plugin HTTP security bootstrap failed: {message}")]
+    PluginSecurity { message: String },
+    #[error("backend server task failed")]
+    BackendTask(#[source] tokio::task::JoinError),
+    #[error("failed to wait for the process shutdown signal")]
+    ShutdownSignal(#[source] std::io::Error),
 }
 
 /// Represents one structured error response returned by the HTTP adapter.
@@ -82,6 +79,70 @@ impl WebApiError {
             status: StatusCode::BAD_REQUEST,
             code: "bad_request",
             message: message.into(),
+        }
+    }
+
+    pub(crate) fn not_found(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "plugin_backend_unavailable",
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "internal_error",
+            message: message.into(),
+        }
+    }
+}
+
+impl From<PluginError> for WebApiError {
+    fn from(error: PluginError) -> Self {
+        let (status, code) = match error {
+            PluginError::NotFound { .. } => (StatusCode::NOT_FOUND, "plugin_not_found"),
+            PluginError::AlreadyInstalled { .. } | PluginError::InstallConflict { .. } => {
+                (StatusCode::CONFLICT, "plugin_conflict")
+            }
+            PluginError::InvalidManifest { .. }
+            | PluginError::UnsupportedSchemaVersion { .. }
+            | PluginError::UnsupportedPackageLayout { .. }
+            | PluginError::Incompatible { .. }
+            | PluginError::UnsupportedKind { .. }
+            | PluginError::SourceChanged { .. }
+            | PluginError::SelectionHandleInvalid { .. }
+            | PluginError::CandidateHandleInvalid { .. }
+            | PluginError::DestructiveConfirmationInvalid
+            | PluginError::InvalidLaunchGrant => {
+                (StatusCode::BAD_REQUEST, "plugin_request_invalid")
+            }
+            PluginError::Disabled { .. }
+            | PluginError::IntegrityMismatch { .. }
+            | PluginError::MissingInstallFiles { .. }
+            | PluginError::RecoveryRequired { .. }
+            | PluginError::RemovalPending { .. } => (StatusCode::CONFLICT, "plugin_unavailable"),
+            PluginError::BackendShuttingDown
+            | PluginError::PluginRuntimeUnavailable
+            | PluginError::LaunchGrantUnavailable { .. } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "plugin_backend_unavailable",
+            ),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "plugin_operation_failed"),
+        };
+        Self {
+            status,
+            code,
+            message: code.replace('_', " "),
         }
     }
 }
