@@ -671,6 +671,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hstr"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1186,6 +1192,7 @@ dependencies = [
 name = "ora-plugin-manager"
 version = "0.0.0"
 dependencies = [
+ "hex",
  "ora-plugin-protocol",
  "ora-process",
  "pretty_assertions",
@@ -1198,6 +1205,7 @@ dependencies = [
 name = "ora-plugin-protocol"
 version = "0.0.0"
 dependencies = [
+ "hex",
  "pretty_assertions",
  "serde",
  "serde_json",
