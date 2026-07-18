@@ -2,6 +2,7 @@
 export * from "./client.js";
 export * from "./endpoints.js";
 export * from "./transport.js";
+export * as acp from "./acp/index.js";
 export * from "./acp/file.js";
 export * from "./acp/plan.js";
 export * from "./acp/terminal.js";

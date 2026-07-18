@@ -485,6 +485,7 @@ fn render_index_module() -> String {
     source.push_str("export * from \"./client.js\";\n");
     source.push_str("export * from \"./endpoints.js\";\n");
     source.push_str("export * from \"./transport.js\";\n");
+    source.push_str("export * as acp from \"./acp/index.js\";\n");
     source.push_str("export * from \"./acp/file.js\";\n");
     source.push_str("export * from \"./acp/plan.js\";\n");
     source.push_str("export * from \"./acp/terminal.js\";\n");
