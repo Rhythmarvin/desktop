@@ -55,6 +55,8 @@ pub enum WebBootstrapError {
     Bind(#[source] std::io::Error),
     #[error("HTTP server exited unexpectedly")]
     Serve(#[source] std::io::Error),
+    #[error("plugin bootstrap failed: {message}")]
+    PluginBootstrap { message: String },
 }
 
 /// Represents one structured error response returned by the HTTP adapter.
