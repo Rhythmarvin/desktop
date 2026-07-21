@@ -27,7 +27,9 @@ async fn main() -> Result<(), WebBootstrapError> {
     // Initialize plugin host (MVP: in-memory only)
     let bun_path = plugin_host::resolve_bun_path();
     let bootstrap_path = plugin_host::resolve_bootstrap_path();
-    let plugin_host = Arc::new(plugin_host::PluginHost::new(bun_path, bootstrap_path));
+    let data_dir = std::env::var("ORA_DATA_DIR").unwrap_or_else(|_| ".data".into());
+    let manager_config = ora_plugin_manager::PluginManagerConfig::new(data_dir);
+    let plugin_host = Arc::new(plugin_host::PluginHost::new(bun_path, bootstrap_path, manager_config));
 
     let router = build_router(app_state.clone(), plugin_host);
     let listener = bind_listener(&runtime_config).await?;

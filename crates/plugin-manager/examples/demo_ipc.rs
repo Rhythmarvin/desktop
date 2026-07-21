@@ -3,7 +3,7 @@
 // Usage:
 //   cargo run --example demo_ipc -p ora-plugin-manager -- <plugin-entry.ts>
 
-use ora_plugin_manager::PluginRuntime;
+use ora_plugin_manager::{PluginManagerConfig, PluginRuntime};
 use std::path::PathBuf;
 
 fn main() {
@@ -16,12 +16,14 @@ fn main() {
     };
 
     let bun_path = std::env::var("ORA_BUN_PATH").unwrap_or_else(|_| "bun".to_string());
+    let data_dir = std::env::var("ORA_DATA_DIR").unwrap_or_else(|_| ".data".into());
 
     println!("=== Plugin IPC Demo ===\n");
     println!("bun:    {bun_path}");
     println!("plugin: {plugin_path}\n");
 
-    let runtime = PluginRuntime::new(PathBuf::from(&bun_path), PathBuf::from(&plugin_path));
+    let config = PluginManagerConfig::new(&data_dir);
+    let runtime = PluginRuntime::new(PathBuf::from(&bun_path), PathBuf::from(&plugin_path), config);
 
     // 1. Start
     println!("── 1. Starting plugin ──");

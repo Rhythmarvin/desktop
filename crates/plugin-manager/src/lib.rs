@@ -1,4 +1,6 @@
+pub mod config;
 pub mod runtime;
+pub mod scanner;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -7,6 +9,8 @@ use uuid::Uuid;
 
 use ora_plugin_protocol::lifecycle::InitializeParams;
 
+pub use config::PluginManagerConfig;
+pub use scanner::{DiscoveredPlugin, scan_plugins};
 use crate::runtime::{PluginProcess, PluginProcessHandle};
 
 /// Unique identifier for a running plugin instance.
@@ -54,14 +58,32 @@ pub enum PluginManagerError {
 pub struct PluginRuntime {
     processes: Mutex<HashMap<PluginInstanceId, PluginProcessHandle>>,
     bun_path: PathBuf,
+    config: PluginManagerConfig,
 }
 
 impl PluginRuntime {
-    pub fn new(bun_path: PathBuf, _bootstrap_path: PathBuf) -> Self {
+    pub fn new(bun_path: PathBuf, _bootstrap_path: PathBuf, config: PluginManagerConfig) -> Self {
         Self {
             processes: Mutex::new(HashMap::new()),
             bun_path,
+            config,
         }
+    }
+
+    /// Scans `plugins_dir()` for discovered plugins with valid manifests.
+    pub fn scan(&self) -> Vec<DiscoveredPlugin> {
+        scan_plugins(&self.config)
+    }
+
+    /// Starts a plugin by its discovered ID (looked up via scan).
+    pub fn start_by_id(&self, plugin_id: &str) -> Result<StartResult, PluginManagerError> {
+        let plugins = self.scan();
+        let found = plugins
+            .iter()
+            .find(|p| p.id == plugin_id)
+            .ok_or_else(|| PluginManagerError::Runtime(format!("plugin not found: {plugin_id}")))?;
+
+        self.start(&found.entry_path.to_string_lossy())
     }
 
     /// Initializes a plugin: spawn Bun → $/initialize handshake.

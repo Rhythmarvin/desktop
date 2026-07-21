@@ -1,7 +1,7 @@
 // plugin_host.rs — Minimal plugin host for MVP.
 // Manages the PluginRuntime lifecycle within the web server.
 
-use ora_plugin_manager::PluginRuntime;
+use ora_plugin_manager::{PluginManagerConfig, PluginRuntime};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,12 +11,8 @@ pub struct PluginHost {
 }
 
 impl PluginHost {
-    /// Creates a new PluginHost.
-    ///
-    /// `bun_path` — path to bun.exe (from ORA_BUN_PATH env or system PATH)
-    /// `bootstrap_path` — path to the bootstrap entry script
-    pub fn new(bun_path: PathBuf, bootstrap_path: PathBuf) -> Self {
-        let runtime = Arc::new(PluginRuntime::new(bun_path, bootstrap_path));
+    pub fn new(bun_path: PathBuf, bootstrap_path: PathBuf, config: PluginManagerConfig) -> Self {
+        let runtime = Arc::new(PluginRuntime::new(bun_path, bootstrap_path, config));
         Self { runtime }
     }
 }
