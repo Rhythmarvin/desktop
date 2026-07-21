@@ -11,6 +11,7 @@ pub struct PluginProcess {
     stdin: Box<dyn Write + Send>,
     stdout: Box<dyn Read + Send>,
     decoder: FrameDecoder,
+    activated: bool,
 }
 
 /// A handle to a running plugin process (used by invoke/stop).
@@ -23,6 +24,15 @@ impl PluginProcessHandle {
         Self {
             inner: Some(process),
         }
+    }
+
+    /// Sends $/activate Request to transition plugin from initialized → running.
+    /// Must be called after spawn() and before invoke().
+    pub fn activate(&mut self) -> Result<(), String> {
+        self.inner
+            .as_mut()
+            .ok_or("process already stopped")?
+            .activate()
     }
 
     pub fn invoke(
@@ -51,8 +61,9 @@ pub struct InvokeResult {
 }
 
 impl PluginProcess {
-    /// Spawns Bun and completes: $/initialize → $/activate → Running.
-    pub fn spawn_and_activate(
+    /// Spawns Bun and completes $/initialize handshake.
+    /// The plugin is left in the "awaitingActivate" phase.
+    pub fn spawn(
         bun_path: &Path,
         plugin_path: &Path,
         init_params: InitializeParams,
@@ -78,9 +89,7 @@ impl PluginProcess {
         let init_bytes = serde_json::to_vec(&init_json).map_err(|e| format!("json: {e}"))?;
         let init_frame = encode_frame(FrameType::Request, &init_bytes, MAX_FRAME_BYTES)
             .map_err(|e| format!("encode: {e}"))?;
-        stdin
-            .write_all(&init_frame)
-            .map_err(|e| format!("write init: {e}"))?;
+        stdin.write_all(&init_frame).map_err(|e| format!("write init: {e}"))?;
 
         // Read $/initialize Response
         let mut decoder = FrameDecoder::new(MAX_FRAME_BYTES).map_err(|e| format!("decoder: {e}"))?;
@@ -98,7 +107,21 @@ impl PluginProcess {
             return Err("handshake failed: no initialize response".into());
         }
 
-        // Send $/activate Request
+        Ok(Self {
+            child,
+            stdin: Box::new(stdin),
+            stdout: Box::new(stdout),
+            decoder,
+            activated: false,
+        })
+    }
+
+    /// Sends $/activate Request to transition from initialized → running.
+    pub fn activate(&mut self) -> Result<(), String> {
+        if self.activated {
+            return Err("plugin already activated".into());
+        }
+
         let act_json = serde_json::json!({
             "jsonrpc": "2.0", "id": "h:2", "method": "$/activate",
             "params": { "reason": "manualStart" }
@@ -106,10 +129,10 @@ impl PluginProcess {
         let act_bytes = serde_json::to_vec(&act_json).map_err(|e| format!("json: {e}"))?;
         let act_frame = encode_frame(FrameType::Request, &act_bytes, MAX_FRAME_BYTES)
             .map_err(|e| format!("encode: {e}"))?;
-        stdin.write_all(&act_frame).map_err(|e| format!("write activate: {e}"))?;
+        self.stdin.write_all(&act_frame).map_err(|e| format!("write activate: {e}"))?;
 
-        // Read $/activate Response
-        let act_frames = read_frames(&mut decoder, &mut stdout)?;
+        let stdout: &mut dyn Read = &mut *self.stdout;
+        let act_frames = read_frames(&mut self.decoder, stdout)?;
         let act_ok = act_frames.iter().any(|f| {
             f.frame_type == FrameType::Response
                 && f.as_json().map(|v| v["id"] == "h:2").unwrap_or(false)
@@ -118,12 +141,8 @@ impl PluginProcess {
             return Err("activate failed".into());
         }
 
-        Ok(Self {
-            child,
-            stdin: Box::new(stdin),
-            stdout: Box::new(stdout),
-            decoder,
-        })
+        self.activated = true;
+        Ok(())
     }
 
     /// Sends a JSON-RPC Request to the plugin and reads the Response.

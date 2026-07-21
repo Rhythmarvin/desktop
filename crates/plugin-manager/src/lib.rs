@@ -64,9 +64,11 @@ impl PluginRuntime {
         }
     }
 
-    /// Starts a plugin: spawn Bun → $/initialize → $/activate → Running.
-    pub fn start(&self, plugin_path: &str) -> Result<StartResult, PluginManagerError> {
-        eprintln!("[host] starting plugin: {plugin_path}");
+    /// Initializes a plugin: spawn Bun → $/initialize handshake.
+    /// Returns the plugin in "awaitingActivate" phase.
+    /// Call `activate()` before sending business requests.
+    pub fn initialize(&self, plugin_path: &str) -> Result<StartResult, PluginManagerError> {
+        eprintln!("[host] initializing plugin: {plugin_path}");
         let instance_id = PluginInstanceId::new_random();
         let session_id = Uuid::new_v4().to_string();
 
@@ -86,7 +88,7 @@ impl PluginRuntime {
             },
         };
 
-        let process = PluginProcess::spawn_and_activate(
+        let process = PluginProcess::spawn(
             &self.bun_path,
             &PathBuf::from(plugin_path),
             init_params,
@@ -105,7 +107,27 @@ impl PluginRuntime {
             .lock().unwrap()
             .insert(instance_id.clone(), handle);
 
-        eprintln!("[host] plugin started: id={instance_id} session={}", result.session_id);
+        eprintln!("[host] plugin initialized: id={instance_id} session={}", result.session_id);
+        Ok(result)
+    }
+
+    /// Activates an initialized plugin: sends $/activate → plugin enters "running" phase.
+    pub fn activate(&self, instance_id: &PluginInstanceId) -> Result<(), PluginManagerError> {
+        let mut processes = self.processes.lock().unwrap();
+        let handle = processes
+            .get_mut(instance_id)
+            .ok_or_else(|| PluginManagerError::NotFound(instance_id.clone()))?;
+        handle
+            .activate()
+            .map_err(|e| PluginManagerError::Runtime(format!("activate: {e}")))?;
+        eprintln!("[host] plugin activated: id={instance_id}");
+        Ok(())
+    }
+
+    /// Convenience: spawn Bun → $/initialize → $/activate → Running.
+    pub fn start(&self, plugin_path: &str) -> Result<StartResult, PluginManagerError> {
+        let result = self.initialize(plugin_path)?;
+        self.activate(&result.instance_id)?;
         Ok(result)
     }
 
