@@ -27,7 +27,5 @@ dist-ssr
 packages/contracts/.test-dist/
 packages/plugin-sdk/.test-dist/
 /.data
-.cache/
-runtime-assets/
 .tmp
 *.tsbuildinfo
