@@ -25,7 +25,6 @@ dist-ssr
 
 /target
 packages/contracts/.test-dist/
-packages/plugin-sdk/.test-dist/
 /.data
 .tmp
 *.tsbuildinfo
