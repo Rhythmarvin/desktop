@@ -34,20 +34,16 @@ export async function runBootstrap(): Promise<void> {
   pluginConfig = raw ?? null;
 
   // Built-in handlers
-  let pingHandled = false;
   dispatcher.register("ping", async () => {
     stderr("[bootstrap] received ping\n");
-    if (!pingHandled) {
-      pingHandled = true;
-      setTimeout(() => {
-        const note = new TextEncoder().encode(JSON.stringify({
-          jsonrpc: "2.0", method: "$/hello",
-          params: { message: "Hello from plugin! Bidirectional communication works.", timestamp: Date.now() },
-        }));
-        writer.write(3, note);
-        stderr("[bootstrap] sent $/hello notification\n");
-      }, 50);
-    }
+    setTimeout(() => {
+      const note = new TextEncoder().encode(JSON.stringify({
+        jsonrpc: "2.0", method: "$/hello",
+        params: { message: "Hello from plugin! Bidirectional communication works.", timestamp: Date.now() },
+      }));
+      writer.write(3, note);
+      stderr("[bootstrap] sent $/hello notification\n");
+    }, 50);
     return { pong: true, timestamp: Date.now() };
   });
 
