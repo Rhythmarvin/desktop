@@ -3,6 +3,8 @@ mod bootstrap;
 mod config;
 mod error;
 mod handlers;
+mod plugin_host;
+mod plugin_routes;
 mod routes;
 mod service;
 
@@ -11,6 +13,7 @@ use crate::config::RuntimeConfig;
 use crate::error::WebBootstrapError;
 use axum::Router;
 use ora_logging::{LoggingGuard, init_logging, ora_info, register_gitlancer_logger};
+use std::sync::Arc;
 use tokio::net::TcpListener;
 
 /// Boots the web server runtime, initializes shared services, and starts serving HTTP traffic.
@@ -20,7 +23,13 @@ async fn main() -> Result<(), WebBootstrapError> {
     let _logging_guard = initialize_logging(runtime_config.logging())?;
     register_gitlancer_logger();
     let app_state = build_app_state(&runtime_config)?;
-    let router = build_router(app_state.clone());
+
+    // Initialize plugin host (MVP: in-memory only)
+    let bun_path = plugin_host::resolve_bun_path();
+    let bootstrap_path = plugin_host::resolve_bootstrap_path();
+    let plugin_host = Arc::new(plugin_host::PluginHost::new(bun_path, bootstrap_path));
+
+    let router = build_router(app_state.clone(), plugin_host);
     let listener = bind_listener(&runtime_config).await?;
 
     app_state.mark_ready();
@@ -37,9 +46,11 @@ async fn main() -> Result<(), WebBootstrapError> {
         .map_err(WebBootstrapError::Serve)
 }
 
-/// Builds the HTTP router for the configured application state.
-fn build_router(app_state: app_state::AppState) -> Router {
-    routes::build_router(app_state)
+/// Builds the HTTP router by merging app routes with plugin routes.
+fn build_router(app_state: app_state::AppState, plugin_host: Arc<plugin_host::PluginHost>) -> Router {
+    let app_router = routes::build_router(app_state);
+    let plugin_router = plugin_routes::router(plugin_host);
+    app_router.merge(plugin_router)
 }
 
 /// Binds the Tokio listener using the configured socket address.

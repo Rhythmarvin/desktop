@@ -19,6 +19,7 @@ windows-sys = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
 

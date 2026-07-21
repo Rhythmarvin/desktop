@@ -1,17 +1,21 @@
 {
   "name": "@ora-space/plugin-sdk",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Ora plugin development SDK",
   "type": "module",
   "license": "MIT",
   "files": [
     "src",
+    "examples",
     "tsconfig.json"
   ],
   "exports": {
-    "./host": {
-      "types": "./src/host/index.ts",
-      "default": "./src/host/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./bootstrap": {
+      "default": "./src/bootstrap/main.ts"
     },
     "./package.json": "./package.json"
   },

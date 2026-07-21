@@ -15,6 +15,8 @@ ora-db = { workspace = true }
 ora-contracts = { workspace = true }
 ora-domain = { workspace = true }
 ora-logging = { workspace = true }
+ora-plugin-manager = { workspace = true }
+ora-process = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

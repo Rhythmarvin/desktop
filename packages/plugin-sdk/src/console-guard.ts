@@ -1,19 +1,12 @@
-// 此文件在 import 时自动执行，不需要手动调用
+// console-guard.ts — Redirect console.* to stderr to protect stdout frame channel.
+// This file executes at import time. Import it before any other plugin-sdk module.
 
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+const stderr = process.stderr.write.bind(process.stderr);
 
-function format(args: any[]): string {
-  return args
-    .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
-    .join(" ");
+function fmt(args: unknown[]): string {
+  return args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
 }
 
-console.log = (...args: any[]) => {
-  process.stderr.write(`[plugin] ${format(args)}\n`);
-};
-console.warn = (...args: any[]) => {
-  process.stderr.write(`[plugin:warn] ${format(args)}\n`);
-};
-console.error = (...args: any[]) => {
-  process.stderr.write(`[plugin:error] ${format(args)}\n`);
-};
+console.log = (...args: unknown[]) => stderr(`[plugin] ${fmt(args)}\n`);
+console.warn = (...args: unknown[]) => stderr(`[plugin:warn] ${fmt(args)}\n`);
+console.error = (...args: unknown[]) => stderr(`[plugin:error] ${fmt(args)}\n`);

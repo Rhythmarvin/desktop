@@ -1360,11 +1360,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ora-plugin-manager"
+version = "0.0.0"
+dependencies = [
+ "ora-plugin-protocol",
+ "ora-process",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ora-plugin-protocol"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "ora-process"
 version = "0.0.0"
 dependencies = [
  "libc",
  "pretty_assertions",
+ "serde_json",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
@@ -1394,6 +1422,8 @@ dependencies = [
  "ora-db",
  "ora-domain",
  "ora-logging",
+ "ora-plugin-manager",
+ "ora-process",
  "pretty_assertions",
  "reqwest",
  "serde",
