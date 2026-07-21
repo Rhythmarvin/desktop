@@ -2,7 +2,7 @@ pub mod runtime;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use ora_plugin_protocol::lifecycle::InitializeParams;
@@ -66,8 +66,8 @@ impl PluginRuntime {
         }
     }
 
-    /// Starts a plugin by spawning Bun with the bootstrap entry point.
-    pub async fn start(&self, plugin_path: &str) -> Result<StartResult, PluginManagerError> {
+    /// Starts a plugin by spawning Bun with the bootstrap entry point (blocking).
+    pub fn start(&self, plugin_path: &str) -> Result<StartResult, PluginManagerError> {
         let instance_id = PluginInstanceId::new_random();
         let session_id = Uuid::new_v4().to_string();
 
@@ -92,7 +92,6 @@ impl PluginRuntime {
             &self.bootstrap_path,
             init_params,
         )
-        .await
         .map_err(|e| PluginManagerError::Runtime(format!("spawn: {e}")))?;
 
         let handle = PluginProcessHandle::new(process);
@@ -104,50 +103,47 @@ impl PluginRuntime {
         };
 
         self.processes
-            .lock()
-            .await
+            .lock().unwrap()
             .insert(instance_id, handle);
 
         Ok(result)
     }
 
-    /// Sends a JSON-RPC Request to a running plugin and waits for the Response.
-    pub async fn invoke(
+    /// Sends a JSON-RPC Request to a running plugin and waits for the Response (blocking).
+    pub fn invoke(
         &self,
         instance_id: &PluginInstanceId,
         method: &str,
         params: serde_json::Value,
     ) -> Result<InvokeResult, PluginManagerError> {
-        let processes = self.processes.lock().await;
+        let mut processes = self.processes.lock().unwrap();
         let handle = processes
-            .get(instance_id)
+            .get_mut(instance_id)
             .ok_or_else(|| PluginManagerError::NotFound(instance_id.clone()))?;
 
         let request_id = format!("h:{}", Uuid::new_v4().simple().to_string()[..8].to_string());
         handle
             .invoke(&request_id, method, params)
-            .await
             .map_err(|e| PluginManagerError::Runtime(format!("invoke: {e}")))
     }
 
-    /// Sends $/exit Notification and waits for graceful shutdown.
-    pub async fn stop(
+    /// Sends $/exit Notification and waits for graceful shutdown (blocking).
+    pub fn stop(
         &self,
         instance_id: &PluginInstanceId,
     ) -> Result<(), PluginManagerError> {
-        let mut processes = self.processes.lock().await;
+        let mut processes = self.processes.lock().unwrap();
         let handle = processes
             .remove(instance_id)
             .ok_or_else(|| PluginManagerError::NotFound(instance_id.clone()))?;
 
         handle
             .shutdown()
-            .await
             .map_err(|e| PluginManagerError::Runtime(format!("stop: {e}")))
     }
 
     /// Lists running plugin instance IDs.
-    pub async fn list(&self) -> Vec<PluginInstanceId> {
-        self.processes.lock().await.keys().cloned().collect()
+    pub fn list(&self) -> Vec<PluginInstanceId> {
+        self.processes.lock().unwrap().keys().cloned().collect()
     }
 }

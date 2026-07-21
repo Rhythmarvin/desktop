@@ -1,22 +1,23 @@
 // examples/demo-plugin/index.ts
-// Minimal plugin using @ora-space/plugin-sdk to demonstrate the SDK API.
+// Entry point: `bun run examples/demo-plugin/index.ts`
 //
-// The bootstrap handles $/initialize handshake and built-in handlers
-// (ping/pong, $/hello notification, $/exit). This file is loaded by
-// the bootstrap after handshake and its activate() is called.
+// definePlugin() is called BEFORE bootstrap auto-runs, so handlers
+// are registered before the Host sends any requests.
 //
-// Usage: The server points to this directory via the REST API, and the
-// bootstrap runs bun on this file as the plugin entry.
+// The bootstrap is imported for its side effect (auto-runs transport).
 
-import { definePlugin } from "@ora-space/plugin-sdk";
-import type { ExtensionContext } from "@ora-space/plugin-sdk";
+import { definePlugin } from "../../packages/plugin-sdk/src/index.js";
+import type { ExtensionContext } from "../../packages/plugin-sdk/src/index.js";
 
-export default definePlugin({
+// Side-effect import: bootstrap auto-runs transport
+import "../../packages/plugin-sdk/src/bootstrap/main.js";
+
+definePlugin({
   activate(ctx: ExtensionContext) {
-    ctx.logger.info(`plugin activated: id=${ctx.extensionId} session=${ctx.sessionId}`);
-  },
+    ctx.logger.info(`plugin activated: id=${ctx.extensionId}`);
 
-  deactivate() {
-    // Cleanup goes here. ctx.subscriptions are auto-disposed by the bootstrap.
+    ctx.registerHandler("getInfo", async () => {
+      return { info: "This is a demo plugin!" };
+    });
   },
 });

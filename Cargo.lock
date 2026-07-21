@@ -1364,13 +1364,9 @@ name = "ora-plugin-manager"
 version = "0.0.0"
 dependencies = [
  "ora-plugin-protocol",
- "ora-process",
- "pretty_assertions",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "uuid",
 ]

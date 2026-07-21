@@ -12,15 +12,8 @@ workspace = true
 
 [dependencies]
 ora-plugin-protocol = { workspace = true }
-ora-process = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
-
-[dev-dependencies]
-pretty_assertions = { workspace = true }
-tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

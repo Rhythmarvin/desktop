@@ -1,5 +1,7 @@
 import type { Disposable, SubscriptionStore } from "./disposable.js";
 
+export type RequestHandler = (params: Record<string, unknown> | undefined) => Promise<unknown>;
+
 export interface PluginLogger {
   debug(msg: string): void;
   info(msg: string): void;
@@ -15,6 +17,8 @@ export interface ExtensionContext {
   readonly subscriptions: SubscriptionStore;
   readonly logger: PluginLogger;
   readonly shutdownSignal: AbortSignal;
+  /** Register a handler that Host can call via JSON-RPC. */
+  registerHandler(method: string, handler: RequestHandler): void;
 }
 
 export function createExtensionContext(params: {
@@ -24,6 +28,7 @@ export function createExtensionContext(params: {
   sessionId: string;
   subscriptions: SubscriptionStore;
   shutdownSignal: AbortSignal;
+  registerHandler: (method: string, handler: RequestHandler) => void;
 }): ExtensionContext {
   const stderr = process.stderr.write.bind(process.stderr);
   const logger: PluginLogger = {
@@ -41,5 +46,6 @@ export function createExtensionContext(params: {
     subscriptions: params.subscriptions,
     logger,
     shutdownSignal: params.shutdownSignal,
+    registerHandler: params.registerHandler,
   };
 }

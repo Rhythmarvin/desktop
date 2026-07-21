@@ -1,10 +1,4 @@
 // plugin_routes.rs — Minimal REST API for plugin IPC MVP.
-//
-// Endpoints:
-//   POST /api/plugins/start   — start a plugin from a path
-//   POST /api/plugins/{id}/invoke — send JSON-RPC request
-//   POST /api/plugins/{id}/stop   — graceful shutdown
-//   GET  /api/plugins             — list running plugins
 
 use crate::plugin_host::PluginHost;
 use axum::Router;
@@ -25,140 +19,62 @@ pub fn router(host: Arc<PluginHost>) -> Router {
         .with_state(host)
 }
 
-// ── Request bodies ──────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct StartBody {
-    path: String,
-}
-
-#[derive(Deserialize)]
-struct InvokeBody {
-    method: String,
-    #[serde(default)]
-    params: Option<serde_json::Value>,
-}
-
-// ── Handlers ────────────────────────────────────────────────────
+#[derive(Deserialize)] struct StartBody { path: String }
+#[derive(Deserialize)] struct InvokeBody { method: String, #[serde(default)] params: Option<serde_json::Value> }
 
 async fn start_plugin(
     State(host): State<AppState>,
     axum::Json(body): axum::Json<StartBody>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    tracing::info!(path = %body.path, "starting plugin");
-
-    let result = host
-        .runtime
-        .start(&body.path)
-        .await
+    let h = host.clone(); let p = body.path.clone();
+    let result = tokio::task::spawn_blocking(move || h.runtime.start(&p))
+        .await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))?
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("start: {e}")))?;
-
-    tracing::info!(
-        instance_id = %result.instance_id,
-        session_id = %result.session_id,
-        "plugin started"
-    );
-
-    Ok((
-        StatusCode::OK,
-        axum::Json(serde_json::json!({
-            "instanceId": result.instance_id.as_str(),
-            "sessionId": result.session_id,
-            "pluginId": result.plugin_id,
-            "version": result.plugin_version,
-            "status": "started",
-        })),
-    ))
+    Ok((StatusCode::OK, axum::Json(serde_json::json!({
+        "instanceId": result.instance_id.as_str(), "sessionId": result.session_id,
+        "pluginId": result.plugin_id, "version": result.plugin_version, "status": "started",
+    }))))
 }
 
 async fn invoke(
-    State(host): State<AppState>,
-    Path(id): Path<String>,
+    State(host): State<AppState>, Path(id): Path<String>,
     axum::Json(body): axum::Json<InvokeBody>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Find the instance by partial match on stored IDs
-    let instances = host.runtime.list().await;
-    let target = instances
-        .iter()
-        .find(|i| i.as_str().starts_with(&id) || i.as_str() == &id)
-        .cloned()
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("plugin not found: {id}"),
-            )
-        })?;
-
-    tracing::info!(instance_id = %target, method = %body.method, "invoking plugin");
-
-    let result = host
-        .runtime
-        .invoke(&target, &body.method, body.params.unwrap_or(serde_json::Value::Null))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("invoke: {e}")))?;
-
-    tracing::info!(
-        instance_id = %target,
-        request_id = %result.request_id,
-        result = %result.result,
-        "invoke complete"
-    );
-
-    Ok((
-        StatusCode::OK,
-        axum::Json(serde_json::json!({
-            "instanceId": target.as_str(),
-            "requestId": result.request_id,
-            "result": result.result,
-        })),
-    ))
+    let h = host.clone(); let mid = body.method.clone();
+    let params = body.params.unwrap_or(serde_json::Value::Null);
+    let (target, result) = tokio::task::spawn_blocking(move || {
+        let instances = h.runtime.list();
+        let t = instances.iter().find(|i| i.as_str().starts_with(&id) || i.as_str() == &id)
+            .cloned().ok_or_else(|| format!("plugin not found: {id}"))?;
+        let r = h.runtime.invoke(&t, &mid, params).map_err(|e| format!("invoke: {e}"))?;
+        Ok::<(_, String), String>((t, r))
+    }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))??;
+    Ok((StatusCode::OK, axum::Json(serde_json::json!({
+        "instanceId": target.as_str(), "requestId": result.request_id, "result": result.result,
+    }))))
 }
 
 async fn stop(
-    State(host): State<AppState>,
-    Path(id): Path<String>,
+    State(host): State<AppState>, Path(id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let instances = host.runtime.list().await;
-    let target = instances
-        .iter()
-        .find(|i| i.as_str().starts_with(&id) || i.as_str() == &id)
-        .cloned()
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("plugin not found: {id}"),
-            )
-        })?;
-
-    tracing::info!(instance_id = %target, "stopping plugin");
-
-    host.runtime
-        .stop(&target)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("stop: {e}")))?;
-
-    tracing::info!(instance_id = %target, "plugin stopped");
-
-    Ok((
-        StatusCode::OK,
-        axum::Json(serde_json::json!({
-            "instanceId": target.as_str(),
-            "status": "stopped",
-        })),
-    ))
+    let h = host.clone();
+    tokio::task::spawn_blocking(move || {
+        let instances = h.runtime.list();
+        let t = instances.iter().find(|i| i.as_str().starts_with(&id) || i.as_str() == &id)
+            .cloned().ok_or_else(|| format!("plugin not found: {id}"))?;
+        h.runtime.stop(&t).map_err(|e| format!("stop: {e}"))?;
+        Ok::<_, String>(t)
+    }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))??;
+    Ok((StatusCode::OK, axum::Json(serde_json::json!({"status": "stopped"}))))
 }
 
-async fn list_plugins(
-    State(host): State<AppState>,
-) -> impl IntoResponse {
-    let instances = host.runtime.list().await;
-    (
-        StatusCode::OK,
-        axum::Json(serde_json::json!({
-            "plugins": instances.iter().map(|i| serde_json::json!({
-                "instanceId": i.as_str(),
-                "status": "running",
-            })).collect::<Vec<_>>(),
-        })),
-    )
+async fn list_plugins(State(host): State<AppState>) -> impl IntoResponse {
+    let h = host.clone();
+    let instances = tokio::task::spawn_blocking(move || h.runtime.list())
+        .await.unwrap_or_default();
+    (StatusCode::OK, axum::Json(serde_json::json!({
+        "plugins": instances.iter().map(|i| serde_json::json!({
+            "instanceId": i.as_str(), "status": "running",
+        })).collect::<Vec<_>>(),
+    })))
 }
