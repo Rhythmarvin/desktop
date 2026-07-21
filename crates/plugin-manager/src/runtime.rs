@@ -133,6 +133,7 @@ impl PluginProcess {
         method: &str,
         params: serde_json::Value,
     ) -> Result<InvokeResult, String> {
+        eprintln!("[host] → invoke: method={method} requestId={request_id}");
         let request_json = if params.is_null() {
             serde_json::json!({ "jsonrpc": "2.0", "id": request_id, "method": method })
         } else {
@@ -163,6 +164,7 @@ impl PluginProcess {
 
                 if value["id"].as_str() == Some(request_id) {
                     if let Some(result) = value.get("result") {
+                        eprintln!("[host] ← response: method={method} result={result}");
                         return Ok(InvokeResult {
                             request_id: request_id.to_string(),
                             result: result.clone(),

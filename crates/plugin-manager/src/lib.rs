@@ -54,20 +54,19 @@ pub enum PluginManagerError {
 pub struct PluginRuntime {
     processes: Mutex<HashMap<PluginInstanceId, PluginProcessHandle>>,
     bun_path: PathBuf,
-    bootstrap_path: PathBuf,
 }
 
 impl PluginRuntime {
-    pub fn new(bun_path: PathBuf, bootstrap_path: PathBuf) -> Self {
+    pub fn new(bun_path: PathBuf, _bootstrap_path: PathBuf) -> Self {
         Self {
             processes: Mutex::new(HashMap::new()),
             bun_path,
-            bootstrap_path,
         }
     }
 
-    /// Starts a plugin by spawning Bun with the bootstrap entry point (blocking).
+    /// Starts a plugin: spawn Bun → $/initialize → $/activate → Running.
     pub fn start(&self, plugin_path: &str) -> Result<StartResult, PluginManagerError> {
+        eprintln!("[host] starting plugin: {plugin_path}");
         let instance_id = PluginInstanceId::new_random();
         let session_id = Uuid::new_v4().to_string();
 
@@ -104,8 +103,9 @@ impl PluginRuntime {
 
         self.processes
             .lock().unwrap()
-            .insert(instance_id, handle);
+            .insert(instance_id.clone(), handle);
 
+        eprintln!("[host] plugin started: id={instance_id} session={}", result.session_id);
         Ok(result)
     }
 
