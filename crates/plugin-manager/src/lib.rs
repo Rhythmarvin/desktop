@@ -87,9 +87,9 @@ impl PluginRuntime {
             },
         };
 
-        let process = PluginProcess::spawn(
+        let process = PluginProcess::spawn_and_activate(
             &self.bun_path,
-            &self.bootstrap_path,
+            &PathBuf::from(plugin_path),
             init_params,
         )
         .map_err(|e| PluginManagerError::Runtime(format!("spawn: {e}")))?;

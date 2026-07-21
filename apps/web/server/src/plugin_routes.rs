@@ -22,17 +22,21 @@ pub fn router(host: Arc<PluginHost>) -> Router {
 #[derive(Deserialize)] struct StartBody { path: String }
 #[derive(Deserialize)] struct InvokeBody { method: String, #[serde(default)] params: Option<serde_json::Value> }
 
+fn err(msg: impl Into<String>) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, msg.into())
+}
+
 async fn start_plugin(
     State(host): State<AppState>,
     axum::Json(body): axum::Json<StartBody>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let h = host.clone(); let p = body.path.clone();
     let result = tokio::task::spawn_blocking(move || h.runtime.start(&p))
-        .await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("start: {e}")))?;
+        .await.map_err(|e| err(format!("join: {e}")))?
+        .map_err(|e| err(format!("start: {e}")))?;
     Ok((StatusCode::OK, axum::Json(serde_json::json!({
         "instanceId": result.instance_id.as_str(), "sessionId": result.session_id,
-        "pluginId": result.plugin_id, "version": result.plugin_version, "status": "started",
+        "pluginId": result.plugin_id, "status": "started",
     }))))
 }
 
@@ -42,13 +46,14 @@ async fn invoke(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let h = host.clone(); let mid = body.method.clone();
     let params = body.params.unwrap_or(serde_json::Value::Null);
-    let (target, result) = tokio::task::spawn_blocking(move || {
+    let (target, result) = tokio::task::spawn_blocking(move || -> Result<_, String> {
         let instances = h.runtime.list();
         let t = instances.iter().find(|i| i.as_str().starts_with(&id) || i.as_str() == &id)
             .cloned().ok_or_else(|| format!("plugin not found: {id}"))?;
         let r = h.runtime.invoke(&t, &mid, params).map_err(|e| format!("invoke: {e}"))?;
-        Ok::<(_, String), String>((t, r))
-    }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))??;
+        Ok((t, r))
+    }).await.map_err(|e| err(format!("join: {e}")))?
+        .map_err(|e| err(e))?;
     Ok((StatusCode::OK, axum::Json(serde_json::json!({
         "instanceId": target.as_str(), "requestId": result.request_id, "result": result.result,
     }))))
@@ -58,13 +63,13 @@ async fn stop(
     State(host): State<AppState>, Path(id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let h = host.clone();
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<_, String> {
         let instances = h.runtime.list();
         let t = instances.iter().find(|i| i.as_str().starts_with(&id) || i.as_str() == &id)
             .cloned().ok_or_else(|| format!("plugin not found: {id}"))?;
-        h.runtime.stop(&t).map_err(|e| format!("stop: {e}"))?;
-        Ok::<_, String>(t)
-    }).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")))??;
+        h.runtime.stop(&t).map_err(|e| format!("stop: {e}"))
+    }).await.map_err(|e| err(format!("join: {e}")))?
+        .map_err(|e| err(e))?;
     Ok((StatusCode::OK, axum::Json(serde_json::json!({"status": "stopped"}))))
 }
 

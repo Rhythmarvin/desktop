@@ -51,14 +51,14 @@ pub struct InvokeResult {
 }
 
 impl PluginProcess {
-    /// Spawns Bun with the bootstrap script and completes the $/initialize handshake.
-    pub fn spawn(
+    /// Spawns Bun and completes: $/initialize → $/activate → Running.
+    pub fn spawn_and_activate(
         bun_path: &Path,
-        bootstrap_path: &Path,
+        plugin_path: &Path,
         init_params: InitializeParams,
     ) -> Result<Self, String> {
         let mut child = Command::new(bun_path)
-            .arg(bootstrap_path)
+            .arg(plugin_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -96,6 +96,26 @@ impl PluginProcess {
 
         if !init_ok {
             return Err("handshake failed: no initialize response".into());
+        }
+
+        // Send $/activate Request
+        let act_json = serde_json::json!({
+            "jsonrpc": "2.0", "id": "h:2", "method": "$/activate",
+            "params": { "reason": "manualStart" }
+        });
+        let act_bytes = serde_json::to_vec(&act_json).map_err(|e| format!("json: {e}"))?;
+        let act_frame = encode_frame(FrameType::Request, &act_bytes, MAX_FRAME_BYTES)
+            .map_err(|e| format!("encode: {e}"))?;
+        stdin.write_all(&act_frame).map_err(|e| format!("write activate: {e}"))?;
+
+        // Read $/activate Response
+        let act_frames = read_frames(&mut decoder, &mut stdout)?;
+        let act_ok = act_frames.iter().any(|f| {
+            f.frame_type == FrameType::Response
+                && f.as_json().map(|v| v["id"] == "h:2").unwrap_or(false)
+        });
+        if !act_ok {
+            return Err("activate failed".into());
         }
 
         Ok(Self {
@@ -162,8 +182,23 @@ impl PluginProcess {
         Err("no response received".into())
     }
 
-    /// Sends $/exit Notification and waits for child exit.
+    /// Sends $/deactivate Request → $/exit Notification → waits for child exit.
     pub fn shutdown(mut self) -> Result<(), String> {
+        // Send $/deactivate
+        let deact_json = serde_json::json!({ "jsonrpc": "2.0", "id": "h:deact", "method": "$/deactivate", "params": { "reason": "shutdown" } });
+        let deact_bytes = serde_json::to_vec(&deact_json).map_err(|e| format!("json: {e}"))?;
+        let deact_frame = encode_frame(FrameType::Request, &deact_bytes, MAX_FRAME_BYTES)
+            .map_err(|e| format!("encode: {e}"))?;
+        self.stdin.write_all(&deact_frame).map_err(|e| format!("write deactivate: {e}"))?;
+
+        // Read deactivate response
+        let frames = read_frames(&mut self.decoder, &mut self.stdout)?;
+        let deact_ok = frames.iter().any(|f| f.as_json().map(|v| v["id"] == "h:deact").unwrap_or(false));
+        if deact_ok {
+            eprintln!("[host] $/deactivate acknowledged");
+        }
+
+        // Send $/exit
         let exit_json = serde_json::json!({ "jsonrpc": "2.0", "method": "$/exit" });
         let exit_bytes = serde_json::to_vec(&exit_json).map_err(|e| format!("json: {e}"))?;
         let exit_frame =

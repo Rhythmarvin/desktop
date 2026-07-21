@@ -1,16 +1,12 @@
 // examples/demo-plugin/index.ts
 // Entry point: `bun run examples/demo-plugin/index.ts`
 //
-// definePlugin() is called BEFORE bootstrap auto-runs, so handlers
-// are registered before the Host sends any requests.
-//
-// The bootstrap is imported for its side effect (auto-runs transport).
+// IMPORTANT: definePlugin() must run BEFORE the bootstrap starts.
+// We import runBootstrap explicitly and call it after definePlugin().
 
 import { definePlugin } from "../../packages/plugin-sdk/src/index.js";
 import type { ExtensionContext } from "../../packages/plugin-sdk/src/index.js";
-
-// Side-effect import: bootstrap auto-runs transport
-import "../../packages/plugin-sdk/src/bootstrap/main.js";
+import { runBootstrap } from "../../packages/plugin-sdk/src/bootstrap/main.js";
 
 definePlugin({
   activate(ctx: ExtensionContext) {
@@ -21,3 +17,6 @@ definePlugin({
     });
   },
 });
+
+// Start transport AFTER handlers are registered
+runBootstrap();

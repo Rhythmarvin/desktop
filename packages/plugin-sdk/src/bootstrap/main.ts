@@ -1,11 +1,11 @@
-// main.ts — Bootstrap entry point. Executed by Bun as the plugin host process.
+// main.ts — Full design-v3 lifecycle bootstrap entry point.
 //
 // Lifecycle:
-//   1. Initialize transport (stdin frame reader, stdout writer)
-//   2. Wait for $/initialize Request from Host, respond with session info
-//   3. If a plugin entry is available (via __ora_plugin_config or ORA_PLUGIN_ENTRY env),
-//      call activate(context) — plugins register their handlers here
-//   4. Process frames until $/exit notification
+//   1. $/initialize → echo session info
+//   2. $/activate   → load plugin, call activate(ctx)
+//   3. === Running ===  (business requests accepted)
+//   4. $/deactivate → call plugin deactivate(), LIFO dispose subscriptions
+//   5. $/exit       → process.exit(0)
 
 import { FrameDecoder } from "../transport/frame.js";
 import { ProtocolWriter } from "../transport/writer.js";
@@ -17,40 +17,42 @@ import { createSubscriptionStore } from "../disposable.js";
 const stderr = process.stderr.write.bind(process.stderr);
 
 export async function runBootstrap(): Promise<void> {
-  stderr("[bootstrap] started, waiting for frames on stdin\n");
+  stderr("[bootstrap] started, awaiting $/initialize\n");
 
   const writer = new ProtocolWriter(process.stdout);
   const dispatcher = new RequestDispatcher(writer);
   const session = new BootstrapSession(writer, dispatcher);
-  const decoder = new FrameDecoder();
 
-  // Built-in handlers (always available)
+  let pluginConfig: {
+    activate?(ctx: Record<string, unknown>): void | Promise<void>;
+    deactivate?(): void | Promise<void>;
+  } | null = null;
+  let pluginSubs = createSubscriptionStore();
+
+  // Load plugin config (set by definePlugin() before runBootstrap())
+  const raw = (globalThis as Record<string, unknown>).__ora_plugin_config as typeof pluginConfig;
+  pluginConfig = raw ?? null;
+
+  // Built-in handlers
   let pingHandled = false;
-  dispatcher.register("ping", async (_params) => {
+  dispatcher.register("ping", async () => {
     stderr("[bootstrap] received ping\n");
     if (!pingHandled) {
       pingHandled = true;
       setTimeout(() => {
-        const notePayload = new TextEncoder().encode(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            method: "$/hello",
-            params: {
-              message: "Hello from plugin! Bidirectional communication works.",
-              timestamp: Date.now(),
-            },
-          })
-        );
-        writer.write(3, notePayload);
+        const note = new TextEncoder().encode(JSON.stringify({
+          jsonrpc: "2.0", method: "$/hello",
+          params: { message: "Hello from plugin! Bidirectional communication works.", timestamp: Date.now() },
+        }));
+        writer.write(3, note);
         stderr("[bootstrap] sent $/hello notification\n");
       }, 50);
     }
     return { pong: true, timestamp: Date.now() };
   });
 
-  // Read loop — handshake first, then load plugin after
-  let pluginLoaded = false;
-
+  // Read loop
+  const decoder = new FrameDecoder();
   try {
     for await (const chunk of process.stdin) {
       const bytes = typeof chunk === "string"
@@ -66,26 +68,53 @@ export async function runBootstrap(): Promise<void> {
 
         const result = session.processFrame(wireBytes);
 
+        // ── Handshake: $/initialize complete, awaiting $/activate ──
         if (result.type === "handshake") {
-          stderr(`[bootstrap] handshake complete: plugin=${result.params.pluginId}\n`);
+          stderr("[bootstrap] $/initialize complete, awaiting $/activate\n");
+        }
 
-          // Load plugin after handshake (only once)
-          if (!pluginLoaded) {
-            pluginLoaded = true;
-            await loadPluginEntry(result.params.extensionPath, {
+        // ── Activate: call plugin activate() ──
+        if (result.type === "activate") {
+          stderr("[bootstrap] $/activate received\n");
+          const params = session.initParams;
+          if (params && pluginConfig?.activate) {
+            const ctx = createExtensionContext({
+              extensionId: params.pluginId,
+              extensionPath: params.extensionPath,
+              storagePath: params.storagePath,
+              sessionId: params.sessionId,
+              subscriptions: pluginSubs,
+              shutdownSignal: session.shutdownSignal,
               registerHandler: (method: string, handler: RequestHandler) => {
                 stderr(`[bootstrap] plugin registered handler: ${method}\n`);
                 dispatcher.register(method, handler);
               },
-              extensionId: result.params.pluginId,
-              extensionPath: result.params.extensionPath,
-              storagePath: result.params.storagePath,
-              sessionId: result.params.sessionId,
-              shutdownSignal: session.shutdownSignal,
             });
+
+            try {
+              await pluginConfig.activate(ctx as any);
+              stderr("[bootstrap] plugin activate() completed\n");
+            } catch (err) {
+              stderr(`[bootstrap] plugin activate() failed: ${err}\n`);
+            }
+          } else if (!pluginConfig) {
+            stderr("[bootstrap] no plugin config — running with built-in handlers only\n");
           }
         }
 
+        // ── Deactivate: call plugin deactivate() + LIFO dispose ──
+        if (result.type === "deactivate") {
+          stderr("[bootstrap] $/deactivate received\n");
+          if (pluginConfig?.deactivate) {
+            try { await pluginConfig.deactivate(); } catch (err) {
+              stderr(`[bootstrap] plugin deactivate() failed: ${err}\n`);
+            }
+          }
+          await pluginSubs.disposeAll();
+          stderr("[bootstrap] subscriptions disposed, awaiting $/exit\n");
+        }
+
+        // ── Exit ──
         if (result.type === "exit" || session.phase === "exiting") {
           stderr("[bootstrap] received $/exit, shutting down\n");
           process.exit(0);
@@ -99,37 +128,4 @@ export async function runBootstrap(): Promise<void> {
 
   stderr("[bootstrap] stdin closed\n");
   process.exit(0);
-}
-
-// Auto-run when executed as main
-runBootstrap();
-
-async function loadPluginEntry(
-  extensionPath: string,
-  contextParams: {
-    registerHandler: (method: string, handler: RequestHandler) => void;
-    extensionId: string;
-    extensionPath: string;
-    storagePath: string;
-    sessionId: string;
-    shutdownSignal: AbortSignal;
-  },
-): Promise<void> {
-  // Check for plugin config set via definePlugin()
-  const config = (globalThis as Record<string, unknown>).__ora_plugin_config as
-    | { activate?(ctx: Record<string, unknown>): void | Promise<void>; deactivate?(): void | Promise<void> }
-    | undefined;
-
-  if (config?.activate) {
-    const subs = createSubscriptionStore();
-    const ctx = createExtensionContext({ ...contextParams, subscriptions: subs });
-    try {
-      await config.activate(ctx);
-      stderr("[bootstrap] plugin activate() completed\n");
-    } catch (err) {
-      stderr(`[bootstrap] plugin activate() failed: ${err}\n`);
-    }
-  } else {
-    stderr("[bootstrap] no plugin config found — running with built-in handlers only\n");
-  }
 }
