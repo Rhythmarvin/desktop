@@ -6,7 +6,6 @@
   "license": "MIT",
   "files": [
     "src",
-    "examples",
     "tsconfig.json"
   ],
   "exports": {
