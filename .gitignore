@@ -26,7 +26,6 @@ dist-ssr
 /target
 packages/contracts/.test-dist/
 packages/plugin-sdk/.test-dist/
-packages/plugin-runtime/
 /.data
 .cache/
 runtime-assets/
