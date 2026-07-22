@@ -86,6 +86,7 @@ impl RuntimeActor {
             self.session.agent_cli,
             &self.cwd,
             &self.home_directory,
+            &self.opencode_path,
         )
         .await
         {

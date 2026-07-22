@@ -69,6 +69,7 @@ pub(crate) struct AgentRuntimeManager {
 struct ManagerInner {
     pool: RepositoryPool,
     home_directory: PathBuf,
+    opencode_path: PathBuf,
     actors: RwLock<HashMap<SessionId, RuntimeActorHandle>>,
     lifecycle: tokio::sync::Mutex<()>,
     next_operation_id: AtomicU64,
@@ -108,6 +109,7 @@ struct RuntimeActor {
     session: Session,
     cwd: PathBuf,
     home_directory: PathBuf,
+    opencode_path: PathBuf,
     repository: SqliteSessionRepository,
     clock: SystemClock,
     process: Option<AgentProcess>,
@@ -143,10 +145,12 @@ impl AgentRuntimeManager {
                     })?;
             }
         }
+        let opencode_path = resolve_opencode_path()?;
         Ok(Self {
             inner: Arc::new(ManagerInner {
                 pool,
                 home_directory,
+                opencode_path,
                 actors: RwLock::new(HashMap::new()),
                 lifecycle: tokio::sync::Mutex::new(()),
                 next_operation_id: AtomicU64::new(1),
@@ -163,7 +167,7 @@ impl AgentRuntimeManager {
         let agent_cli = domain_agent_cli(request.agent_cli);
         let cwd = resolve_task_cwd(&self.inner.pool, &TaskId::new(request.task_id.clone()))?;
         let process =
-            spawn_initialized_process(agent_cli, &cwd, &self.inner.home_directory).await?;
+            spawn_initialized_process(agent_cli, &cwd, &self.inner.home_directory, &self.inner.opencode_path).await?;
         let response = timeout(
             SESSION_SETUP_TIMEOUT,
             process.client.request::<_, NewSessionResponse>(
@@ -459,6 +463,7 @@ impl AgentRuntimeManager {
         actors.insert(session.id.clone(), handle.clone());
         tokio::spawn(
             RuntimeActor {
+                opencode_path: self.inner.opencode_path.clone(),
                 session,
                 cwd,
                 home_directory: self.inner.home_directory.clone(),
@@ -478,8 +483,9 @@ async fn spawn_initialized_process(
     agent_cli: AgentCli,
     cwd: &Path,
     home_directory: &Path,
+    opencode_path: &Path,
 ) -> Result<AgentProcess, BackendError> {
-    let executable = paths::executable_for(agent_cli, home_directory);
+    let executable = paths::executable_for(agent_cli, home_directory, opencode_path);
     if !executable.is_file() {
         return Err(BackendError::new(
             BackendErrorKind::NotFound,
@@ -633,6 +639,32 @@ fn contract_agent_cli(agent_cli: AgentCli) -> ContractAgentCli {
         AgentCli::Nga => ContractAgentCli::Nga,
         AgentCli::CodeAgentCli => ContractAgentCli::CodeAgentCli,
     }
+}
+
+/// Resolves the opencode executable path via `where.exe` once at startup.
+fn resolve_opencode_path() -> Result<PathBuf, BackendError> {
+    let output = std::process::Command::new("where.exe")
+        .arg("opencode")
+        .output()
+        .map_err(|_| runtime_internal("opencode_resolution_failed", "failed to run where.exe"))?;
+    if !output.status.success() {
+        return Err(runtime_internal(
+            "opencode_not_found",
+            "opencode executable not found on PATH",
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find(|line| {
+            let lower = line.to_lowercase();
+            lower.ends_with(".exe") || lower.ends_with(".cmd") || lower.ends_with(".bat")
+        })
+        .or_else(|| stdout.lines().next())
+        .map(|path| PathBuf::from(path.trim()))
+        .ok_or_else(|| {
+            runtime_internal("opencode_not_found", "opencode executable not found on PATH")
+        })
 }
 
 /// Builds the stable error used when ownership cannot resolve a live Git worktree.
