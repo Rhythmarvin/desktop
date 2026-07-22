@@ -10,6 +10,7 @@ import {
   Textarea,
 } from "@ora/ui";
 import { useTranslation } from "react-i18next";
+import { ModelSelector } from "./model-selector";
 
 interface ComposerProps {
   onSend: (text: string) => void;
@@ -134,7 +135,7 @@ export function Composer({
             </DropdownMenu>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <p className="hidden text-[11px] text-muted-foreground lg:block">{t("chat.sendHint")}</p>
+            <ModelSelector disabled={disabled} />
             <Button
               size="icon"
               aria-label={isResponding ? t("common.stop") : t("chat.send")}
