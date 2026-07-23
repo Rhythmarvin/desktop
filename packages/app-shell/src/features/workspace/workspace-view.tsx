@@ -13,7 +13,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
-import { DEFAULT_AGENT_CLI } from "../../state/hooks/use-workspace-mutations";
 import { queryKeys } from "../../state/hooks/query-keys";
 import { useContractsClient } from "../../contracts-client-context";
 import { useUiStore } from "../../state/stores/ui-store";
@@ -98,7 +97,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
         text,
         createSession: () =>
           client.session
-            .create({ taskId, agentCli: DEFAULT_AGENT_CLI })
+            .create({ taskId })
             .then((response) => response.session.id),
         // Show the optimistic turn under its temporary key right away.
         onDraft: (draftSessionId) =>
@@ -149,7 +148,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
           <DragRegion>
             {session && (
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium tracking-[-0.01em]">{session.agentCli}</p>
+                <p className="truncate text-sm font-medium tracking-[-0.01em]">OpenCode</p>
                 {project && task && (
                   <p className="truncate text-[11px] text-muted-foreground">{project.name} / {task.title}</p>
                 )}

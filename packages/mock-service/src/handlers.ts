@@ -243,7 +243,6 @@ export function createMockHandlers(state: MockState = mockState): HttpHandler[] 
       const session = {
         id: createId("session"),
         taskId: body.taskId,
-        agentCli: body.agentCli,
         status: "running" as const,
       };
       state.sessions.push(session);
