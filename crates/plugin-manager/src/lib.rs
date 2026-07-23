@@ -6,12 +6,95 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
+use tokio::sync::mpsc;
 
 use ora_plugin_protocol::lifecycle::InitializeParams;
 
 pub use config::PluginManagerConfig;
 pub use scanner::{DiscoveredPlugin, scan_plugins};
 use crate::runtime::{PluginProcess, PluginProcessHandle};
+
+/// Typed metadata for different plugin capabilities.
+///
+/// Keeps [`DiscoveredPlugin`] stable while allowing each plugin kind to carry
+/// its own strongly-typed configuration without polluting the shared struct with
+/// `Option` fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginMetadata {
+    /// Plugin that bridges Host ↔ external AI agent via ACP.
+    Agent {
+        /// CLI executable name (e.g. "opencode", "claude").
+        cli: String,
+        /// Human-readable display name for the agent.
+        display_name: String,
+        /// Optional longer description.
+        description: Option<String>,
+    },
+    /// Conventional plugin with request/response handlers.
+    Workbench,
+}
+
+impl PluginMetadata {
+    /// Returns the CLI executable name if this is an Agent plugin.
+    pub fn agent_cli(&self) -> Option<&str> {
+        match self {
+            Self::Agent { cli, .. } => Some(cli),
+            Self::Workbench => None,
+        }
+    }
+
+    /// Returns the display name if this is an Agent plugin.
+    pub fn agent_display_name(&self) -> Option<&str> {
+        match self {
+            Self::Agent { display_name, .. } => Some(display_name),
+            Self::Workbench => None,
+        }
+    }
+}
+
+/// Events pushed from a plugin back to the Host during streaming operations.
+///
+/// Tagged union matching the `acp/event` Notification wire format so the
+/// Host-side reader task can route events by `request_id` without inspecting
+/// the inner payload.
+#[derive(Debug, Clone)]
+pub enum PluginEvent {
+    /// A streaming `session/update` from the agent.
+    SessionUpdate {
+        /// ID of the Host request that triggered this stream.
+        request_id: String,
+        /// Raw payload from the ACP `session/update` notification.
+        update: serde_json::Value,
+    },
+    /// A permission request from the agent.
+    PermissionRequest {
+        request_id: String,
+        permission: serde_json::Value,
+    },
+    /// The streaming operation completed successfully.
+    Completed {
+        request_id: String,
+        result: serde_json::Value,
+    },
+    /// The streaming operation failed with an error.
+    Error {
+        request_id: String,
+        code: i32,
+        message: String,
+    },
+}
+
+impl PluginEvent {
+    /// Returns the Host request ID that this event belongs to.
+    pub fn request_id(&self) -> &str {
+        match self {
+            Self::SessionUpdate { request_id, .. }
+            | Self::PermissionRequest { request_id, .. }
+            | Self::Completed { request_id, .. }
+            | Self::Error { request_id, .. } => request_id,
+        }
+    }
+}
 
 /// Unique identifier for a running plugin instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -169,6 +252,31 @@ impl PluginRuntime {
         handle
             .invoke(&request_id, method, params)
             .map_err(|e| PluginManagerError::Runtime(format!("invoke: {e}")))
+    }
+
+    /// Sends a JSON-RPC Request and immediately returns a stream of [`PluginEvent`]s.
+    ///
+    /// The caller receives an `mpsc::Receiver` that yields events as the plugin
+    /// pushes `acp/event` Notifications back. The channel is closed when the
+    /// plugin sends a final `completed` or `error` event (or when the process exits).
+    ///
+    /// This is the primary API for long-running operations like ACP `session/prompt`
+    /// where the agent streams multiple updates before returning a final result.
+    pub fn invoke_streaming(
+        &self,
+        instance_id: &PluginInstanceId,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<mpsc::UnboundedReceiver<PluginEvent>, PluginManagerError> {
+        let mut processes = self.processes.lock().unwrap();
+        let handle = processes
+            .get_mut(instance_id)
+            .ok_or_else(|| PluginManagerError::NotFound(instance_id.clone()))?;
+
+        let request_id = format!("h:{}", Uuid::new_v4().simple().to_string()[..8].to_string());
+        handle
+            .invoke_streaming(&request_id, method, params)
+            .map_err(|e| PluginManagerError::Runtime(format!("invoke_streaming: {e}")))
     }
 
     /// Sends $/exit Notification and waits for graceful shutdown (blocking).

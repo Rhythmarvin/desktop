@@ -1364,9 +1364,12 @@ name = "ora-plugin-manager"
 version = "0.0.0"
 dependencies = [
  "ora-plugin-protocol",
+ "pretty_assertions",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
 ]
@@ -1411,6 +1414,7 @@ name = "ora-web-server"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "bytes",
  "futures-util",
  "ora-application",
  "ora-backend",

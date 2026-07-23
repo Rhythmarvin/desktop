@@ -6,15 +6,31 @@ import { encodeError, type RpcRequest } from "./envelope.js";
 
 export type RequestHandler = (params: Record<string, unknown> | undefined) => Promise<unknown>;
 
+/**
+ * Extended handler that also receives the Host request id.
+ * Used by agent plugin handlers that need to emit `acp/event` Notifications
+ * referencing the original Host request.
+ */
+export type RequestHandlerWithId = (
+  params: Record<string, unknown> | undefined,
+  requestId: string,
+) => Promise<unknown>;
+
+type AnyHandler = RequestHandler | RequestHandlerWithId;
+
+function isWithId(h: AnyHandler): h is RequestHandlerWithId {
+  return h.length >= 2;
+}
+
 export class RequestDispatcher {
-  readonly #handlers = new Map<string, RequestHandler>();
+  readonly #handlers = new Map<string, AnyHandler>();
   readonly #writer: ProtocolWriter;
 
   constructor(writer: ProtocolWriter) {
     this.#writer = writer;
   }
 
-  register(method: string, handler: RequestHandler): void {
+  register(method: string, handler: AnyHandler): void {
     this.#handlers.set(method, handler);
   }
 
@@ -31,9 +47,9 @@ export class RequestDispatcher {
       return;
     }
     try {
-      const result = await handler(request.params);
-      const payload = encodeError(request.id, 0, ""); // placeholder
-      // Encode success
+      const result = isWithId(handler)
+        ? await handler(request.params, request.id)
+        : await handler(request.params);
       const successPayload = new TextEncoder().encode(
         JSON.stringify({ jsonrpc: "2.0", id: request.id, result: result ?? null })
       );

@@ -16,6 +16,12 @@
     "./bootstrap": {
       "default": "./src/bootstrap/main.ts"
     },
+    "./bootstrap/agent": {
+      "default": "./src/bootstrap/agent.ts"
+    },
+    "./bootstrap/main": {
+      "default": "./src/bootstrap/main.ts"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {

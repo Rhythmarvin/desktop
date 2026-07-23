@@ -1,4 +1,5 @@
 use crate::config::PluginManagerConfig;
+use crate::PluginMetadata;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -17,6 +18,8 @@ pub struct DiscoveredPlugin {
     pub entry_path: PathBuf,
     /// The plugin's root directory.
     pub plugin_dir: PathBuf,
+    /// Typed metadata extracted from the manifest based on `kind`.
+    pub metadata: PluginMetadata,
 }
 
 /// Minimal package.json shape — we only extract the `ora` block.
@@ -35,6 +38,19 @@ struct OraManifest {
     #[serde(default)]
     kind: String,
     main: String,
+    /// Agent-specific metadata (only meaningful when kind = "agent").
+    #[serde(default)]
+    agent: Option<AgentManifest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentManifest {
+    cli: String,
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 /// Scans `<data_dir>/plugins/` for subdirectories containing a valid package.json
@@ -84,6 +100,26 @@ pub fn scan_plugins(config: &PluginManagerConfig) -> Vec<DiscoveredPlugin> {
         };
         let entry_path = path.join(&ora.main);
 
+        let metadata = match ora.kind.as_str() {
+            "agent" => {
+                let agent = ora.agent.unwrap_or_else(|| AgentManifest {
+                    cli: ora.id.clone(),
+                    display_name: display_name.clone(),
+                    description: None,
+                });
+                PluginMetadata::Agent {
+                    cli: agent.cli,
+                    display_name: if agent.display_name.is_empty() {
+                        display_name.clone()
+                    } else {
+                        agent.display_name
+                    },
+                    description: agent.description,
+                }
+            }
+            _ => PluginMetadata::Workbench,
+        };
+
         discovered.push(DiscoveredPlugin {
             id: ora.id,
             display_name,
@@ -91,6 +127,7 @@ pub fn scan_plugins(config: &PluginManagerConfig) -> Vec<DiscoveredPlugin> {
             version,
             entry_path,
             plugin_dir: path,
+            metadata,
         });
     }
 
@@ -103,7 +140,6 @@ mod tests {
     use super::*;
     use crate::config::PluginManagerConfig;
     use std::fs;
-    use std::io::Write;
     use tempfile::TempDir;
 
     #[test]
@@ -121,8 +157,11 @@ mod tests {
                 "displayName": "Demo",
                 "kind": "agent",
                 "main": "index.ts",
-                "engines": { "ora": ">=0.1.0", "pluginApi": 1, "bun": ">=1.0.0" },
-                "contributes": { "agents": [{ "id": "demo", "displayName": "Demo", "contractVersion": 1 }] }
+                "agent": {
+                    "cli": "opencode",
+                    "displayName": "OpenCode",
+                    "description": "OpenCode ACP agent"
+                }
             }
         });
         fs::write(plugin_dir.join("package.json"), serde_json::to_string_pretty(&pkg).unwrap()).unwrap();
@@ -134,6 +173,36 @@ mod tests {
         assert_eq!(plugins[0].id, "ora.demo");
         assert_eq!(plugins[0].display_name, "Demo");
         assert_eq!(plugins[0].kind, "agent");
+        assert!(matches!(plugins[0].metadata, PluginMetadata::Agent { .. }));
+        if let PluginMetadata::Agent { cli, display_name, .. } = &plugins[0].metadata {
+            assert_eq!(cli, "opencode");
+            assert_eq!(display_name, "OpenCode");
+        }
+    }
+
+    #[test]
+    fn discovers_workbench_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = tmp.path().join("plugins").join("workbench-plugin");
+        fs::create_dir_all(&plugin_dir).unwrap();
+
+        let pkg = serde_json::json!({
+            "name": "@ora-plugins/workbench",
+            "version": "0.1.0",
+            "ora": {
+                "id": "ora.workbench",
+                "displayName": "Workbench",
+                "kind": "workbench",
+                "main": "index.ts"
+            }
+        });
+        fs::write(plugin_dir.join("package.json"), serde_json::to_string_pretty(&pkg).unwrap()).unwrap();
+        fs::write(plugin_dir.join("index.ts"), "// workbench").unwrap();
+
+        let config = PluginManagerConfig::new(tmp.path());
+        let plugins = scan_plugins(&config);
+        assert_eq!(plugins.len(), 1);
+        assert!(matches!(plugins[0].metadata, PluginMetadata::Workbench));
     }
 
     #[test]
