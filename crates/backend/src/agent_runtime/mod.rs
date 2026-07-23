@@ -14,6 +14,7 @@ use ora_application::{
     UuidSessionIdGenerator, WorktreeRepository,
 };
 use ora_contracts::acp::common::SessionId as AcpSessionId;
+use ora_logging::ora_debug;
 use ora_contracts::acp::initialization::{
     Implementation, InitializeRequest, InitializeResponse, ProtocolVersion,
 };
@@ -132,8 +133,9 @@ impl AgentRuntimeManager {
         clock: SystemClock,
     ) -> Result<Self, BackendError> {
         let repository = SqliteSessionRepository::new(pool.clone());
-        for session in repository.list_sessions().map_err(|_| {
-            runtime_internal("session_repository_error", "failed to reconcile sessions")
+        let mut reconciled = 0u64;
+        for session in repository.list_sessions().map_err(|error| {
+            runtime_internal("session_repository_error", format!("failed to reconcile sessions: {error:?}"))
         })? {
             if session.status == SessionStatus::Running {
                 repository
@@ -143,7 +145,11 @@ impl AgentRuntimeManager {
                     .map_err(|_| {
                         runtime_internal("session_repository_error", "failed to reconcile sessions")
                     })?;
+                reconciled += 1;
             }
+        }
+        if reconciled > 0 {
+            ora_debug!(reconciled_count = reconciled, "reconciled stale running sessions");
         }
         let opencode_path = resolve_opencode_path(&home_directory)?;
         Ok(Self {
@@ -200,6 +206,11 @@ impl AgentRuntimeManager {
                     "failed to persist agent session",
                 )
             })?;
+        ora_debug!(
+            session_id = %session.id,
+            agent_session_id = %session.agent_session_id,
+            "session created",
+        );
         self.insert_actor(session.clone(), cwd, Some(process))?;
         Ok(CreateSessionResponse {
             session: contract_session(session),
@@ -498,6 +509,7 @@ async fn spawn_initialized_process(
             format!("agent CLI executable not found: {}", executable.display()),
         ));
     }
+    ora_debug!(executable = %executable.display(), cwd = %cwd.display(), "spawning agent process");
     let mut child = TokioProcessSpawner::new()
         .spawn(ProcessSpec::new(executable).arg("acp").cwd(cwd))
         .map_err(|_| runtime_internal("agent_start_failed", "failed to start agent CLI"))?;
@@ -521,6 +533,10 @@ async fn spawn_initialized_process(
     .await
     .map_err(|_| runtime_internal("agent_initialize_timeout", "agent initialization timed out"))?
     .map_err(map_acp_error)?;
+    ora_debug!(
+        load_session_supported = response.agent_capabilities.load_session,
+        "initialize handshake completed",
+    );
     let (client, updates, control) = peer.into_parts();
     Ok(AgentProcess {
         child,
@@ -605,6 +621,7 @@ async fn respond_permission(
             "permission option does not belong to this request",
         ));
     }
+    let selected_option = request.option_id.clone();
     let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
         PermissionOptionId::new(request.option_id),
     ));
@@ -612,6 +629,7 @@ async fn respond_permission(
         .respond(&request_id, &RequestPermissionResponse::new(outcome))
         .await
         .map_err(map_acp_error)?;
+    ora_debug!(option_id = %selected_option, "permission responded");
     Ok(RespondToPermissionResponse {})
 }
 

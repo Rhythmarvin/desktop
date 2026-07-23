@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use ora_contracts::acp::error::Error as RpcError;
+use ora_logging::ora_trace;
 use ora_contracts::acp::literals::CLIENT_METHOD_NAMES;
 use ora_contracts::acp::notification::SessionNotification;
 use ora_contracts::acp::permission::RequestPermissionRequest;
@@ -240,6 +241,14 @@ async fn read_frames<Reader, Writer>(
                 return;
             }
         };
+        let (msg, jsonrpc_method, session_id) = trace_frame_summary(&value, "recv");
+        ora_trace!(
+            direction = "recv",
+            jsonrpc_method = %jsonrpc_method,
+            session_id = %session_id,
+            frame = %value,
+            "{}", msg,
+        );
         if let Err(error) = route_frame(value, &writer, &pending, &updates, &control).await {
             let _ = control.send(AcpControl::Fatal(error));
             pending.lock().await.clear();
@@ -335,11 +344,46 @@ where
     }
 }
 
+/// Extracts summary fields from a JSON-RPC frame for trace-level correlation without re-parsing.
+fn trace_frame_summary(value: &Value, direction: &str) -> (String, String, String) {
+    let jsonrpc_method = value
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let session_id = value
+        .get("params")
+        .and_then(|p| p.get("sessionId"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let is_response = value.get("result").is_some();
+    let is_error = value.get("error").is_some();
+
+    let message = if !jsonrpc_method.is_empty() {
+        format!("{} {}", direction, jsonrpc_method)
+    } else if is_response {
+        format!("{} response", direction)
+    } else if is_error {
+        format!("{} error response", direction)
+    } else {
+        format!("{} frame", direction)
+    };
+
+    (message, jsonrpc_method.to_string(), session_id.to_string())
+}
+
 /// Writes a reader-originated protocol response through the connection's serialized sink.
 async fn write_frame<Writer>(writer: &Mutex<Writer>, value: &Value) -> Result<(), AcpError>
 where
     Writer: AsyncWrite + Unpin,
 {
+    let (msg, jsonrpc_method, session_id) = trace_frame_summary(value, "send");
+    ora_trace!(
+        direction = "send",
+        jsonrpc_method = %jsonrpc_method,
+        session_id = %session_id,
+        frame = %value,
+        "{}", msg,
+    );
     let mut bytes =
         serde_json::to_vec(value).map_err(|error| AcpError::InvalidFrame(error.to_string()))?;
     if bytes.len() > MAX_FRAME_BYTES {
