@@ -167,7 +167,7 @@ tasks:
       ORA_DATA_DIR: .data
       ORA_PROJECT_NAME: rustun
       ORA_PROJECT_PATH: .data/rustun
-      ORA_LOG_LEVEL: '{{.LOG_LEVEL | default "info"}}'
+      ORA_LOG_LEVEL: '{{.LOG_LEVEL | default "debug"}}'
       ORA_LOG_MODE: '{{.LOG_MODE | default "file"}}'
     cmds:
       - task: run:prepare

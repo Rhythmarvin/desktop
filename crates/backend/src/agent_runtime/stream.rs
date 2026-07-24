@@ -40,7 +40,10 @@ impl<Event> SessionEventStream<Event> {
 impl<Event> Drop for SessionEventStream<Event> {
     fn drop(&mut self) {
         if !self.completed {
-            ora_debug!(operation_id = self.operation_id, "stream dropped, sending cancel");
+            ora_debug!(
+                operation_id = self.operation_id,
+                "stream dropped, sending cancel"
+            );
             let _ = self.commands.send(RuntimeCommand::Cancel {
                 operation_id: self.operation_id,
             });

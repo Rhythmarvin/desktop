@@ -14,7 +14,6 @@ use ora_application::{
     UuidSessionIdGenerator, WorktreeRepository,
 };
 use ora_contracts::acp::common::SessionId as AcpSessionId;
-use ora_logging::ora_debug;
 use ora_contracts::acp::initialization::{
     Implementation, InitializeRequest, InitializeResponse, ProtocolVersion,
 };
@@ -43,6 +42,7 @@ use ora_db::{
 use ora_domain::{
     AgentCli, AuditFields, Session, SessionId, SessionStatus, TaskId, WorktreeActivity,
 };
+use ora_logging::ora_debug;
 use ora_process::{
     ManagedProcess, ProcessSpawner, ProcessSpec, TokioManagedProcess, TokioProcessSpawner,
 };
@@ -135,7 +135,10 @@ impl AgentRuntimeManager {
         let repository = SqliteSessionRepository::new(pool.clone());
         let mut reconciled = 0u64;
         for session in repository.list_sessions().map_err(|error| {
-            runtime_internal("session_repository_error", format!("failed to reconcile sessions: {error:?}"))
+            runtime_internal(
+                "session_repository_error",
+                format!("failed to reconcile sessions: {error:?}"),
+            )
         })? {
             if session.status == SessionStatus::Running {
                 repository
@@ -149,7 +152,10 @@ impl AgentRuntimeManager {
             }
         }
         if reconciled > 0 {
-            ora_debug!(reconciled_count = reconciled, "reconciled stale running sessions");
+            ora_debug!(
+                reconciled_count = reconciled,
+                "reconciled stale running sessions"
+            );
         }
         let opencode_path = resolve_opencode_path(&home_directory)?;
         Ok(Self {
