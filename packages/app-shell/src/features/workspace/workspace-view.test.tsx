@@ -19,7 +19,7 @@ describe("WorkspaceView", () => {
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora", rootPath: "/ora" }];
     state.tasks = [{ id: "t1", projectId: "p1", title: "Refresh history", status: "todo" }];
-    state.sessions = [{ id: "s1", taskId: "t1", status: "running" }];
+    state.sessions = [{ id: "s1", taskId: "t1", agentCli: "open_code", status: "running" }];
     const client = createMockClient(state);
     const load = vi.fn(async function* () {
       yield { type: "completed" as const };

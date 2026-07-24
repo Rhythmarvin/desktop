@@ -23,6 +23,7 @@ import { WindowControls } from "../../components/window-controls";
 import { ChatView } from "../chat/chat-view";
 import { ComposerContextBar } from "../chat/composer-context-bar";
 import { LocationActionsButton } from "./location-actions-button";
+import { agentCliLabel } from "./agent-cli";
 
 interface WorkspaceViewProps {
   userName: string;
@@ -97,7 +98,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
         text,
         createSession: () =>
           client.session
-            .create({ taskId })
+            .create({ taskId, agentCli: "open_code" })
             .then((response) => response.session.id),
         // Show the optimistic turn under its temporary key right away.
         onDraft: (draftSessionId) =>
@@ -148,7 +149,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
           <DragRegion>
             {session && (
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium tracking-[-0.01em]">OpenCode</p>
+                <p className="truncate text-sm font-medium tracking-[-0.01em]">{agentCliLabel(session.agentCli)}</p>
                 {project && task && (
                   <p className="truncate text-[11px] text-muted-foreground">{project.name} / {task.title}</p>
                 )}
