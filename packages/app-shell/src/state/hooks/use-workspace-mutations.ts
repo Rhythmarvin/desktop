@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Project, Task, TaskStatus } from "@ora/contracts";
+import type { AgentCli, Project, Task, TaskStatus } from "@ora/contracts";
 import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "./query-keys";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
@@ -116,9 +116,9 @@ export function useCreateSession() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ taskId }: { taskId: string }) => {
+    mutationFn: async ({ taskId, agentCli }: { taskId: string; agentCli: string }) => {
       return client.session
-        .create({ taskId })
+        .create({ taskId, agentCli: agentCli as AgentCli })
         .then((response) => response.session);
     },
     onSuccess: (session) => {
