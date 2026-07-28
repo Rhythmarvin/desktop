@@ -7,7 +7,7 @@ import {
   TooltipProvider,
   type ResizablePanelHandle,
 } from "@ora/ui";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import type { ContractsClient } from "@ora/contracts";
 import type { ChatStore } from "@ora/chat";
 import {
@@ -29,6 +29,7 @@ import { useGitIdentityUser } from "./state/hooks/use-git-identity";
 import { useSessionUnreadSync } from "./state/hooks/use-session-unread-sync";
 import { useUiStore } from "./state/stores/ui-store";
 import { startThemeSubscription } from "./state/stores/settings-store";
+import { useNorthbound } from "./state/subscribe-northbound";
 import { useTranslation } from "react-i18next";
 
 interface AppShellProps {
@@ -62,6 +63,8 @@ function AppShellContent({ client, chatStore, platform, user: injectedUser }: Ap
   useEffect(() => startThemeSubscription(), []);
   // Track which sessions finished a turn while the user was looking elsewhere.
   useSessionUnreadSync(chatStore);
+  // Subscribe to backend-pushed northbound events and invalidate affected caches.
+  useNorthbound(client, useQueryClient());
 
   // Derive the sidebar user from the host's global Git identity unless a caller
   // (tests, storybook) injects an explicit user to render instead.

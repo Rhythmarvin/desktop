@@ -280,6 +280,7 @@ impl RuntimeActor {
                                     let title_ora_sid = self.session.id.clone();
                                     let title_repo = self.repository.clone();
                                     let title_cwd = self.cwd.clone();
+                                    let title_northbound = self.northbound.clone();
                                     schedule_deferred(
                                         Duration::from_secs(3),
                                         {
@@ -288,9 +289,10 @@ impl RuntimeActor {
                                             let ora_sid = title_ora_sid.clone();
                                             let repo = title_repo.clone();
                                             let cwd = title_cwd.clone();
+                                            let northbound = title_northbound.clone();
                                             async move {
                                                 refresh_session_title(
-                                                    &client, &agent_sid, &ora_sid, &repo, cwd,
+                                                    &client, &agent_sid, &ora_sid, &repo, cwd, northbound.as_ref(),
                                                 )
                                                 .await;
                                             }
@@ -298,15 +300,19 @@ impl RuntimeActor {
                                     );
                                     schedule_deferred(
                                         Duration::from_secs(10),
-                                        async move {
-                                            refresh_session_title(
-                                                &title_client,
-                                                &title_agent_sid,
-                                                &title_ora_sid,
-                                                &title_repo,
-                                                title_cwd,
-                                            )
-                                            .await;
+                                        {
+                                            let northbound = title_northbound.clone();
+                                            async move {
+                                                refresh_session_title(
+                                                    &title_client,
+                                                    &title_agent_sid,
+                                                    &title_ora_sid,
+                                                    &title_repo,
+                                                    title_cwd,
+                                                    northbound.as_ref(),
+                                                )
+                                                .await;
+                                            }
                                         },
                                     );
                                 }

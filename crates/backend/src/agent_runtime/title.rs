@@ -1,6 +1,7 @@
 use crate::clock::SystemClock;
 use ora_acp::AcpClient;
-use ora_application::{Clock, SessionRepository};
+use ora_application::{Clock, NorthboundBus, SessionRepository};
+use ora_contracts::Northbound;
 use ora_contracts::acp::literals::AGENT_METHOD_NAMES;
 use ora_contracts::acp::session::{ListSessionsRequest, ListSessionsResponse};
 use ora_db::SqliteSessionRepository;
@@ -13,12 +14,15 @@ use tokio::process::ChildStdin;
 
 /// Calls ACP `session/list`, finds the matching agent session, and persists
 /// the title to the database when it differs from the current value.
+///
+/// On a successful title change, emits `Northbound::SessionTitleUpdated`.
 pub(crate) async fn refresh_session_title(
     client: &AcpClient<ChildStdin>,
     agent_session_id: &str,
     session_id: &SessionId,
     repository: &SqliteSessionRepository,
     cwd: PathBuf,
+    northbound: &dyn NorthboundBus,
 ) {
     let response = match client
         .request::<_, ListSessionsResponse>(
@@ -38,12 +42,7 @@ pub(crate) async fn refresh_session_title(
         }
     };
 
-    let acp_title = match response
-        .sessions
-        .iter()
-        .find(|s| s.session_id.0.as_ref() == agent_session_id)
-        .and_then(|s| s.title.clone())
-    {
+    let acp_title = match extract_title(&response, agent_session_id) {
         Some(title) => title,
         None => {
             ora_debug!(
@@ -71,7 +70,7 @@ pub(crate) async fn refresh_session_title(
         }
     };
 
-    if session.title.as_deref() == Some(&acp_title) {
+    if !title_needs_update(session.title.as_deref(), &acp_title) {
         return;
     }
 
@@ -90,7 +89,30 @@ pub(crate) async fn refresh_session_title(
             title = %acp_title,
             "session title updated"
         );
+        northbound.emit(Northbound::SessionTitleUpdated {
+            session_id: session_id.to_string(),
+            title: acp_title,
+        });
     }
+}
+
+/// Finds the matching agent session in a `session/list` response and returns
+/// its title, if present.
+pub(crate) fn extract_title(
+    response: &ListSessionsResponse,
+    agent_session_id: &str,
+) -> Option<String> {
+    response
+        .sessions
+        .iter()
+        .find(|s| s.session_id.0.as_ref() == agent_session_id)
+        .and_then(|s| s.title.clone())
+}
+
+/// Returns `true` when the current persisted title differs from the agent's
+/// latest title.
+pub(crate) fn title_needs_update(current: Option<&str>, incoming: &str) -> bool {
+    current != Some(incoming)
 }
 
 /// Schedules a fire-and-forget task after `delay`.
@@ -121,11 +143,15 @@ pub(crate) fn is_default_title(title: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ora_contracts::acp::common::SessionId as AcpSessionId;
+    use ora_contracts::acp::session::{ListSessionsResponse, SessionInfo};
     use ora_domain::{AgentCli, AuditFields, Session, SessionId, SessionStatus, TaskId};
     use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
-    /// Verifies `is_default_title` identifies placeholder titles that should be replaced.
+    // ── is_default_title ─────────────────────────────────────────────────
+
     #[test]
     fn detects_default_titles() {
         assert_eq!(is_default_title(None), true);
@@ -138,9 +164,54 @@ mod tests {
         assert_eq!(is_default_title(Some("Code review")), false);
     }
 
-    // ── schedule_deferred tests ──────────────────────────────────────────
+    // ── extract_title ────────────────────────────────────────────────────
 
-    /// Verifies `schedule_deferred` executes the task after the specified delay.
+    #[test]
+    fn extracts_title_when_session_found() {
+        let response = ListSessionsResponse::new(vec![
+            SessionInfo::new(AcpSessionId::new("agent-1"), PathBuf::from("/test"))
+                .title("New session".to_string()),
+        ]);
+        assert_eq!(
+            extract_title(&response, "agent-1"),
+            Some("New session".to_string())
+        );
+    }
+
+    #[test]
+    fn returns_none_when_session_not_found() {
+        let response = ListSessionsResponse::new(vec![]);
+        assert_eq!(extract_title(&response, "agent-1"), None);
+    }
+
+    #[test]
+    fn returns_none_when_session_has_no_title() {
+        let response = ListSessionsResponse::new(vec![SessionInfo::new(
+            AcpSessionId::new("agent-1"),
+            PathBuf::from("/test"),
+        )]);
+        assert_eq!(extract_title(&response, "agent-1"), None);
+    }
+
+    // ── title_needs_update ───────────────────────────────────────────────
+
+    #[test]
+    fn needs_update_when_current_is_none() {
+        assert_eq!(title_needs_update(None, "问候"), true);
+    }
+
+    #[test]
+    fn needs_update_when_titles_differ() {
+        assert_eq!(title_needs_update(Some("旧标题"), "新标题"), true);
+    }
+
+    #[test]
+    fn skips_update_when_titles_match() {
+        assert_eq!(title_needs_update(Some("问候"), "问候"), false);
+    }
+
+    // ── schedule_deferred ────────────────────────────────────────────────
+
     #[tokio::test]
     async fn schedule_deferred_runs_after_delay() {
         let flag = Arc::new(Mutex::new(false));
@@ -151,16 +222,13 @@ mod tests {
             *flag_clone.lock().unwrap() = true;
         });
 
-        // Immediately after scheduling, the flag should still be false
         assert_eq!(*flag.lock().unwrap(), false);
 
-        // Wait and verify the task ran
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(*flag.lock().unwrap(), true);
         assert!(start.elapsed() >= Duration::from_millis(100));
     }
 
-    /// Verifies `schedule_deferred` returns immediately without blocking.
     #[tokio::test]
     async fn schedule_deferred_returns_immediately() {
         let start = tokio::time::Instant::now();
@@ -169,13 +237,11 @@ mod tests {
             // This task would run after 60s, but we don't wait for it
         });
 
-        // schedule_deferred should return in well under 1 second
         assert!(start.elapsed() < Duration::from_millis(500));
     }
 
-    // ── is_default_title integration checks ──────────────────────────────
+    // ── integration checks ───────────────────────────────────────────────
 
-    /// Verifies a new session (title = None) is detected as needing a refresh.
     #[test]
     fn new_session_needs_title_refresh() {
         let session = Session::new(
@@ -189,7 +255,6 @@ mod tests {
         assert_eq!(is_default_title(session.title.as_deref()), true);
     }
 
-    /// Verifies a session with a real title is NOT detected as needing a refresh.
     #[test]
     fn titled_session_skips_refresh() {
         let session = Session::new(

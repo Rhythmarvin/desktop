@@ -13,6 +13,9 @@ export type ContractCallOptions = {
   readonly signal?: AbortSignal;
 };
 
+/** Minimal protocol shared by all northbound events. */
+export type TransportMessage = { type: string } & Record<string, unknown>;
+
 export interface ContractTransport {
   send<TResponse>(
     request: ContractTransportRequest,
@@ -22,6 +25,10 @@ export interface ContractTransport {
     request: ContractTransportRequest,
     options?: ContractCallOptions,
   ): AsyncIterable<TEvent>;
+  /**
+   * Subscribes to backend-pushed notifications. Returns an unsubscribe function.
+   */
+  subscribe(handler: (message: TransportMessage) => void): () => void;
 }
 
 export type ContractStreamFrame<TEvent> =

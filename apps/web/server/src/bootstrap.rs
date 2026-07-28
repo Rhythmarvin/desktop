@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::config::{ProjectConfig, RuntimeConfig};
 use crate::error::WebBootstrapError;
+use crate::northbound::BroadcastNorthboundBus;
 use crate::service::{FileSystemApi, ProjectWorkContextApi};
 use ora_application::{
     Clock, OpenProjectWorkContextHandler, ProjectIdGenerator, ProjectRepository,
@@ -16,10 +17,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Builds the application state used by the web runtime from SQLite-backed dependencies.
 pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBootstrapError> {
+    let northbound = BroadcastNorthboundBus::new();
     let backend = build_backend(
         runtime_config.database().path(),
         runtime_config.project().work_dir(),
         runtime_config.file_system().home_directory(),
+        northbound.clone(),
     )?;
     let pool = backend.repository_pool();
     let clock = SystemClock;
@@ -32,6 +35,7 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
             runtime_config.file_system().home_directory().to_path_buf(),
         )),
         Arc::new(ProjectWorkContextApi::new(pool.clone(), clock)),
+        northbound,
     ))
 }
 
@@ -42,10 +46,12 @@ pub(crate) fn build_app_state_for_database(
     project_root: &Path,
     work_dir: &Path,
 ) -> Result<AppState, WebBootstrapError> {
+    let northbound = BroadcastNorthboundBus::new();
     let backend = build_backend(
         database_path,
         work_dir,
         project_root.parent().unwrap_or(project_root),
+        northbound.clone(),
     )?;
     let pool = backend.repository_pool();
     let clock = SystemClock;
@@ -56,6 +62,7 @@ pub(crate) fn build_app_state_for_database(
             project_root.parent().unwrap_or(project_root).to_path_buf(),
         )),
         Arc::new(ProjectWorkContextApi::new(pool.clone(), clock)),
+        northbound,
     ))
 }
 
@@ -118,12 +125,16 @@ fn build_backend(
     database_path: &Path,
     worktree_root: &Path,
     home_directory: &Path,
+    northbound: BroadcastNorthboundBus,
 ) -> Result<Backend, WebBootstrapError> {
-    Backend::open(BackendPaths {
-        database_path: database_path.to_path_buf(),
-        worktree_root: worktree_root.to_path_buf(),
-        home_directory: home_directory.to_path_buf(),
-    })
+    Backend::open(
+        BackendPaths {
+            database_path: database_path.to_path_buf(),
+            worktree_root: worktree_root.to_path_buf(),
+            home_directory: home_directory.to_path_buf(),
+        },
+        northbound,
+    )
     .map_err(web_backend_bootstrap_error)
 }
 

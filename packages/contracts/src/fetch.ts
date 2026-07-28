@@ -1,4 +1,4 @@
-import { ContractTransportError, type ContractCallOptions, type ContractErrorPayload, type ContractStreamFrame, type ContractTransport, type ContractTransportRequest } from "./transport.js";
+import { ContractTransportError, type ContractCallOptions, type ContractErrorPayload, type ContractStreamFrame, type ContractTransport, type ContractTransportRequest, type TransportMessage } from "./transport.js";
 
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 
@@ -48,6 +48,18 @@ export function createFetchTransport(
           return readNdjsonStream(fetchImplementation, options.baseUrl ?? "", request, callOptions);
         },
       };
+    },
+    subscribe(handler: (message: TransportMessage) => void): () => void {
+      const url = resolveUrl(options.baseUrl ?? "", "/api/northbound");
+      const source = new EventSource(url);
+      source.addEventListener("northbound", (event: MessageEvent) => {
+        try {
+          handler(JSON.parse(event.data) as TransportMessage);
+        } catch {
+          // Skip unparseable events silently.
+        }
+      });
+      return () => source.close();
     },
   };
 }

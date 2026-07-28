@@ -14,7 +14,9 @@ use crate::clock::SystemClock;
 use crate::task::resolve_task_cwd;
 use crate::{BackendError, BackendErrorKind};
 use connection::{ConnectionSupervisor, ConnectionSupervisors};
-use ora_application::{Clock, SessionIdGenerator, SessionRepository, UuidSessionIdGenerator};
+use ora_application::{
+    Clock, NorthboundBus, SessionIdGenerator, SessionRepository, UuidSessionIdGenerator,
+};
 use ora_contracts::{
     CreateSessionRequest, CreateSessionResponse, DeleteSessionResponse, LoadSessionEvent,
     LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RespondToPermissionRequest,
@@ -51,6 +53,7 @@ struct ManagerInner {
     connections: ConnectionSupervisors,
     home_directory: PathBuf,
     clock: SystemClock,
+    northbound: Arc<dyn NorthboundBus>,
 }
 
 #[derive(Clone)]
@@ -94,6 +97,7 @@ struct RuntimeActor {
     /// subsequent prompts do not repeatedly call session/list on an agent that
     /// never generates a real title.
     title_refresh_scheduled: bool,
+    northbound: Arc<dyn NorthboundBus>,
 }
 
 impl AgentRuntimeManager {
@@ -102,7 +106,9 @@ impl AgentRuntimeManager {
         pool: RepositoryPool,
         home_directory: PathBuf,
         clock: SystemClock,
+        northbound: impl NorthboundBus + 'static,
     ) -> Result<Self, BackendError> {
+        let northbound: Arc<dyn NorthboundBus> = Arc::new(northbound);
         reconcile_running_sessions(&pool, clock)?;
         let connections = ConnectionSupervisors::start(pool.clone(), home_directory.clone(), clock);
         Ok(Self {
@@ -114,6 +120,7 @@ impl AgentRuntimeManager {
                 connections,
                 home_directory,
                 clock,
+                northbound,
             }),
         })
     }
@@ -188,6 +195,7 @@ impl AgentRuntimeManager {
         let title_ora_sid = session.id.clone();
         let title_repo = SqliteSessionRepository::new(self.inner.pool.clone());
         let title_cwd = cwd.clone();
+        let title_northbound = self.inner.northbound.clone();
         ora_debug!(session_id = %title_ora_sid, "scheduling creation-time title refresh");
         schedule_deferred(Duration::from_secs(3), async move {
             refresh_session_title(
@@ -196,6 +204,7 @@ impl AgentRuntimeManager {
                 &title_ora_sid,
                 &title_repo,
                 title_cwd,
+                title_northbound.as_ref(),
             )
             .await;
         });
@@ -406,6 +415,7 @@ impl AgentRuntimeManager {
                 channel,
                 commands: receiver,
                 title_refresh_scheduled: false,
+                northbound: self.inner.northbound.clone(),
             }
             .run(),
         );

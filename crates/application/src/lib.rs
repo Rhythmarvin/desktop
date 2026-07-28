@@ -1,5 +1,6 @@
 mod agent_definition;
 mod error;
+mod northbound;
 mod project;
 mod project_work_context;
 mod session;
@@ -14,6 +15,7 @@ pub use agent_definition::{
     ListAgentDefinitionsHandler, UpdateAgentDefinitionHandler, UuidAgentDefinitionIdGenerator,
 };
 pub use error::ApplicationError;
+pub use northbound::{NoopNorthboundBus, NorthboundBus};
 pub use project::{
     Clock, CreateProjectHandler, GetProjectHandler, ListProjectsHandler, ProjectIdGenerator,
     ProjectRepository, ProjectRepositoryError, UpdateProjectHandler, UuidProjectIdGenerator,

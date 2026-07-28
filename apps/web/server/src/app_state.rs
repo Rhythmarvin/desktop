@@ -1,3 +1,4 @@
+use crate::northbound::BroadcastNorthboundBus;
 use crate::service::{FileSystemApi, ProjectWorkContextApi};
 use ora_backend::Backend;
 use std::sync::Arc;
@@ -9,6 +10,7 @@ pub struct AppState {
     backend: Backend,
     file_system_api: Arc<FileSystemApi>,
     project_work_context_api: Arc<ProjectWorkContextApi>,
+    northbound: BroadcastNorthboundBus,
     ready: Arc<AtomicBool>,
 }
 
@@ -18,11 +20,13 @@ impl AppState {
         backend: Backend,
         file_system_api: Arc<FileSystemApi>,
         project_work_context_api: Arc<ProjectWorkContextApi>,
+        northbound: BroadcastNorthboundBus,
     ) -> Self {
         Self {
             backend,
             file_system_api,
             project_work_context_api,
+            northbound,
             ready: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -40,6 +44,11 @@ impl AppState {
     /// Returns the shared project work context API that routes delegate into.
     pub fn project_work_context_api(&self) -> &Arc<ProjectWorkContextApi> {
         &self.project_work_context_api
+    }
+
+    /// Returns the shared northbound broadcast bus used by the SSE endpoint.
+    pub fn northbound(&self) -> &BroadcastNorthboundBus {
+        &self.northbound
     }
 
     /// Marks the runtime as ready after bootstrap finishes successfully.

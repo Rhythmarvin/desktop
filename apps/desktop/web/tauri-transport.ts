@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   ContractTransportError,
   type ContractCallOptions,
@@ -6,6 +7,7 @@ import {
   type ContractTransport,
   type ContractTransportRequest,
   type EndpointOperation,
+  type TransportMessage,
 } from "@ora/contracts";
 
 type TauriInvoke = <TResponse>(
@@ -92,6 +94,14 @@ export function createTauriTransport(
           consumed = true;
           return streamFromChannel<TEvent>(invokeCommand, createChannel, request, options);
         },
+      };
+    },
+    subscribe(handler: (message: TransportMessage) => void): () => void {
+      const pending = listen<TransportMessage>("northbound", (event) => {
+        handler(event.payload);
+      });
+      return () => {
+        pending.then((unlisten) => unlisten());
       };
     },
   };

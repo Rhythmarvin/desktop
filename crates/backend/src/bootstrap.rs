@@ -6,6 +6,7 @@ use crate::project::ProjectApi;
 use crate::session::SessionApi;
 use crate::skill::SkillApi;
 use crate::task::TaskApi;
+use ora_application::NorthboundBus;
 use ora_contracts::*;
 use ora_db::{DatabaseBootstrapper, DatabaseLocation, RepositoryPool, default_migration_catalog};
 use std::fs;
@@ -51,7 +52,10 @@ pub struct Backend {
 
 impl Backend {
     /// Opens persistent storage and constructs every shared CRUD API.
-    pub fn open(paths: BackendPaths) -> Result<Self, BackendBootstrapError> {
+    pub fn open(
+        paths: BackendPaths,
+        northbound: impl NorthboundBus + 'static,
+    ) -> Result<Self, BackendBootstrapError> {
         ensure_directory(
             paths
                 .database_path
@@ -65,8 +69,9 @@ impl Backend {
             .map_err(BackendBootstrapError::Database)?;
         let clock = SystemClock;
         let worktree_root = Arc::new(RwLock::new(paths.worktree_root));
-        let agent_runtime = AgentRuntimeManager::new(pool.clone(), paths.home_directory, clock)
-            .map_err(BackendBootstrapError::AgentRuntime)?;
+        let agent_runtime =
+            AgentRuntimeManager::new(pool.clone(), paths.home_directory, clock, northbound)
+                .map_err(BackendBootstrapError::AgentRuntime)?;
 
         Ok(Self {
             project: Arc::new(ProjectApi::new(pool.clone(), clock)),
@@ -348,11 +353,14 @@ mod tests {
         let temporary = TempDir::new().expect("create temporary backend directory");
         let database_path = temporary.path().join("data").join("ora.sqlite3");
         let worktree_root = temporary.path().join("worktrees");
-        let backend = Backend::open(BackendPaths {
-            database_path: database_path.clone(),
-            worktree_root: worktree_root.clone(),
-            home_directory: temporary.path().to_path_buf(),
-        })
+        let backend = Backend::open(
+            BackendPaths {
+                database_path: database_path.clone(),
+                worktree_root: worktree_root.clone(),
+                home_directory: temporary.path().to_path_buf(),
+            },
+            ora_application::NoopNorthboundBus,
+        )
         .expect("open shared backend");
 
         assert!(database_path.is_file());
@@ -459,11 +467,14 @@ mod tests {
         let repository_root = temporary.path().join("repository");
         initialize_repository(&repository_root);
         let original_worktree_root = temporary.path().join("original-worktrees");
-        let backend = Backend::open(BackendPaths {
-            database_path: temporary.path().join("ora.sqlite3"),
-            worktree_root: original_worktree_root.clone(),
-            home_directory: temporary.path().to_path_buf(),
-        })
+        let backend = Backend::open(
+            BackendPaths {
+                database_path: temporary.path().join("ora.sqlite3"),
+                worktree_root: original_worktree_root.clone(),
+                home_directory: temporary.path().to_path_buf(),
+            },
+            ora_application::NoopNorthboundBus,
+        )
         .expect("open shared backend");
         let project = backend
             .create_project(CreateProjectRequest {

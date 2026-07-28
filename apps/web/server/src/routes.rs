@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::handlers::{
-    agents, file_system, git, health, project_work_contexts, projects, sessions, skills, tasks,
+    agents, file_system, git, health, northbound, project_work_contexts, projects, sessions,
+    skills, tasks,
 };
 use axum::Router;
 use axum::routing::{get, post};
@@ -16,6 +17,7 @@ pub fn build_router(app_state: AppState) -> Router {
     Router::new()
         .route("/health/live", get(health::liveness))
         .route("/health/ready", get(health::readiness))
+        .route("/api/northbound", get(northbound::northbound_events))
         .route(FILE_SYSTEM_DIRECTORY_PATH, get(file_system::list_directory))
         .route(GIT_IDENTITY_PATH, get(git::get_identity))
         .route(AGENT_MODELS_PATH, get(sessions::list_agent_models))

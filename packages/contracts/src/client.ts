@@ -6,6 +6,7 @@ import {
   type RequestByOperation,
   type ResponseByOperation,
 } from "./endpoints.js";
+import type { Northbound } from "./northbound.js";
 import type {
   ContractCallOptions,
   ContractTransport,
@@ -44,6 +45,11 @@ export type ContractsClient = {
     [Operation in EndpointOperation as (typeof endpoints)[Operation]["namespace"] extends Namespace
       ? (typeof endpoints)[Operation]["memberName"]
       : never]: ClientOperation<Operation>;
+  };
+} & {
+  /** Backend-to-frontend notification subscription, not part of the endpoint manifest. */
+  northbound: {
+    subscribe(handler: (event: Northbound) => void): () => void;
   };
 };
 
@@ -111,6 +117,9 @@ export function createContractsClient(
     gitIdentity: {
       get: (request, options) =>
         executeOperation("getGitIdentity", request, transport, options),
+    },
+    northbound: {
+      subscribe: (handler) => transport.subscribe(handler as (msg: unknown) => void),
     },
   };
 }
