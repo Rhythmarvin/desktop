@@ -300,7 +300,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
             {session && (
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium tracking-[-0.01em]">
-                  {agentCliLabel(session.agentCli)}
+                  {session.title ?? agentCliLabel(session.agentCli)}
                 </p>
                 {project && task && (
                   <p className="truncate text-[11px] text-muted-foreground">

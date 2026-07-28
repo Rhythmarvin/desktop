@@ -92,7 +92,8 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
     return project.name.toLowerCase().includes(needle)
       || projectTasks.some((task) => task.title.toLowerCase().includes(needle)
         || sessions.some((session) => session.taskId === task.id
-          && agentCliLabel(session.agentCli).toLowerCase().includes(needle)));
+          && ((session.title && session.title.toLowerCase().includes(needle))
+            || agentCliLabel(session.agentCli).toLowerCase().includes(needle))));
   }), [needle, projects, sessions, tasks]);
 
   // Expand the initial workspace tree once while preserving later manual collapse choices.
@@ -251,29 +252,51 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                     const taskOpen = expandedTasks.has(task.id) || Boolean(needle);
                     if (task.workspaceMode === "project_root") {
                       const directSession = taskSessions[0];
+                      if (directSession) {
+                        return (
+                          <TreeRow
+                            key={directSession.id}
+                            depth={1}
+                            active={selection.sessionId === directSession.id}
+                            icon={conversations[directSession.id]?.pendingPermissions.length
+                              ? <IconAlertTriangle className="size-[18px] text-amber-500" aria-label={t("sidebar.permissionRequired")} />
+                              : conversations[directSession.id]?.isResponding
+                                ? <AgentActivityDots label={t("common.running")} className="text-muted-foreground" />
+                                : unread.has(directSession.id)
+                                  ? <UnreadDot label={t("sidebar.unread")} />
+                                  : <IconMessageCircle className="size-4 text-muted-foreground" aria-label={t("sidebar.directChatTask")} />}
+                            label={directSession.title ?? agentCliLabel(directSession.agentCli)}
+                            onClick={() => selectSession(directSession.id, task.id, project.id)}
+                            menu={(
+                              <EntityMenu
+                                onDelete={() => setDeleteTarget({
+                                  kind: "task",
+                                  id: task.id,
+                                  name: directSession.title ?? agentCliLabel(directSession.agentCli),
+                                  workspaceMode: task.workspaceMode,
+                                  sessionIds: [directSession.id],
+                                })}
+                              />
+                            )}
+                          />
+                        );
+                      }
                       return (
                         <TreeRow
                           key={task.id}
                           depth={1}
-                          active={directSession
-                            ? selection.sessionId === directSession.id
-                            : selection.taskId === task.id}
-                          icon={directSession && conversations[directSession.id]?.pendingPermissions.length
-                            ? <IconAlertTriangle className="size-[18px] text-amber-500" aria-label={t("sidebar.permissionRequired")} />
-                            : <IconMessageCircle className="size-4 text-muted-foreground" aria-label={t("sidebar.directChatTask")} />}
+                          active={selection.taskId === task.id}
+                          icon={<IconMessageCircle className="size-4 text-muted-foreground" aria-label={t("sidebar.directChatTask")} />}
                           label={task.title}
-                          onClick={() => directSession
-                            ? selectSession(directSession.id, task.id, project.id)
-                            : selectTask(task.id, task.projectId)}
+                          onClick={() => selectTask(task.id, task.projectId)}
                           menu={(
                             <EntityMenu
-                              onEdit={() => setDialog({ kind: "task", projectId: project.id, entity: task })}
                               onDelete={() => setDeleteTarget({
                                 kind: "task",
                                 id: task.id,
                                 name: task.title,
                                 workspaceMode: task.workspaceMode,
-                                sessionIds: taskSessions.map((session) => session.id),
+                                sessionIds: [],
                               })}
                             />
                           )}
@@ -321,11 +344,11 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                                   : unread.has(session.id)
                                     ? <UnreadDot label={t("sidebar.unread")} />
                                     : null}
-                              label={agentCliLabel(session.agentCli)}
+                              label={session.title ?? agentCliLabel(session.agentCli)}
                               onClick={() => selectSession(session.id, task.id, project.id)}
                               menu={(
                                 <EntityMenu
-                                  onDelete={() => setDeleteTarget({ kind: "session", id: session.id, name: agentCliLabel(session.agentCli) })}
+                                  onDelete={() => setDeleteTarget({ kind: "session", id: session.id, name: session.title ?? agentCliLabel(session.agentCli) })}
                                 />
                               )}
                             />
