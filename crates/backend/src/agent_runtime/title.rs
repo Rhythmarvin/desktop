@@ -97,9 +97,13 @@ pub(crate) async fn refresh_session_title(
 ///
 /// Currently backed by `tokio::spawn`; will delegate to the scheduler once it is available.
 pub(crate) fn schedule_deferred(delay: Duration, task: impl Future<Output = ()> + Send + 'static) {
+    let delay_ms = delay.as_millis();
     tokio::spawn(async move {
+        ora_debug!(delay_ms, "deferred task sleeping");
         tokio::time::sleep(delay).await;
+        ora_debug!(delay_ms, "deferred task executing");
         task.await;
+        ora_debug!(delay_ms, "deferred task completed");
     });
 }
 

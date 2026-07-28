@@ -85,6 +85,9 @@ impl RuntimeActor {
         events: mpsc::Sender<Result<LoadSessionEvent, BackendError>>,
     ) {
         self.unload().await;
+        // Sync the title from the last persisted row before overwriting status,
+        // otherwise a fire-and-forget title refresh is lost on every session/load.
+        sync_title_from_db(&self.repository, &mut self.session);
         let running = self
             .session
             .clone()
@@ -265,8 +268,13 @@ impl RuntimeActor {
                             if events.try_send(Ok(PromptSessionEvent::Completed {
                                 stop_reason: response.stop_reason,
                             })).is_ok() {
-                                // Schedule title refresh when the session still has a default title.
-                                if is_default_title(self.session.title.as_deref()) {
+                                // Sync the title from the last persisted row so that a
+                                // non-default title acquired by a prior refresh stops
+                                // scheduling duplicate session/list calls.
+                                sync_title_from_db(&self.repository, &mut self.session);
+                                if !self.title_refresh_scheduled && is_default_title(self.session.title.as_deref()) {
+                                    self.title_refresh_scheduled = true;
+                                    ora_debug!(session_id = %self.session.id, "scheduling post-prompt title refresh");
                                     let title_client = channel.connection.client.clone();
                                     let title_agent_sid = self.session.agent_session_id.clone();
                                     let title_ora_sid = self.session.id.clone();
@@ -498,12 +506,32 @@ impl RuntimeActor {
     /// Persists a stopped state after the provider session is detached or becomes unusable.
     fn mark_stopped(&mut self) {
         self.channel = None;
+        sync_title_from_db(&self.repository, &mut self.session);
         self.session = self
             .session
             .clone()
             .with_status(SessionStatus::Stopped, self.clock.now_timestamp_millis());
         let _ = self.repository.update_session(self.session.clone());
         ora_debug!(session_id = %self.session.id, "session marked stopped");
+    }
+}
+
+/// Pulls the current title from the repository into the in-memory session so
+/// that status-only updates (mark_stopped, run_load) do not overwrite a title
+/// that was refreshed by a fire-and-forget task.
+fn sync_title_from_db(repository: &SqliteSessionRepository, session: &mut Session) {
+    match repository.find_session(&session.id) {
+        Ok(Some(persisted)) => {
+            if session.title != persisted.title {
+                session.title = persisted.title;
+            }
+        }
+        Ok(None) => {
+            ora_debug!(session_id = %session.id, "session not found during title sync");
+        }
+        Err(error) => {
+            ora_debug!(session_id = %session.id, error = ?error, "failed to read session during title sync");
+        }
     }
 }
 

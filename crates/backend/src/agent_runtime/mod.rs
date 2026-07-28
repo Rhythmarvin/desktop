@@ -90,6 +90,10 @@ struct RuntimeActor {
     connection: ConnectionSupervisor,
     channel: Option<SessionChannel>,
     commands: mpsc::UnboundedReceiver<RuntimeCommand>,
+    /// Set to true after the first post-prompt title refresh is scheduled so
+    /// subsequent prompts do not repeatedly call session/list on an agent that
+    /// never generates a real title.
+    title_refresh_scheduled: bool,
 }
 
 impl AgentRuntimeManager {
@@ -184,6 +188,7 @@ impl AgentRuntimeManager {
         let title_ora_sid = session.id.clone();
         let title_repo = SqliteSessionRepository::new(self.inner.pool.clone());
         let title_cwd = cwd.clone();
+        ora_debug!(session_id = %title_ora_sid, "scheduling creation-time title refresh");
         schedule_deferred(Duration::from_secs(3), async move {
             refresh_session_title(
                 &title_client,
@@ -400,6 +405,7 @@ impl AgentRuntimeManager {
                 connection,
                 channel,
                 commands: receiver,
+                title_refresh_scheduled: false,
             }
             .run(),
         );
