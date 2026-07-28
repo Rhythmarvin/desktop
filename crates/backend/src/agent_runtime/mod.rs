@@ -4,9 +4,11 @@ mod models;
 mod routing;
 mod stream;
 mod support;
+mod title;
 
 pub use stream::SessionEventStream;
 use support::*;
+use title::{is_default_title, refresh_session_title, schedule_deferred};
 
 use crate::clock::SystemClock;
 use crate::task::resolve_task_cwd;
@@ -173,7 +175,26 @@ impl AgentRuntimeManager {
             agent_session_id = %session.agent_session_id,
             "session created",
         );
-        self.insert_actor(session.clone(), cwd, supervisor, Some(channel))?;
+        self.insert_actor(session.clone(), cwd.clone(), supervisor, Some(channel))?;
+
+        // Schedule the initial title fetch: captures the default title as a
+        // baseline so later prompt-completion tasks can detect a change.
+        let title_client = connection.client.clone();
+        let title_agent_sid = session.agent_session_id.clone();
+        let title_ora_sid = session.id.clone();
+        let title_repo = SqliteSessionRepository::new(self.inner.pool.clone());
+        let title_cwd = cwd.clone();
+        schedule_deferred(Duration::from_secs(3), async move {
+            refresh_session_title(
+                &title_client,
+                &title_agent_sid,
+                &title_ora_sid,
+                &title_repo,
+                title_cwd,
+            )
+            .await;
+        });
+
         Ok(CreateSessionResponse {
             session: contract_session(session),
         })

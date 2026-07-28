@@ -75,6 +75,7 @@ pub struct Session {
     pub agent_cli: AgentCli,
     pub agent_session_id: String,
     pub status: SessionStatus,
+    pub title: Option<String>,
     pub audit_fields: AuditFields,
 }
 
@@ -94,6 +95,7 @@ impl Session {
             agent_cli,
             agent_session_id: agent_session_id.into(),
             status,
+            title: None,
             audit_fields,
         }
     }
@@ -101,6 +103,13 @@ impl Session {
     /// Changes only registration state while preserving immutable provider routing.
     pub fn with_status(mut self, status: SessionStatus, updated_at: i64) -> Self {
         self.status = status;
+        self.audit_fields.updated_at = updated_at;
+        self
+    }
+
+    /// Updates the agent-generated title and refreshes the modification timestamp.
+    pub fn with_title(mut self, title: String, updated_at: i64) -> Self {
+        self.title = Some(title);
         self.audit_fields.updated_at = updated_at;
         self
     }

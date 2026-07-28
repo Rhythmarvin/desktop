@@ -167,6 +167,7 @@ fn constructs_schema_backed_entities() {
             agent_cli: AgentCli::OpenCode,
             agent_session_id: "agent-session-1".to_string(),
             status: SessionStatus::Running,
+            title: None,
             audit_fields: audit_fields.clone(),
         }
     );
@@ -188,6 +189,31 @@ fn constructs_schema_backed_entities() {
             audit_fields,
         }
     );
+}
+
+/// Verifies with_title updates the title and refreshes the timestamp without changing other fields.
+#[test]
+fn updates_session_title_and_timestamp() {
+    let audit_fields = AuditFields::new(1_700_000_000_000, 1_700_000_000_500, false);
+    let session = Session::new(
+        SessionId::new("session-1"),
+        TaskId::new("task-1"),
+        AgentCli::OpenCode,
+        "agent-session-1",
+        SessionStatus::Running,
+        audit_fields,
+    );
+
+    let updated = session.with_title("代码审查".to_string(), 1_700_000_000_999);
+
+    assert_eq!(updated.title, Some("代码审查".to_string()));
+    assert_eq!(updated.audit_fields.updated_at, 1_700_000_000_999);
+    // Other fields are preserved
+    assert_eq!(updated.id, SessionId::new("session-1"));
+    assert_eq!(updated.task_id, TaskId::new("task-1"));
+    assert_eq!(updated.agent_cli, AgentCli::OpenCode);
+    assert_eq!(updated.agent_session_id, "agent-session-1");
+    assert_eq!(updated.status, SessionStatus::Running);
 }
 
 /// Verifies configurable resource constructors reject names that cannot identify a resource.

@@ -61,6 +61,7 @@ fn bootstraps_empty_database_with_default_catalog() {
             AppliedMigration::new("0001", 1_700_000_000_000),
             AppliedMigration::new("0002", 1_700_000_000_000),
             AppliedMigration::new("0003", 1_700_000_000_000),
+            AppliedMigration::new("0004", 1_700_000_000_000),
         ]
     );
 }
@@ -71,7 +72,7 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
     let database_path = temp_dir.path().join("skill-agent.sqlite3");
     let catalog = default_migration_catalog().unwrap();
-    let migrations = ["0001", "0002", "0003"].map(|version| {
+    let migrations = ["0001", "0002", "0003", "0004"].map(|version| {
         catalog
             .migration(version)
             .cloned()
@@ -455,6 +456,65 @@ fn load_table_column_names(connection: &Connection, table_name: &str) -> Vec<Str
         .unwrap();
 
     rows.collect::<Result<Vec<_>, _>>().unwrap()
+}
+
+/// Verifies v0004 adds the title column to the sessions table and can be rolled back.
+#[test]
+fn adds_and_removes_session_title_column() {
+    let temp_dir = TempDir::new().unwrap();
+    let database_path = temp_dir.path().join("session-title.sqlite3");
+    let catalog = default_migration_catalog().unwrap();
+    // Bootstrap with only the first 3 migrations, then upgrade to v0004
+    let migrations = ["0001", "0002", "0003", "0004"].map(|version| {
+        catalog
+            .migration(version)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing migration {version}"))
+    });
+    let target_0003 =
+        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001", "0002", "0003"])
+            .unwrap();
+    let target_0002 =
+        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001", "0002"]).unwrap();
+
+    // Upgrade: apply v0004
+    bootstrap_file_database(&database_path, target_0003, 1_700_000_000_000);
+    bootstrap_file_database(&database_path, catalog.clone(), 1_700_000_000_100);
+
+    let connection = Connection::open(&database_path).unwrap();
+    // Verify title column exists after upgrade
+    assert_eq!(
+        load_table_column_names(&connection, "sessions"),
+        vec![
+            "id".to_string(),
+            "task_id".to_string(),
+            "agent_cli".to_string(),
+            "agent_session_id".to_string(),
+            "status".to_string(),
+            "created_at".to_string(),
+            "updated_at".to_string(),
+            "is_deleted".to_string(),
+            "title".to_string(),
+        ]
+    );
+
+    // Rollback: drop v0004
+    bootstrap_file_database(&database_path, target_0002, 1_700_000_000_200);
+    let connection = Connection::open(&database_path).unwrap();
+    // Verify title column is gone after rollback past v0003
+    assert_eq!(
+        load_table_column_names(&connection, "sessions"),
+        vec![
+            "id".to_string(),
+            "task_id".to_string(),
+            "agent_cli".to_string(),
+            "agent_session_id".to_string(),
+            "status".to_string(),
+            "created_at".to_string(),
+            "updated_at".to_string(),
+            "is_deleted".to_string(),
+        ]
+    );
 }
 
 /// Verifies a migration-step error identifies the version and direction while preserving the SQL parser context.

@@ -13,7 +13,7 @@ use ora_contracts::acp::session::{
 };
 use ora_logging::ora_debug;
 use tokio::process::ChildStdin;
-use tokio::time::{Instant, timeout};
+use tokio::time::{Duration, Instant, timeout};
 
 impl RuntimeActor {
     /// Serializes operations for one logical session while the shared connection remains concurrent.
@@ -265,6 +265,43 @@ impl RuntimeActor {
                             if events.try_send(Ok(PromptSessionEvent::Completed {
                                 stop_reason: response.stop_reason,
                             })).is_ok() {
+                                // Schedule title refresh when the session still has a default title.
+                                if is_default_title(self.session.title.as_deref()) {
+                                    let title_client = channel.connection.client.clone();
+                                    let title_agent_sid = self.session.agent_session_id.clone();
+                                    let title_ora_sid = self.session.id.clone();
+                                    let title_repo = self.repository.clone();
+                                    let title_cwd = self.cwd.clone();
+                                    schedule_deferred(
+                                        Duration::from_secs(3),
+                                        {
+                                            let client = title_client.clone();
+                                            let agent_sid = title_agent_sid.clone();
+                                            let ora_sid = title_ora_sid.clone();
+                                            let repo = title_repo.clone();
+                                            let cwd = title_cwd.clone();
+                                            async move {
+                                                refresh_session_title(
+                                                    &client, &agent_sid, &ora_sid, &repo, cwd,
+                                                )
+                                                .await;
+                                            }
+                                        },
+                                    );
+                                    schedule_deferred(
+                                        Duration::from_secs(10),
+                                        async move {
+                                            refresh_session_title(
+                                                &title_client,
+                                                &title_agent_sid,
+                                                &title_ora_sid,
+                                                &title_repo,
+                                                title_cwd,
+                                            )
+                                            .await;
+                                        },
+                                    );
+                                }
                                 self.channel = Some(channel);
                             } else {
                                 self.isolate_channel(channel).await;

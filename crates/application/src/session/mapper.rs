@@ -15,6 +15,7 @@ pub(crate) fn map_session(session: DomainSession) -> ContractSession {
             ora_domain::AgentCli::CodeAgentCli => ContractAgentCli::CodeAgentCli,
         },
         status: map_session_status(session.status),
+        title: session.title.clone(),
     }
 }
 

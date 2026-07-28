@@ -112,6 +112,7 @@ export type Session = {
   taskId: string;
   agentCli: AgentCli;
   status: SessionStatus;
+  title: string | null;
 };
 
 /**

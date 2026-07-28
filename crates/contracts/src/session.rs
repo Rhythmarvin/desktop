@@ -33,6 +33,7 @@ pub struct Session {
     pub task_id: String,
     pub agent_cli: AgentCli,
     pub status: SessionStatus,
+    pub title: Option<String>,
 }
 
 /// Creates a provider-backed session on one selected application-scoped CLI.

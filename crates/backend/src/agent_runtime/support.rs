@@ -54,6 +54,7 @@ pub(super) fn contract_session(session: Session) -> ContractSession {
             SessionStatus::Running => ContractSessionStatus::Running,
             SessionStatus::Stopped => ContractSessionStatus::Stopped,
         },
+        title: session.title.clone(),
     }
 }
 

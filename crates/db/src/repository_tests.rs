@@ -483,14 +483,20 @@ fn session_repository_supports_crud_and_soft_delete() {
         vec![created_session.clone()]
     );
 
-    let updated_session = Session::new(
-        created_session.id.clone(),
-        created_session.task_id.clone(),
-        created_session.agent_cli,
-        created_session.agent_session_id.clone(),
-        SessionStatus::Stopped,
-        AuditFields::new(12, 22, false),
+    let titled_session = created_session
+        .clone()
+        .with_title("代码审查".to_string(), 15);
+    assert_eq!(
+        repository.update_session(titled_session.clone()).unwrap(),
+        titled_session.clone()
     );
+    assert_eq!(
+        repository.find_session(&titled_session.id).unwrap(),
+        Some(titled_session.clone())
+    );
+    assert_eq!(titled_session.title, Some("代码审查".to_string()));
+
+    let updated_session = titled_session.with_status(SessionStatus::Stopped, 22);
 
     assert_eq!(
         repository.update_session(updated_session.clone()).unwrap(),
@@ -500,6 +506,9 @@ fn session_repository_supports_crud_and_soft_delete() {
         repository.find_session(&updated_session.id).unwrap(),
         Some(updated_session.clone())
     );
+    // Title survives status update
+    assert_eq!(updated_session.title, Some("代码审查".to_string()));
+    assert_eq!(updated_session.status, SessionStatus::Stopped);
     assert_eq!(
         repository
             .soft_delete_session(&updated_session.id, /*deleted_at*/ 32)
@@ -720,7 +729,7 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
              INSERT INTO project_work_contexts VALUES ('context-1', 'web', 'main', 'project-1', 100, 1, 1);",
         )?;
         connection.execute(
-            "INSERT INTO sessions VALUES ('session-1', 'task-1', 'ora-space.opencode', 'provider-1', ?1, 1, 1, 0)",
+            "INSERT INTO sessions (id, task_id, agent_cli, agent_session_id, status, created_at, updated_at, is_deleted) VALUES ('session-1', 'task-1', 'ora-space.opencode', 'provider-1', ?1, 1, 1, 0)",
             rusqlite::params![session_status.database_value()],
         )?;
         Ok(())
