@@ -265,14 +265,14 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                                 : unread.has(directSession.id)
                                   ? <UnreadDot label={t("sidebar.unread")} />
                                   : <IconMessageCircle className="size-4 text-muted-foreground" aria-label={t("sidebar.directChatTask")} />}
-                            label={directSession.title ?? agentCliLabel(directSession.agentCli)}
+                            label={directSession.title ?? t("session.newSessionDefault")}
                             onClick={() => selectSession(directSession.id, task.id, project.id)}
                             menu={(
                               <EntityMenu
                                 onDelete={() => setDeleteTarget({
                                   kind: "task",
                                   id: task.id,
-                                  name: directSession.title ?? agentCliLabel(directSession.agentCli),
+                                  name: directSession.title ?? t("session.newSessionDefault"),
                                   workspaceMode: task.workspaceMode,
                                   sessionIds: [directSession.id],
                                 })}
@@ -344,11 +344,11 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                                   : unread.has(session.id)
                                     ? <UnreadDot label={t("sidebar.unread")} />
                                     : null}
-                              label={session.title ?? agentCliLabel(session.agentCli)}
+                              label={session.title ?? t("session.newSessionDefault")}
                               onClick={() => selectSession(session.id, task.id, project.id)}
                               menu={(
                                 <EntityMenu
-                                  onDelete={() => setDeleteTarget({ kind: "session", id: session.id, name: session.title ?? agentCliLabel(session.agentCli) })}
+                                  onDelete={() => setDeleteTarget({ kind: "session", id: session.id, name: session.title ?? t("session.newSessionDefault") })}
                                 />
                               )}
                             />
