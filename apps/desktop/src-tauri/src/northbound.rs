@@ -1,6 +1,6 @@
 use ora_application::NorthboundBus;
 use ora_contracts::Northbound;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 /// Delivers northbound events to the Desktop frontend via Tauri IPC.
 ///

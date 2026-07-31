@@ -109,14 +109,17 @@ fn bootstrap_desktop(
     );
     register_gitlancer_logger();
     let northbound = crate::northbound::TauriNorthboundBus::new(app.handle().clone());
-    let backend = Backend::open(BackendPaths {
-        database_path: app_data_directory.join("ora.sqlite3"),
-        worktree_root: config_snapshot.worktree_root().to_path_buf(),
-        home_directory: app
-            .path()
-            .home_dir()
-            .map_err(DesktopBootstrapError::AppDataDirectory)?,
-    }, northbound)?;
+    let backend = Backend::open(
+        BackendPaths {
+            database_path: app_data_directory.join("ora.sqlite3"),
+            worktree_root: config_snapshot.worktree_root().to_path_buf(),
+            home_directory: app
+                .path()
+                .home_dir()
+                .map_err(DesktopBootstrapError::AppDataDirectory)?,
+        },
+        northbound,
+    )?;
 
     Ok((
         DesktopState {
