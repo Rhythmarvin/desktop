@@ -27,6 +27,9 @@ function recordingTransport<TResponse>(
     stream<TEvent>(): AsyncIterable<TEvent> {
       throw new Error("stream was not expected in this test");
     },
+    subscribe(): () => void {
+      throw new Error("subscribe was not expected in this test");
+    },
   };
 }
 
@@ -241,6 +244,9 @@ test("forwards call options through every unary client operation", async () => {
     },
     stream<TEvent>(): AsyncIterable<TEvent> {
       throw new Error("stream was not expected in this test");
+    },
+    subscribe(): () => void {
+      throw new Error("subscribe was not expected in this test");
     },
   };
   const client = createContractsClient(transport);
