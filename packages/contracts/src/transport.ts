@@ -27,8 +27,12 @@ export interface ContractTransport {
   ): AsyncIterable<TEvent>;
   /**
    * Subscribes to backend-pushed notifications. Returns an unsubscribe function.
+   * `onOutOfSync` fires when a lossy transport connects or reports missed events.
    */
-  subscribe(handler: (message: TransportMessage) => void): () => void;
+  subscribe(
+    handler: (message: TransportMessage) => void,
+    onOutOfSync: () => void,
+  ): () => void;
 }
 
 export type ContractStreamFrame<TEvent> =

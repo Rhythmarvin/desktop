@@ -6,7 +6,7 @@ const BROADCAST_CAPACITY: usize = 256;
 
 /// Broadcasts backend `Northbound` events to all connected SSE clients.
 ///
-/// Slow consumers are silently dropped when the channel buffer fills.
+/// Slow consumers observe a lag signal after the channel discards buffered events.
 #[derive(Clone, Debug)]
 pub struct BroadcastNorthboundBus {
     sender: broadcast::Sender<Northbound>,

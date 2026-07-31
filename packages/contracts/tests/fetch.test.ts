@@ -98,6 +98,54 @@ test("normalizes structured server errors from fetch responses", async () => {
   ]);
 });
 
+test("recovers northbound subscriptions after connect or missed events", () => {
+  const listeners = new Map<string, EventListener>();
+  let subscribedUrl: string | undefined;
+  let closed = false;
+  const transport = createFetchTransport({
+    baseUrl: "http://localhost:32578",
+    eventSourceFactory: (url) => {
+      subscribedUrl = url;
+      return {
+        addEventListener(type, listener) {
+          listeners.set(type, listener);
+        },
+        close() {
+          closed = true;
+        },
+      };
+    },
+  });
+  const messages: unknown[] = [];
+  let recoveryCount = 0;
+
+  const unsubscribe = transport.subscribe(
+    (message) => messages.push(message),
+    () => {
+      recoveryCount += 1;
+    },
+  );
+  listeners.get("open")?.(new Event("open"));
+  listeners.get("gap")?.(new MessageEvent("gap", { data: '{"skipped":2}' }));
+  listeners.get("northbound")?.(
+    new MessageEvent("northbound", {
+      data: '{"type":"session_title_updated","session_id":"session-1","title":"New title"}',
+    }),
+  );
+  unsubscribe();
+
+  assert.equal(subscribedUrl, "http://localhost:32578/api/northbound");
+  assert.equal(recoveryCount, 2);
+  assert.deepEqual(messages, [
+    {
+      type: "session_title_updated",
+      session_id: "session-1",
+      title: "New title",
+    },
+  ]);
+  assert.equal(closed, true);
+});
+
 test("starts NDJSON streams lazily, decodes split frames, and enforces single consumption", async () => {
   let fetchCalls = 0;
   const encoder = new TextEncoder();

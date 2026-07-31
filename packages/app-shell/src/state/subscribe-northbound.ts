@@ -12,13 +12,19 @@ export function useNorthbound(
   queryClient: QueryClient,
 ): void {
   useEffect(() => {
-    const unsubscribe = client.northbound.subscribe((event) => {
-      switch (event.type) {
-        case "session_title_updated":
-          queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-          break;
-      }
-    });
+    const invalidateSessions = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+    };
+    const unsubscribe = client.northbound.subscribe(
+      (event) => {
+        switch (event.type) {
+          case "session_title_updated":
+            invalidateSessions();
+            break;
+        }
+      },
+      invalidateSessions,
+    );
     return unsubscribe;
   }, [client, queryClient]);
 }

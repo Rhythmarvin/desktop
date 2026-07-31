@@ -174,5 +174,8 @@ export function createMockClient(state: MockClientState): ContractsClient {
         entries: [],
       }),
     },
+    northbound: {
+      subscribe: () => () => undefined,
+    },
   };
 }

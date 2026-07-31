@@ -5,6 +5,12 @@ const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 export type FetchTransportOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
+  eventSourceFactory?: (url: string) => EventSourceConnection;
+};
+
+export type EventSourceConnection = {
+  addEventListener(type: string, listener: EventListener): void;
+  close(): void;
 };
 
 export function createFetchTransport(
@@ -49,12 +55,17 @@ export function createFetchTransport(
         },
       };
     },
-    subscribe(handler: (message: TransportMessage) => void): () => void {
+    subscribe(
+      handler: (message: TransportMessage) => void,
+      onOutOfSync: () => void,
+    ): () => void {
       const url = resolveUrl(options.baseUrl ?? "", "/api/northbound");
-      const source = new EventSource(url);
-      source.addEventListener("northbound", (event: MessageEvent) => {
+      const source = options.eventSourceFactory?.(url) ?? new EventSource(url);
+      source.addEventListener("open", onOutOfSync);
+      source.addEventListener("gap", onOutOfSync);
+      source.addEventListener("northbound", (event) => {
         try {
-          handler(JSON.parse(event.data) as TransportMessage);
+          handler(JSON.parse((event as MessageEvent<string>).data) as TransportMessage);
         } catch {
           // Skip unparseable events silently.
         }

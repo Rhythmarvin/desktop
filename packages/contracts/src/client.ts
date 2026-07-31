@@ -49,7 +49,10 @@ export type ContractsClient = {
 } & {
   /** Backend-to-frontend notification subscription, not part of the endpoint manifest. */
   northbound: {
-    subscribe(handler: (event: Northbound) => void): () => void;
+    subscribe(
+      handler: (event: Northbound) => void,
+      onOutOfSync: () => void,
+    ): () => void;
   };
 };
 
@@ -119,7 +122,8 @@ export function createContractsClient(
         executeOperation("getGitIdentity", request, transport, options),
     },
     northbound: {
-      subscribe: (handler) => transport.subscribe(handler as (msg: unknown) => void),
+      subscribe: (handler, onOutOfSync) =>
+        transport.subscribe(handler as (msg: unknown) => void, onOutOfSync),
     },
   };
 }

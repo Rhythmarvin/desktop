@@ -8,9 +8,9 @@ use ora_contracts::Northbound;
 pub trait NorthboundBus: Send + Sync {
     /// Pushes one typed northbound event toward connected frontend consumers.
     ///
-    /// This is a fire-and-forget operation — delivery failures are silently
-    /// ignored because the frontend re-fetches fresh state on its next render
-    /// cycle regardless of individual events.
+    /// This is a fire-and-forget operation: delivery failures are not surfaced
+    /// to backend use cases. Lossy transports must notify consumers to re-fetch
+    /// authoritative state when delivery continuity cannot be guaranteed.
     fn emit(&self, event: Northbound);
 }
 
