@@ -95,34 +95,60 @@ impl SessionRepository for SqliteSessionRepository {
             .map_err(session_repository_error_from_database)
     }
 
-    /// Updates lifecycle fields while preserving immutable provider and task routing.
-    fn update_session(&self, session: Session) -> Result<Session, SessionRepositoryError> {
+    /// Updates only the title and returns a fresh snapshot with concurrent status changes intact.
+    fn update_session_title(
+        &self,
+        session_id: &SessionId,
+        title: String,
+        updated_at: i64,
+    ) -> Result<Session, SessionRepositoryError> {
         self.pool
             .with_connection(|connection| {
-                let updated_rows = connection.execute(
+                let mut statement = connection.prepare(
                     "UPDATE sessions
-                     SET status = ?2, title = ?3, updated_at = ?4, is_deleted = ?5
-                     WHERE id = ?1 AND task_id = ?6 AND agent_cli = ?7
-                       AND agent_session_id = ?8 AND is_deleted = 0",
-                    params![
-                        session.id.as_ref(),
-                        session.status.database_value(),
-                        session.title.as_deref(),
-                        session.audit_fields.updated_at,
-                        bool_to_sqlite(session.audit_fields.is_deleted),
-                        session.task_id.as_ref(),
-                        session.agent_cli.database_value(),
-                        session.agent_session_id,
-                    ],
+                     SET title = ?2, updated_at = MAX(updated_at, ?3)
+                     WHERE id = ?1 AND is_deleted = 0
+                     RETURNING id, task_id, agent_cli, agent_session_id, status, title,
+                               created_at, updated_at, is_deleted",
                 )?;
-
-                if updated_rows == 0 {
-                    return Err(crate::DatabaseError::Sqlite(
+                let mut rows = statement.query(params![session_id.as_ref(), title, updated_at])?;
+                match rows.next()? {
+                    Some(row) => map_session_row(row),
+                    None => Err(crate::DatabaseError::Sqlite(
                         rusqlite::Error::QueryReturnedNoRows,
-                    ));
+                    )),
                 }
+            })
+            .map_err(session_repository_error_from_database)
+    }
 
-                Ok(session)
+    /// Updates only lifecycle state and returns a fresh snapshot with concurrent title changes intact.
+    fn update_session_status(
+        &self,
+        session_id: &SessionId,
+        status: SessionStatus,
+        updated_at: i64,
+    ) -> Result<Session, SessionRepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "UPDATE sessions
+                     SET status = ?2, updated_at = MAX(updated_at, ?3)
+                     WHERE id = ?1 AND is_deleted = 0
+                     RETURNING id, task_id, agent_cli, agent_session_id, status, title,
+                               created_at, updated_at, is_deleted",
+                )?;
+                let mut rows = statement.query(params![
+                    session_id.as_ref(),
+                    status.database_value(),
+                    updated_at
+                ])?;
+                match rows.next()? {
+                    Some(row) => map_session_row(row),
+                    None => Err(crate::DatabaseError::Sqlite(
+                        rusqlite::Error::QueryReturnedNoRows,
+                    )),
+                }
             })
             .map_err(session_repository_error_from_database)
     }

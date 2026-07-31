@@ -487,7 +487,9 @@ fn session_repository_supports_crud_and_soft_delete() {
         .clone()
         .with_title("代码审查".to_string(), 15);
     assert_eq!(
-        repository.update_session(titled_session.clone()).unwrap(),
+        repository
+            .update_session_title(&created_session.id, "代码审查".to_string(), 15)
+            .unwrap(),
         titled_session.clone()
     );
     assert_eq!(
@@ -499,7 +501,9 @@ fn session_repository_supports_crud_and_soft_delete() {
     let updated_session = titled_session.with_status(SessionStatus::Stopped, 22);
 
     assert_eq!(
-        repository.update_session(updated_session.clone()).unwrap(),
+        repository
+            .update_session_status(&created_session.id, SessionStatus::Stopped, 22)
+            .unwrap(),
         updated_session.clone()
     );
     assert_eq!(
@@ -517,6 +521,69 @@ fn session_repository_supports_crud_and_soft_delete() {
     );
     assert_eq!(repository.find_session(&updated_session.id).unwrap(), None);
     assert_eq!(repository.list_sessions().unwrap(), Vec::<Session>::new());
+}
+
+/// Verifies independent field updates cannot overwrite each other when they run concurrently.
+#[test]
+fn session_title_and_status_updates_preserve_each_other() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let project_repository = SqliteProjectRepository::new(pool.clone());
+    let task_repository = SqliteTaskRepository::new(pool.clone());
+    let repository = SqliteSessionRepository::new(pool);
+    project_repository
+        .create_project(Project::new(
+            ProjectId::new("project-concurrent"),
+            "Ora",
+            "/tmp/ora",
+            AuditFields::new(10, 10, false),
+        ))
+        .unwrap();
+    task_repository
+        .create_task(Task::new(
+            TaskId::new("task-concurrent"),
+            ProjectId::new("project-concurrent"),
+            "Test concurrent session updates",
+            TaskStatus::Todo,
+            None,
+            AuditFields::new(11, 11, false),
+        ))
+        .unwrap();
+    let session = Session::new(
+        SessionId::new("session-concurrent"),
+        TaskId::new("task-concurrent"),
+        AgentCli::OpenCode,
+        "provider-concurrent",
+        SessionStatus::Running,
+        AuditFields::new(12, 12, false),
+    );
+    repository.create_session(session.clone()).unwrap();
+
+    let title_repository = repository.clone();
+    let title_session_id = session.id.clone();
+    let title_update = std::thread::spawn(move || {
+        title_repository
+            .update_session_title(&title_session_id, "并发标题".to_string(), 20)
+            .unwrap()
+    });
+    let status_repository = repository.clone();
+    let status_session_id = session.id.clone();
+    let status_update = std::thread::spawn(move || {
+        status_repository
+            .update_session_status(&status_session_id, SessionStatus::Stopped, 21)
+            .unwrap()
+    });
+
+    title_update.join().unwrap();
+    status_update.join().unwrap();
+
+    assert_eq!(
+        repository.find_session(&session.id).unwrap(),
+        Some(
+            session
+                .with_title("并发标题".to_string(), 20)
+                .with_status(SessionStatus::Stopped, 21)
+        )
+    );
 }
 
 /// Verifies a completed ACP handshake cannot attach a new session to a deleted task.

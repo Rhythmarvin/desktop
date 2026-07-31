@@ -1,4 +1,4 @@
-use ora_domain::{Session, SessionId};
+use ora_domain::{Session, SessionId, SessionStatus};
 
 /// Supplies application-owned persistence operations for session CRUD use cases.
 ///
@@ -17,8 +17,21 @@ pub trait SessionRepository {
     /// Lists every visible session in storage order.
     fn list_sessions(&self) -> Result<Vec<Session>, SessionRepositoryError>;
 
-    /// Persists a session replacement produced by the application layer.
-    fn update_session(&self, session: Session) -> Result<Session, SessionRepositoryError>;
+    /// Updates only the mutable title so concurrent lifecycle writes remain intact.
+    fn update_session_title(
+        &self,
+        session_id: &SessionId,
+        title: String,
+        updated_at: i64,
+    ) -> Result<Session, SessionRepositoryError>;
+
+    /// Updates only lifecycle state so concurrent metadata writes remain intact.
+    fn update_session_status(
+        &self,
+        session_id: &SessionId,
+        status: SessionStatus,
+        updated_at: i64,
+    ) -> Result<Session, SessionRepositoryError>;
 
     /// Marks a session deleted and returns whether a visible session was affected.
     fn soft_delete_session(

@@ -36,8 +36,33 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 pub(super) struct RuntimeConnection {
     pub client: AcpClient<ChildStdin>,
     pub generation: u64,
+    pub capabilities: RuntimeCapabilities,
+}
+
+/// Records the optional ACP session methods negotiated for one process generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RuntimeCapabilities {
     pub load_session_supported: bool,
+    pub list_sessions_supported: bool,
     pub close_session_supported: bool,
+}
+
+impl From<&InitializeResponse> for RuntimeCapabilities {
+    fn from(response: &InitializeResponse) -> Self {
+        Self {
+            load_session_supported: response.agent_capabilities.load_session,
+            list_sessions_supported: response
+                .agent_capabilities
+                .session_capabilities
+                .list
+                .is_some(),
+            close_session_supported: response
+                .agent_capabilities
+                .session_capabilities
+                .close
+                .is_some(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -245,8 +270,7 @@ struct SharedProcess {
     client: AcpClient<ChildStdin>,
     updates: mpsc::UnboundedReceiver<SessionNotification>,
     control: mpsc::UnboundedReceiver<AcpControl>,
-    load_session_supported: bool,
-    close_session_supported: bool,
+    capabilities: RuntimeCapabilities,
 }
 
 /// Supervises one process generation at a time and retries only after it is fully reaped.
@@ -273,8 +297,7 @@ async fn run_supervisor(context: SupervisorContext) {
                 let connection = RuntimeConnection {
                     client: process.client.clone(),
                     generation,
-                    load_session_supported: process.load_session_supported,
-                    close_session_supported: process.close_session_supported,
+                    capabilities: process.capabilities,
                 };
                 let _ = state.send(ConnectionState::Ready(connection));
                 ora_info!(
@@ -413,18 +436,14 @@ async fn spawn_initialized_process(
             ));
         }
     };
+    let capabilities = RuntimeCapabilities::from(&response);
     let (client, updates, control) = peer.into_parts();
     Ok(SharedProcess {
         child,
         client,
         updates,
         control,
-        load_session_supported: response.agent_capabilities.load_session,
-        close_session_supported: response
-            .agent_capabilities
-            .session_capabilities
-            .close
-            .is_some(),
+        capabilities,
     })
 }
 
@@ -436,8 +455,10 @@ fn mark_running_sessions_stopped(pool: &RepositoryPool, clock: SystemClock, agen
     };
     for session in sessions {
         if session.agent_cli == agent_cli && session.status == SessionStatus::Running {
-            let _ = repository.update_session(
-                session.with_status(SessionStatus::Stopped, clock.now_timestamp_millis()),
+            let _ = repository.update_session_status(
+                &session.id,
+                SessionStatus::Stopped,
+                clock.now_timestamp_millis(),
             );
         }
     }
@@ -460,7 +481,11 @@ async fn stop_process_with_grace(child: &TokioManagedProcess) {
 
 #[cfg(test)]
 mod tests {
-    use super::spawn_runtime_thread;
+    use super::{RuntimeCapabilities, spawn_runtime_thread};
+    use ora_contracts::acp::common::EmptyObject;
+    use ora_contracts::acp::initialization::{
+        AgentCapabilities, InitializeResponse, ProtocolVersion, SessionCapabilities,
+    };
     use ora_domain::AgentCli;
     use pretty_assertions::assert_eq;
     use std::time::Duration;
@@ -476,5 +501,36 @@ mod tests {
         .expect("start runtime thread");
 
         assert_eq!(receiver.recv_timeout(Duration::from_secs(1)), Ok("ready"));
+    }
+
+    /// Verifies only explicitly advertised optional session methods are enabled.
+    #[test]
+    fn derives_runtime_capabilities_from_initialize_response() {
+        let advertised = InitializeResponse::new(ProtocolVersion(1)).agent_capabilities(
+            AgentCapabilities::new()
+                .load_session(true)
+                .session_capabilities(
+                    SessionCapabilities::new()
+                        .list(EmptyObject {})
+                        .close(EmptyObject {}),
+                ),
+        );
+
+        assert_eq!(
+            RuntimeCapabilities::from(&advertised),
+            RuntimeCapabilities {
+                load_session_supported: true,
+                list_sessions_supported: true,
+                close_session_supported: true,
+            }
+        );
+        assert_eq!(
+            RuntimeCapabilities::from(&InitializeResponse::new(ProtocolVersion(1))),
+            RuntimeCapabilities {
+                load_session_supported: false,
+                list_sessions_supported: false,
+                close_session_supported: false,
+            }
+        );
     }
 }

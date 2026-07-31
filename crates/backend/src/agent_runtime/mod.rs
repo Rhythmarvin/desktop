@@ -188,26 +188,27 @@ impl AgentRuntimeManager {
         );
         self.insert_actor(session.clone(), cwd.clone(), supervisor, Some(channel))?;
 
-        // Schedule the initial title fetch: captures the default title as a
-        // baseline so later prompt-completion tasks can detect a change.
-        let title_client = connection.client.clone();
-        let title_agent_sid = session.agent_session_id.clone();
-        let title_ora_sid = session.id.clone();
-        let title_repo = SqliteSessionRepository::new(self.inner.pool.clone());
-        let title_cwd = cwd.clone();
-        let title_northbound = self.inner.northbound.clone();
-        ora_debug!(session_id = %title_ora_sid, "scheduling creation-time title refresh");
-        schedule_deferred(Duration::from_secs(3), async move {
-            refresh_session_title(
-                &title_client,
-                &title_agent_sid,
-                &title_ora_sid,
-                &title_repo,
-                title_cwd,
-                title_northbound.as_ref(),
-            )
-            .await;
-        });
+        if connection.capabilities.list_sessions_supported {
+            // Capture the provider's initial placeholder only when session/list was negotiated.
+            let title_client = connection.client.clone();
+            let title_agent_sid = session.agent_session_id.clone();
+            let title_ora_sid = session.id.clone();
+            let title_repo = SqliteSessionRepository::new(self.inner.pool.clone());
+            let title_cwd = cwd.clone();
+            let title_northbound = self.inner.northbound.clone();
+            ora_debug!(session_id = %title_ora_sid, "scheduling creation-time title refresh");
+            schedule_deferred(Duration::from_secs(3), async move {
+                refresh_session_title(
+                    &title_client,
+                    &title_agent_sid,
+                    &title_ora_sid,
+                    &title_repo,
+                    title_cwd,
+                    title_northbound.as_ref(),
+                )
+                .await;
+            });
+        }
 
         Ok(CreateSessionResponse {
             session: contract_session(session),
@@ -443,8 +444,10 @@ fn reconcile_running_sessions(
     {
         if session.status == SessionStatus::Running {
             repository
-                .update_session(
-                    session.with_status(SessionStatus::Stopped, clock.now_timestamp_millis()),
+                .update_session_status(
+                    &session.id,
+                    SessionStatus::Stopped,
+                    clock.now_timestamp_millis(),
                 )
                 .map_err(|_| {
                     runtime_internal("session_repository_error", "failed to reconcile sessions")

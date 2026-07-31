@@ -75,8 +75,7 @@ pub(crate) async fn refresh_session_title(
     }
 
     let now = SystemClock.now_timestamp_millis();
-    let updated = session.with_title(acp_title.clone(), now);
-    if let Err(error) = repository.update_session(updated) {
+    if let Err(error) = repository.update_session_title(session_id, acp_title.clone(), now) {
         ora_debug!(
             session_id = %session_id,
             title = %acp_title,

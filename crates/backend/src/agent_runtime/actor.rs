@@ -85,18 +85,17 @@ impl RuntimeActor {
         events: mpsc::Sender<Result<LoadSessionEvent, BackendError>>,
     ) {
         self.unload().await;
-        // Sync the title from the last persisted row before overwriting status,
-        // otherwise a fire-and-forget title refresh is lost on every session/load.
-        sync_title_from_db(&self.repository, &mut self.session);
-        let running = self
-            .session
-            .clone()
-            .with_status(SessionStatus::Running, self.clock.now_timestamp_millis());
-        if self.repository.update_session(running.clone()).is_err() {
-            let _ = events.try_send(Err(session_not_found(self.session.id.as_ref())));
-            return;
-        }
-        self.session = running;
+        self.session = match self.repository.update_session_status(
+            &self.session.id,
+            SessionStatus::Running,
+            self.clock.now_timestamp_millis(),
+        ) {
+            Ok(session) => session,
+            Err(_) => {
+                let _ = events.try_send(Err(session_not_found(self.session.id.as_ref())));
+                return;
+            }
+        };
         let channel = match self
             .connection
             .open_session_channel(&self.session.agent_session_id)
@@ -108,7 +107,7 @@ impl RuntimeActor {
                 return;
             }
         };
-        if !channel.connection.load_session_supported {
+        if !channel.connection.capabilities.load_session_supported {
             let _ = events.try_send(Err(BackendError::new(
                 BackendErrorKind::Conflict,
                 "session_load_unsupported",
@@ -272,7 +271,10 @@ impl RuntimeActor {
                                 // non-default title acquired by a prior refresh stops
                                 // scheduling duplicate session/list calls.
                                 sync_title_from_db(&self.repository, &mut self.session);
-                                if !self.title_refresh_scheduled && is_default_title(self.session.title.as_deref()) {
+                                if channel.connection.capabilities.list_sessions_supported
+                                    && !self.title_refresh_scheduled
+                                    && is_default_title(self.session.title.as_deref())
+                                {
                                     self.title_refresh_scheduled = true;
                                     ora_debug!(session_id = %self.session.id, "scheduling post-prompt title refresh");
                                     let title_client = channel.connection.client.clone();
@@ -473,7 +475,7 @@ impl RuntimeActor {
 
     /// Detaches one routed session while leaving the shared CLI process available.
     async fn isolate_channel(&mut self, channel: SessionChannel) {
-        if channel.connection.close_session_supported {
+        if channel.connection.capabilities.close_session_supported {
             let _ = timeout(
                 CANCELLATION_GRACE,
                 channel
@@ -512,19 +514,18 @@ impl RuntimeActor {
     /// Persists a stopped state after the provider session is detached or becomes unusable.
     fn mark_stopped(&mut self) {
         self.channel = None;
-        sync_title_from_db(&self.repository, &mut self.session);
-        self.session = self
-            .session
-            .clone()
-            .with_status(SessionStatus::Stopped, self.clock.now_timestamp_millis());
-        let _ = self.repository.update_session(self.session.clone());
+        if let Ok(session) = self.repository.update_session_status(
+            &self.session.id,
+            SessionStatus::Stopped,
+            self.clock.now_timestamp_millis(),
+        ) {
+            self.session = session;
+        }
         ora_debug!(session_id = %self.session.id, "session marked stopped");
     }
 }
 
-/// Pulls the current title from the repository into the in-memory session so
-/// that status-only updates (mark_stopped, run_load) do not overwrite a title
-/// that was refreshed by a fire-and-forget task.
+/// Pulls the current title into actor memory before deciding whether another refresh is useful.
 fn sync_title_from_db(repository: &SqliteSessionRepository, session: &mut Session) {
     match repository.find_session(&session.id) {
         Ok(Some(persisted)) => {
