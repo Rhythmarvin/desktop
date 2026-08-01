@@ -12,6 +12,7 @@ mod task_diff_comment;
 mod virtual_entry;
 mod virtual_folder;
 mod worktree;
+mod workflow;
 
 #[cfg(test)]
 mod tests;
@@ -22,7 +23,8 @@ pub use audit_fields::AuditFields;
 pub use error::DomainModelError;
 pub use ids::{
     AgentDefinitionId, ArtifactId, ProjectId, ProjectWorkContextId, SessionId, SkillId,
-    TaskDiffCommentId, TaskId, VirtualEntryId, VirtualFolderId, WorktreeId,
+    TaskDiffCommentId, TaskId, VirtualEntryId, VirtualFolderId, WorkflowId, WorkflowSnapshotId,
+    WorktreeId,
 };
 pub use project::Project;
 pub use project_work_context::{ProjectWorkContext, ProjectWorkContextSurface};
@@ -37,3 +39,6 @@ pub use task_diff_comment::{
 pub use virtual_entry::{VirtualEntry, VirtualEntryKind};
 pub use virtual_folder::VirtualFolder;
 pub use worktree::{Worktree, WorktreeActivity, WorktreeBaseline};
+pub use workflow::{
+    CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
+};

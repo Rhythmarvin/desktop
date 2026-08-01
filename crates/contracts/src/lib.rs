@@ -12,6 +12,7 @@ mod skill;
 mod skill_import;
 mod task;
 mod task_diff;
+mod workflow;
 
 pub use agent::{
     Agent, CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse,
@@ -41,7 +42,9 @@ pub use frontend::{
     SKILLS_PATH, TASK_COMMIT_PATH, TASK_DIFF_COMMENT_REPLIES_PATH, TASK_DIFF_COMMENT_STATUS_PATH,
     TASK_DIFF_COMMENTS_PATH, TASK_DIFF_PATH, TASK_PATH, TASK_PUSH_PATH, TASK_WORKSPACE_PATH,
     TASKS_PATH, WORKSPACE_DIRECTORY_PATH, WORKSPACE_FILE_PATH, WORKSPACE_SEARCH_PATH,
-    WORKSPACE_WATCH_PATH, frontend_endpoints,
+    WORKSPACE_WATCH_PATH, WORKFLOWS_PATH, WORKFLOW_ACTIVATE_PATH, WORKFLOW_DRAFT_PATH,
+    WORKFLOW_PATH, WORKFLOW_PUBLISH_PATH, WORKFLOW_ROLLBACK_PATH, WORKFLOW_VERSIONS_PATH,
+    WORKFLOW_VERSION_PATH, frontend_endpoints,
 };
 pub use git::{GetGitIdentityRequest, GitIdentityResponse};
 pub use project::{
@@ -92,6 +95,16 @@ pub use task_diff::{
     SetTaskDiffCommentStatusRequest, SetTaskDiffCommentStatusResponse, TaskDiffComment,
     TaskDiffCommentAnchor, TaskDiffCommentKind, TaskDiffScope, TaskDiffSide, TaskDiffThreadStatus,
 };
+pub use workflow::{
+    ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest,
+    CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest,
+    DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest, GetVersionResponse,
+    GetWorkflowRequest, GetWorkflowResponse, ListVersionsRequest, ListVersionsResponse,
+    ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse,
+    RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse,
+    UpdateWorkflowRequest, UpdateWorkflowResponse, Workflow, WorkflowSnapshot, WorkflowSummary,
+    WorkflowVersion,
+};
 use ts_rs::{Config, ExportError};
 
 /// Exports every contract DTO family into the shared TypeScript package for frontend consumers.
@@ -115,6 +128,7 @@ pub fn export_typescript_bindings_to(
     skill_import::export(&config)?;
     task::export(&config)?;
     task_diff::export(&config)?;
+    workflow::export(&config)?;
 
     Ok(())
 }

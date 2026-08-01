@@ -29,4 +29,6 @@ pub enum DomainModelError {
     SkillDescriptionTooLarge,
     #[error("agent definition name must not be blank")]
     EmptyAgentDefinitionName,
+    #[error("workflow name must not be blank")]
+    EmptyWorkflowName,
 }
