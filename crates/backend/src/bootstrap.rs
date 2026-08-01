@@ -605,18 +605,14 @@ impl Backend {
         &self,
         request: RollbackWorkflowRequest,
     ) -> Result<RollbackWorkflowResponse, BackendError> {
-        self.workflow
-            .rollback(request)
-            .map_err(BackendError::from)
+        self.workflow.rollback(request).map_err(BackendError::from)
     }
     /// Activates a published version through the shared application composition.
     pub fn activate_workflow(
         &self,
         request: ActivateWorkflowRequest,
     ) -> Result<ActivateWorkflowResponse, BackendError> {
-        self.workflow
-            .activate(request)
-            .map_err(BackendError::from)
+        self.workflow.activate(request).map_err(BackendError::from)
     }
     /// Lists published versions through the shared application composition.
     pub fn list_workflow_versions(

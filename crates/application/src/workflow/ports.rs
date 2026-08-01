@@ -32,10 +32,7 @@ pub trait WorkflowRepository {
     fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, WorkflowRepositoryError>;
 
     /// Replaces a visible workflow identified by its stable identifier.
-    fn update_workflow(
-        &self,
-        workflow: Workflow,
-    ) -> Result<Workflow, WorkflowRepositoryError>;
+    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, WorkflowRepositoryError>;
 
     /// Marks a visible workflow deleted and cascades the soft-delete to all its snapshots
     /// within a single transaction.

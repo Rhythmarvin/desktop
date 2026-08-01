@@ -57,7 +57,6 @@ pub use task_diff::{
     TaskDiffSnapshot, TaskGitCommit, TaskGitPush, TaskGitWriter, TaskGitWriterError,
     UuidTaskDiffCommentIdGenerator, task_diff_id,
 };
-pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};
 pub use workflow::{
     ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler, DeleteWorkflowHandler,
     GetDraftHandler, GetVersionHandler, GetWorkflowHandler, ListVersionsHandler,
@@ -65,3 +64,4 @@ pub use workflow::{
     UpdateWorkflowHandler, UuidWorkflowIdGenerator, WorkflowIdGenerator, WorkflowRepository,
     WorkflowRepositoryError,
 };
+pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

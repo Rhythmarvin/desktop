@@ -11,8 +11,8 @@ mod task;
 mod task_diff_comment;
 mod virtual_entry;
 mod virtual_folder;
-mod worktree;
 mod workflow;
+mod worktree;
 
 #[cfg(test)]
 mod tests;
@@ -42,3 +42,4 @@ pub use worktree::{Worktree, WorktreeActivity, WorktreeBaseline};
 pub use workflow::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
 };
+pub use worktree::{Worktree, WorktreeActivity};

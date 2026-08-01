@@ -1,17 +1,15 @@
 use std::sync::Arc;
 
 use ora_contracts::{
-    ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest, CreateWorkflowResponse,
-    DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest, DeleteWorkflowResponse,
-    GetDraftRequest, GetDraftResponse, GetVersionRequest, GetVersionResponse, GetWorkflowRequest,
-    GetWorkflowResponse, ListVersionsRequest, ListVersionsResponse, ListWorkflowsRequest,
-    ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse, RollbackWorkflowRequest,
-    RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse, UpdateWorkflowRequest,
-    UpdateWorkflowResponse,
+    ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest,
+    CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest,
+    DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest,
+    GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, ListVersionsRequest,
+    ListVersionsResponse, ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest,
+    PublishWorkflowResponse, RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest,
+    UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse,
 };
-use ora_domain::{
-    AuditFields, Workflow, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
-};
+use ora_domain::{AuditFields, Workflow, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId};
 use ora_logging::clock::now_local;
 use time::macros::format_description;
 
@@ -44,7 +42,8 @@ impl<Repository, IdGenerator, ClockSource>
     }
 }
 
-impl<Repository, IdGenerator, ClockSource> CreateWorkflowHandler<Repository, IdGenerator, ClockSource>
+impl<Repository, IdGenerator, ClockSource>
+    CreateWorkflowHandler<Repository, IdGenerator, ClockSource>
 where
     Repository: WorkflowRepository,
     IdGenerator: WorkflowIdGenerator,
@@ -302,7 +301,11 @@ where
         let workflow_id = WorkflowId::new(request.workflow_id);
         let updated = self
             .repository
-            .update_draft(&workflow_id, request.graph, self.clock.now_timestamp_millis())
+            .update_draft(
+                &workflow_id,
+                request.graph,
+                self.clock.now_timestamp_millis(),
+            )
             .map_err(ApplicationError::from_workflow_repository_error)?;
 
         Ok(UpdateDraftResponse {
@@ -330,7 +333,8 @@ impl<Repository, IdGenerator, ClockSource>
     }
 }
 
-impl<Repository, IdGenerator, ClockSource> PublishWorkflowHandler<Repository, IdGenerator, ClockSource>
+impl<Repository, IdGenerator, ClockSource>
+    PublishWorkflowHandler<Repository, IdGenerator, ClockSource>
 where
     Repository: WorkflowRepository + Send + Sync + 'static,
     IdGenerator: WorkflowIdGenerator,
@@ -442,7 +446,11 @@ where
 
         let updated = self
             .repository
-            .rollback_draft(&workflow_id, &snapshot_id, self.clock.now_timestamp_millis())
+            .rollback_draft(
+                &workflow_id,
+                &snapshot_id,
+                self.clock.now_timestamp_millis(),
+            )
             .map_err(ApplicationError::from_workflow_repository_error)?;
 
         Ok(RollbackWorkflowResponse {

@@ -6,13 +6,13 @@ use ora_application::{
     UpdateDraftHandler, UpdateWorkflowHandler, UuidWorkflowIdGenerator,
 };
 use ora_contracts::{
-    ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest, CreateWorkflowResponse,
-    DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest, DeleteWorkflowResponse,
-    GetDraftRequest, GetDraftResponse, GetVersionRequest, GetVersionResponse, GetWorkflowRequest,
-    GetWorkflowResponse, ListVersionsRequest, ListVersionsResponse, ListWorkflowsRequest,
-    ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse, RollbackWorkflowRequest,
-    RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse, UpdateWorkflowRequest,
-    UpdateWorkflowResponse,
+    ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest,
+    CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest,
+    DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest,
+    GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, ListVersionsRequest,
+    ListVersionsResponse, ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest,
+    PublishWorkflowResponse, RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest,
+    UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse,
 };
 use ora_db::{RepositoryPool, SqliteWorkflowRepository};
 use std::sync::Arc;
@@ -41,22 +41,14 @@ impl WorkflowApi {
         let id_generator = UuidWorkflowIdGenerator::new();
 
         Self {
-            create: CreateWorkflowHandler::new(
-                (*repository).clone(),
-                id_generator.clone(),
-                clock,
-            ),
+            create: CreateWorkflowHandler::new((*repository).clone(), id_generator.clone(), clock),
             get: GetWorkflowHandler::new(repository.clone()),
             list: ListWorkflowsHandler::new(repository.clone()),
             update: UpdateWorkflowHandler::new(repository.clone(), clock),
             delete: DeleteWorkflowHandler::new(repository.clone(), clock),
             get_draft: GetDraftHandler::new(repository.clone()),
             update_draft: UpdateDraftHandler::new(repository.clone(), clock),
-            publish: PublishWorkflowHandler::new(
-                repository.clone(),
-                id_generator,
-                clock,
-            ),
+            publish: PublishWorkflowHandler::new(repository.clone(), id_generator, clock),
             rollback: RollbackWorkflowHandler::new(repository.clone(), clock),
             activate: ActivateWorkflowHandler::new(repository.clone()),
             list_versions: ListVersionsHandler::new(repository.clone()),
