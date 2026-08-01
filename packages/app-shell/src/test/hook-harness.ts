@@ -5,6 +5,9 @@ import type { ContractsClient } from "@ora/contracts";
 import { createChatStore, type ChatStore } from "@ora/chat";
 import { ContractsClientContext } from "../contracts-client-context";
 import { ChatStoreContext } from "../chat-store-context";
+import { WorkflowRuntimeProvider } from "../features/workflow-run/runtime/workflow-runtime-context";
+import { createMemoryWorkflowRuntime } from "../features/workflow-run/runtime/memory-workflow-runtime";
+import type { WorkflowRuntime } from "../features/workflow-run/runtime/ports";
 
 /** Builds a QueryClient with retries disabled so tests fail fast on transport errors. */
 export function createTestQueryClient(): QueryClient {
@@ -16,20 +19,25 @@ export function createTestQueryClient(): QueryClient {
   });
 }
 
-/** Wraps children with QueryClient + ContractsClient providers for hook tests. */
+/** Wraps children with QueryClient + ContractsClient + workflow runtime providers. */
 export function createHookWrapper(
   client: ContractsClient,
   queryClient: QueryClient,
   chatStore: ChatStore,
+  runtime: WorkflowRuntime = createMemoryWorkflowRuntime(),
 ) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
       createElement(
-        ContractsClientContext.Provider,
-        { value: client },
-        createElement(ChatStoreContext.Provider, { value: chatStore }, children),
+        WorkflowRuntimeProvider,
+        { runtime },
+        createElement(
+          ContractsClientContext.Provider,
+          { value: client },
+          createElement(ChatStoreContext.Provider, { value: chatStore }, children),
+        ),
       ),
     );
   };

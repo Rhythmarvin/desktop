@@ -46,6 +46,7 @@ import {
   animateWorkflowPanel,
   cancelWorkflowPanelAnimation,
 } from "./workflow-panel-motion";
+import { DeployWorkflowButton } from "../workflow-run/deploy-to-project-dialog";
 
 const DEFAULT_WORKFLOW_LIBRARY_WIDTH = 220;
 const MIN_WORKFLOW_LIBRARY_WIDTH = 180;
@@ -488,15 +489,18 @@ function WorkflowSettingsContent({
             </>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void runWorkflow("")}
-          disabled={workflow === null || running}
-        >
-          <IconPlayerPlay />
-          <span className="hidden sm:inline">{t("settings.workflow.testRun")}</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <DeployWorkflowButton workflow={workflow} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void runWorkflow("")}
+            disabled={workflow === null || running}
+          >
+            <IconPlayerPlay />
+            <span className="hidden sm:inline">{t("settings.workflow.testRun")}</span>
+          </Button>
+        </div>
       </header>
       <div ref={editorLayoutRef} className="min-h-0 flex-1">
         <ResizablePanelGroup

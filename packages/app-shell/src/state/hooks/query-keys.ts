@@ -12,6 +12,14 @@ export const queryKeys = {
   skills: ["skills"] as const,
   gitIdentity: ["gitIdentity"] as const,
   agentModels: ["agentModels"] as const,
+  /** Project → mounted graph workflow definitions (mock host). */
+  workflowMounts: (projectId: string) => ["workflowMounts", projectId] as const,
+  /** Definition → projects that already mount it. */
+  workflowMountsByDefinition: (definitionId: string) =>
+    ["workflowMountsByDefinition", definitionId] as const,
+  /** Project → GraphWorkflowRun list (mock run repo). */
+  workflowRuns: (projectId: string) => ["workflowRuns", projectId] as const,
+  workflowRun: (runId: string) => ["workflowRun", runId] as const,
 };
 
 export type WorkspaceQueryKey = readonly ["projects"] | readonly ["tasks"] | readonly ["sessions"];

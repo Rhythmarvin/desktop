@@ -1,8 +1,28 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
+import { createChatStore } from "@ora/chat";
 import { appI18n } from "../../i18n/i18n-instance";
+import { AppI18nProvider } from "../../i18n/i18n";
+import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
+import { createMockClient, createMockClientState } from "../../test/mock-client";
 import { WorkflowSettings } from "./workflow-settings";
+
+/** Shell providers required by Deploy-to-project (runtime + react-query). */
+function renderSettings(ui: ReactElement = <WorkflowSettings />): RenderResult {
+  const client = createMockClient(createMockClientState());
+  const Wrapper = createHookWrapper(
+    client,
+    createTestQueryClient(),
+    createChatStore(client.session),
+  );
+  return render(
+    <Wrapper>
+      <AppI18nProvider>{ui}</AppI18nProvider>
+    </Wrapper>,
+  );
+}
 
 /** Reads graph-space coordinates exposed by the React Flow node card. */
 function nodeGraphPosition(label: string): { x: string; y: string } {
@@ -41,7 +61,7 @@ describe("WorkflowSettings", () => {
 
   it("loads the mock graph and exposes a deterministic preview", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     expect(await screen.findByText("代码审查工作流")).toBeInTheDocument();
     expect(screen.getByLabelText("工作流画布")).toBeInTheDocument();
@@ -65,7 +85,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("zooms around the pointer with the mouse wheel", async () => {
-    render(<WorkflowSettings />);
+    renderSettings();
     await screen.findByLabelText("工作流画布");
     const pane = document.querySelector(".react-flow__pane");
     expect(pane).not.toBeNull();
@@ -80,7 +100,7 @@ describe("WorkflowSettings", () => {
 
   it("exposes canvas zoom controls and resets the React Flow viewport", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     await screen.findByLabelText("工作流画布");
     const viewport = flowViewport();
 
@@ -103,7 +123,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("does not pan from the panel-resize guard zones at canvas edges", async () => {
-    render(<WorkflowSettings />);
+    renderSettings();
     const canvas = await screen.findByLabelText("工作流画布");
     vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
       ...canvas.getBoundingClientRect(),
@@ -129,7 +149,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("keeps workflow node positions under parent graph state", async () => {
-    render(<WorkflowSettings />);
+    renderSettings();
     await screen.findByLabelText("开始节点: 开始");
 
     expect(nodeGraphPosition("开始节点: 开始")).toEqual({
@@ -143,7 +163,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("keeps each workflow port independently visible without node-wide hover styles", async () => {
-    render(<WorkflowSettings />);
+    renderSettings();
     const input = await screen.findByLabelText("连接到理解改动");
     const output = screen.getByLabelText("从理解改动开始连接");
 
@@ -157,7 +177,7 @@ describe("WorkflowSettings", () => {
 
   it("collapses node configuration after a stationary blank-canvas click", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     const startNode = await screen.findByLabelText("开始节点: 开始");
     const flowNode = startNode.closest(".react-flow__node") ?? startNode;
 
@@ -175,7 +195,7 @@ describe("WorkflowSettings", () => {
 
   it("collapses and restores the workflow library from visible controls", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     await screen.findByText("代码审查工作流");
 
     await user.click(screen.getByRole("button", { name: "收起工作流列表" }));
@@ -187,7 +207,7 @@ describe("WorkflowSettings", () => {
 
   it("keeps only one auxiliary panel expanded in a narrow editor", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     const startNode = await screen.findByLabelText("开始节点: 开始");
     const flowNode = startNode.closest(".react-flow__node") ?? startNode;
 
@@ -201,7 +221,7 @@ describe("WorkflowSettings", () => {
 
   it("closes node configuration with its button or Escape", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     const startNode = await screen.findByLabelText("开始节点: 开始");
     const flowNode = startNode.closest(".react-flow__node") ?? startNode;
 
@@ -219,7 +239,7 @@ describe("WorkflowSettings", () => {
 
   it("switches workflows from the manager and adds nodes from the bottom dock", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     const releaseWorkflow = await screen.findByText("发布准备检查");
     await user.click(releaseWorkflow.closest("button")!);
@@ -248,7 +268,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("drags a node type from the dock to the chosen canvas position", async () => {
-    render(<WorkflowSettings />);
+    renderSettings();
     const canvas = await screen.findByLabelText("工作流画布");
     vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
       ...canvas.getBoundingClientRect(),
@@ -301,7 +321,7 @@ describe("WorkflowSettings", () => {
 
   it("deletes workflow connections by double-click or keyboard", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     const connection = await screen.findByRole("button", {
       name: "Edge from start to understand",
@@ -329,7 +349,7 @@ describe("WorkflowSettings", () => {
 
   it("restores each workflow from its React Flow viewport snapshot", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     await screen.findByLabelText("工作流画布");
 
     await user.click(screen.getByRole("button", { name: "放大画布" }));
@@ -351,7 +371,7 @@ describe("WorkflowSettings", () => {
 
   it("uses React Flow deletion to remove a node and its incident edges", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     const node = await screen.findByLabelText("提示词节点: 理解改动");
     expect(screen.getByRole("button", {
@@ -377,7 +397,7 @@ describe("WorkflowSettings", () => {
 
   it("uses React Flow deletable state to protect the required start node", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     const startNode = await screen.findByLabelText("开始节点: 开始");
     await user.click(startNode.closest(".react-flow__node") ?? startNode);
@@ -389,7 +409,7 @@ describe("WorkflowSettings", () => {
 
   it("routes inspector deletion through the shared React Flow store", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     const reviewNode = await screen.findByLabelText("Agent节点: 审查 Agent");
     await user.click(reviewNode.closest(".react-flow__node") ?? reviewNode);
@@ -408,7 +428,7 @@ describe("WorkflowSettings", () => {
 
   it("shows React Flow reconnect controls after selecting an edge", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     const connection = await screen.findByRole("button", {
       name: "Edge from start to understand",
@@ -423,7 +443,7 @@ describe("WorkflowSettings", () => {
 
   it("creates a workflow from the left manager and allows renaming it", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     await screen.findByText("代码审查工作流");
     await user.click(screen.getByRole("button", { name: "新建工作流" }));
@@ -450,7 +470,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("keeps edits only for the mounted demo session", async () => {
-    const view = render(<WorkflowSettings />);
+    const view = renderSettings();
     const nameInput = await screen.findByLabelText("工作流名称");
 
     fireEvent.change(nameInput, { target: { value: "当前会话草稿" } });
@@ -458,13 +478,13 @@ describe("WorkflowSettings", () => {
     expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
 
     view.unmount();
-    render(<WorkflowSettings />);
+    renderSettings();
     expect(await screen.findByDisplayValue("代码审查工作流")).toBeInTheDocument();
   });
 
   it("runs the edited session draft visible in the editor", async () => {
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
     const nameInput = await screen.findByLabelText("工作流名称");
 
     fireEvent.change(nameInput, { target: { value: "未保存草稿" } });
@@ -474,7 +494,7 @@ describe("WorkflowSettings", () => {
   });
 
   it("preserves the current draft when the display language changes", async () => {
-    render(<WorkflowSettings />);
+    renderSettings();
     const nameInput = await screen.findByLabelText("工作流名称");
 
     fireEvent.change(nameInput, { target: { value: "保留这个草稿" } });
@@ -487,7 +507,7 @@ describe("WorkflowSettings", () => {
   it("localizes workflow chrome and mock content in English", async () => {
     await appI18n.changeLanguage("en-US");
     const user = userEvent.setup();
-    render(<WorkflowSettings />);
+    renderSettings();
 
     expect(await screen.findByText("Code review workflow")).toBeInTheDocument();
     expect(screen.getByLabelText("Workflow canvas")).toBeInTheDocument();

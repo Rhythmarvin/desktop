@@ -334,6 +334,7 @@ describe("WorkspaceView", () => {
       projectId: "p1",
       taskId: "t1",
       sessionId: "s1",
+      workflowRunId: null,
     });
     expect(chatStore.getState().conversations.s1?.isLoaded).toBe(true);
   });

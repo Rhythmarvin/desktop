@@ -30,6 +30,7 @@ import { useSessionUnreadSync } from "./state/hooks/use-session-unread-sync";
 import { useUiStore } from "./state/stores/ui-store";
 import { startThemeSubscription } from "./state/stores/settings-store";
 import { useTranslation } from "react-i18next";
+import { WorkflowRuntimeProvider } from "./features/workflow-run/runtime/workflow-runtime-context";
 
 interface AppShellProps {
   client: ContractsClient;
@@ -50,7 +51,9 @@ export function AppShell({ client, chatStore, platform, user }: AppShellProps) {
   return (
     <QueryClientProvider client={queryClient}>
       <AppI18nProvider>
-        <AppShellContent client={client} chatStore={chatStore} platform={platform} user={user} />
+        <WorkflowRuntimeProvider>
+          <AppShellContent client={client} chatStore={chatStore} platform={platform} user={user} />
+        </WorkflowRuntimeProvider>
       </AppI18nProvider>
     </QueryClientProvider>
   );
