@@ -172,9 +172,15 @@ pub enum PublicError {
     ImportSessionCommitInProgress(EmptyErrorParams),
     ImportSessionAlreadyCommitted(EmptyErrorParams),
     SkillStorageInconsistent(EmptyErrorParams),
+    WorkflowNameBlank(EmptyErrorParams),
     WorkflowNotFound(EmptyErrorParams),
+    WorkflowSnapshotNotFound(EmptyErrorParams),
     WorkflowVersionAlreadyExists(EmptyErrorParams),
     WorkflowVersionReserved(EmptyErrorParams),
+    WorkflowCannotDeleteDraft(EmptyErrorParams),
+    WorkflowCannotDeleteActiveVersion(EmptyErrorParams),
+    WorkflowCannotRollbackToDraft(EmptyErrorParams),
+    WorkflowCannotActivateDraft(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -259,9 +265,15 @@ impl PublicError {
             Self::ImportSessionCommitInProgress(_) => "import_session_commit_in_progress",
             Self::ImportSessionAlreadyCommitted(_) => "import_session_already_committed",
             Self::SkillStorageInconsistent(_) => "skill_storage_inconsistent",
+            Self::WorkflowNameBlank(_) => "workflow_name_blank",
             Self::WorkflowNotFound(_) => "workflow_not_found",
+            Self::WorkflowSnapshotNotFound(_) => "workflow_snapshot_not_found",
             Self::WorkflowVersionAlreadyExists(_) => "workflow_version_already_exists",
             Self::WorkflowVersionReserved(_) => "workflow_version_reserved",
+            Self::WorkflowCannotDeleteDraft(_) => "workflow_cannot_delete_draft",
+            Self::WorkflowCannotDeleteActiveVersion(_) => "workflow_cannot_delete_active_version",
+            Self::WorkflowCannotRollbackToDraft(_) => "workflow_cannot_rollback_to_draft",
+            Self::WorkflowCannotActivateDraft(_) => "workflow_cannot_activate_draft",
         }
     }
 }

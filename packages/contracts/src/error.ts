@@ -99,6 +99,21 @@ export type ContractError =
     }
     | { "code": "import_session_already_committed"; "params": EmptyErrorParams }
     | { "code": "skill_storage_inconsistent"; "params": EmptyErrorParams }
+    | { "code": "workflow_name_blank"; "params": EmptyErrorParams }
+    | { "code": "workflow_not_found"; "params": EmptyErrorParams }
+    | { "code": "workflow_snapshot_not_found"; "params": EmptyErrorParams }
+    | { "code": "workflow_version_already_exists"; "params": EmptyErrorParams }
+    | { "code": "workflow_version_reserved"; "params": EmptyErrorParams }
+    | { "code": "workflow_cannot_delete_draft"; "params": EmptyErrorParams }
+    | {
+      "code": "workflow_cannot_delete_active_version";
+      "params": EmptyErrorParams;
+    }
+    | {
+      "code": "workflow_cannot_rollback_to_draft";
+      "params": EmptyErrorParams;
+    }
+    | { "code": "workflow_cannot_activate_draft"; "params": EmptyErrorParams }
   );
 
 /**
@@ -203,7 +218,19 @@ export type PublicError =
   | { "code": "import_session_cancelled"; "params": EmptyErrorParams }
   | { "code": "import_session_commit_in_progress"; "params": EmptyErrorParams }
   | { "code": "import_session_already_committed"; "params": EmptyErrorParams }
-  | { "code": "skill_storage_inconsistent"; "params": EmptyErrorParams };
+  | { "code": "skill_storage_inconsistent"; "params": EmptyErrorParams }
+  | { "code": "workflow_name_blank"; "params": EmptyErrorParams }
+  | { "code": "workflow_not_found"; "params": EmptyErrorParams }
+  | { "code": "workflow_snapshot_not_found"; "params": EmptyErrorParams }
+  | { "code": "workflow_version_already_exists"; "params": EmptyErrorParams }
+  | { "code": "workflow_version_reserved"; "params": EmptyErrorParams }
+  | { "code": "workflow_cannot_delete_draft"; "params": EmptyErrorParams }
+  | {
+    "code": "workflow_cannot_delete_active_version";
+    "params": EmptyErrorParams;
+  }
+  | { "code": "workflow_cannot_rollback_to_draft"; "params": EmptyErrorParams }
+  | { "code": "workflow_cannot_activate_draft"; "params": EmptyErrorParams };
 
 /**
  * Identifies one Ora request across adapters, spans, responses, and completion events.

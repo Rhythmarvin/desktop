@@ -61,10 +61,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
-    fn find_workflow(
-        &self,
-        workflow_id: &WorkflowId,
-    ) -> Result<Option<Workflow>, RepositoryError> {
+    fn find_workflow(&self, workflow_id: &WorkflowId) -> Result<Option<Workflow>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(

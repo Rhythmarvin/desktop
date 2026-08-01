@@ -18,10 +18,7 @@ pub trait WorkflowRepository {
     ) -> Result<CreatedWorkflow, RepositoryError>;
 
     /// Loads one visible workflow by identifier.
-    fn find_workflow(
-        &self,
-        workflow_id: &WorkflowId,
-    ) -> Result<Option<Workflow>, RepositoryError>;
+    fn find_workflow(&self, workflow_id: &WorkflowId) -> Result<Option<Workflow>, RepositoryError>;
 
     /// Loads a workflow together with its draft and currently published snapshot.
     fn get_workflow_detail(
