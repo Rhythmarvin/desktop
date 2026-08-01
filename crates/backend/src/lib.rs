@@ -12,6 +12,7 @@ mod skill;
 mod skill_reconciliation;
 mod task;
 mod task_diff;
+mod workflow;
 
 pub use agent_runtime::SessionEventStream;
 pub use bootstrap::{Backend, BackendBootstrapError, BackendPaths};
