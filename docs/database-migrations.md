@@ -18,8 +18,9 @@ Ora keeps SQLite migration definitions in Rust code inside `ora-db` rather than 
 | `0003` | `skills`, `agents` |
 | `0004` | `worktrees.base_commit_id`, `task_diff_comments`, comment indexes, and the root-parent trigger |
 | `0005` | `sessions.history_degraded_reason` |
+| `0006` | `workflows`, `workflow_snapshots` with `UNIQUE(workflow_id, version)` and foreign key from snapshots to workflows |
 
-`default_migration_catalog()` returns all five with every version as the active target.
+`default_migration_catalog()` returns all six with every version as the active target.
 
 ## Reconciliation model
 

@@ -14,6 +14,7 @@
 | `SqliteAgentDefinitionRepository` | `AgentDefinitionRepository` |
 | `SqliteProjectWorkContextRepository` | `ProjectWorkContextRepository` |
 | `SqliteTaskDiffCommentRepository` | `TaskDiffCommentRepository` |
+| `SqliteWorkflowRepository` | `WorkflowRepository` |
 | `SqliteCascadeRepository` | aggregate deletion used by `ora-backend` |
 
 Adding an adapter never changes a port signature. Handlers keep depending on the traits they own, so a composition root can swap in fakes without touching use-case code.
