@@ -2,7 +2,7 @@ use crate::skill::SkillStorageError;
 use crate::skill_import::SkillImportError;
 use crate::{
     BoxRepositorySource, BranchListingError, RepositoryError, TaskDiffCommentRepositoryError,
-    TaskDiffReaderError, TaskWorktreeProvisionerError,
+    TaskDiffReaderError, TaskWorktreeProvisionerError, WorkflowRepositoryError,
 };
 use ora_domain::DomainModelError;
 use thiserror::Error;
@@ -158,6 +158,35 @@ pub enum ApplicationError {
         #[source]
         source: RepositoryError,
     },
+    #[error("workflow name must not be blank")]
+    WorkflowNameBlank,
+    #[error("workflow not found: {workflow_id}")]
+    WorkflowNotFound { workflow_id: String },
+    #[error("workflow snapshot not found: {workflow_id}/{version}")]
+    WorkflowSnapshotNotFound {
+        workflow_id: String,
+        version: String,
+    },
+    #[error("workflow version already exists: {workflow_id}/{version}")]
+    WorkflowVersionAlreadyExists {
+        workflow_id: String,
+        version: String,
+    },
+    #[error("workflow version 'draft' is reserved")]
+    WorkflowVersionReserved,
+    #[error("cannot delete the draft snapshot")]
+    WorkflowCannotDeleteDraft,
+    #[error("cannot delete the currently active version")]
+    WorkflowCannotDeleteActiveVersion,
+    #[error("cannot rollback to the draft snapshot")]
+    WorkflowCannotRollbackToDraft,
+    #[error("cannot activate the draft snapshot")]
+    WorkflowCannotActivateDraft,
+    #[error("workflow repository operation failed")]
+    WorkflowRepository {
+        #[source]
+        source: RepositoryError,
+    },
 }
 
 impl ApplicationError {
@@ -293,6 +322,25 @@ impl ApplicationError {
     pub(crate) fn from_session_repository_error(error: RepositoryError) -> Self {
         Self::SessionRepository { source: error }
     }
+
+    /// Converts workflow-construction validation failures into application errors.
+    pub(crate) fn from_workflow_domain_error(error: DomainModelError) -> Self {
+        match error {
+            DomainModelError::EmptyWorkflowName => Self::WorkflowNameBlank,
+            _ => Self::WorkflowRepository {
+                source: RepositoryError::new(error),
+            },
+        }
+    }
+
+    /// Maps workflow repository failures into stable application errors.
+    pub(crate) fn from_workflow_repository_error(error: WorkflowRepositoryError) -> Self {
+        match error {
+            WorkflowRepositoryError::OperationFailed(message) => Self::WorkflowRepository {
+                source: RepositoryError::from_message(message),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -314,6 +362,13 @@ impl PartialEq for ApplicationError {
             | (SkillImport(_), SkillImport(_))
             | (AgentDefinitionNameBlank, AgentDefinitionNameBlank)
             | (TaskWorktreeRequiresGitRepository, TaskWorktreeRequiresGitRepository)
+            | (TaskWorktreeRootUnavailable, TaskWorktreeRootUnavailable)
+            | (WorkflowNameBlank, WorkflowNameBlank)
+            | (WorkflowVersionReserved, WorkflowVersionReserved)
+            | (WorkflowCannotDeleteDraft, WorkflowCannotDeleteDraft)
+            | (WorkflowCannotDeleteActiveVersion, WorkflowCannotDeleteActiveVersion)
+            | (WorkflowCannotRollbackToDraft, WorkflowCannotRollbackToDraft)
+            | (WorkflowCannotActivateDraft, WorkflowCannotActivateDraft)
             | (SkillRepository { .. }, SkillRepository { .. })
             | (AgentDefinitionRepository { .. }, AgentDefinitionRepository { .. })
             | (ProjectRepository { .. }, ProjectRepository { .. })
@@ -324,7 +379,9 @@ impl PartialEq for ApplicationError {
             | (TaskDiffStale, TaskDiffStale)
             | (TaskDiffCommitMessageBlank, TaskDiffCommitMessageBlank)
             | (WorktreeRepository { .. }, WorktreeRepository { .. })
-            | (SessionRepository { .. }, SessionRepository { .. }) => true,
+            | (SessionRepository { .. }, SessionRepository { .. })
+            | (WorkflowRepository { .. }, WorkflowRepository { .. })
+            | (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (SkillNotFound { skill_id: left }, SkillNotFound { skill_id: right }) => left == right,
             (
                 SkillUploadTooManyFiles { max_files: left },
@@ -400,6 +457,29 @@ impl PartialEq for ApplicationError {
             (SessionNotFound { session_id: left }, SessionNotFound { session_id: right }) => {
                 left == right
             }
+            (WorkflowNotFound { workflow_id: left }, WorkflowNotFound { workflow_id: right }) => {
+                left == right
+            }
+            (
+                WorkflowSnapshotNotFound {
+                    workflow_id: left_wf,
+                    version: left_v,
+                },
+                WorkflowSnapshotNotFound {
+                    workflow_id: right_wf,
+                    version: right_v,
+                },
+            ) => left_wf == right_wf && left_v == right_v,
+            (
+                WorkflowVersionAlreadyExists {
+                    workflow_id: left_wf,
+                    version: left_v,
+                },
+                WorkflowVersionAlreadyExists {
+                    workflow_id: right_wf,
+                    version: right_v,
+                },
+            ) => left_wf == right_wf && left_v == right_v,
             _ => false,
         }
     }

@@ -4,12 +4,12 @@ mod project;
 mod project_work_context;
 mod repository_error;
 mod session;
-mod task;
 mod task_diff;
-mod worktree;
-
 mod skill;
 mod skill_import;
+mod task;
+mod workflow;
+mod worktree;
 
 pub use agent_definition::{
     AgentDefinitionIdGenerator, AgentDefinitionRepository, CreateAgentDefinitionHandler,
@@ -58,3 +58,10 @@ pub use task_diff::{
     UuidTaskDiffCommentIdGenerator, task_diff_id,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};
+pub use workflow::{
+    ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler, DeleteWorkflowHandler,
+    GetDraftHandler, GetVersionHandler, GetWorkflowHandler, ListVersionsHandler,
+    ListWorkflowsHandler, PublishWorkflowHandler, RollbackWorkflowHandler, UpdateDraftHandler,
+    UpdateWorkflowHandler, UuidWorkflowIdGenerator, WorkflowIdGenerator, WorkflowRepository,
+    WorkflowRepositoryError,
+};

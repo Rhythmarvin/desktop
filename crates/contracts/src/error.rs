@@ -172,6 +172,9 @@ pub enum PublicError {
     ImportSessionCommitInProgress(EmptyErrorParams),
     ImportSessionAlreadyCommitted(EmptyErrorParams),
     SkillStorageInconsistent(EmptyErrorParams),
+    WorkflowNotFound(EmptyErrorParams),
+    WorkflowVersionAlreadyExists(EmptyErrorParams),
+    WorkflowVersionReserved(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -256,6 +259,9 @@ impl PublicError {
             Self::ImportSessionCommitInProgress(_) => "import_session_commit_in_progress",
             Self::ImportSessionAlreadyCommitted(_) => "import_session_already_committed",
             Self::SkillStorageInconsistent(_) => "skill_storage_inconsistent",
+            Self::WorkflowNotFound(_) => "workflow_not_found",
+            Self::WorkflowVersionAlreadyExists(_) => "workflow_version_already_exists",
+            Self::WorkflowVersionReserved(_) => "workflow_version_reserved",
         }
     }
 }

@@ -316,10 +316,44 @@ impl From<ApplicationError> for BackendError {
             | ApplicationError::TaskDiff { .. }
             | ApplicationError::TaskDiffCommentRepository { .. }
             | ApplicationError::WorktreeRepository { .. }
-            | ApplicationError::SessionRepository { .. } => (
+            | ApplicationError::SessionRepository { .. }
+            | ApplicationError::WorkflowRepository { .. } => (
                 ErrorClassification::Internal,
                 PublicError::InternalError(EmptyErrorParams {}),
                 "application operation failed",
+            ),
+            ApplicationError::WorkflowNameBlank => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "workflow name must not be blank",
+            ),
+            ApplicationError::WorkflowNotFound { .. } => (
+                ErrorClassification::NotFound,
+                PublicError::WorkflowNotFound(EmptyErrorParams {}),
+                "workflow not found",
+            ),
+            ApplicationError::WorkflowSnapshotNotFound { .. } => (
+                ErrorClassification::NotFound,
+                PublicError::WorkflowNotFound(EmptyErrorParams {}),
+                "workflow snapshot not found",
+            ),
+            ApplicationError::WorkflowVersionAlreadyExists { .. } => (
+                ErrorClassification::Conflict,
+                PublicError::WorkflowVersionAlreadyExists(EmptyErrorParams {}),
+                "workflow version already exists",
+            ),
+            ApplicationError::WorkflowVersionReserved => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowVersionReserved(EmptyErrorParams {}),
+                "workflow version 'draft' is reserved",
+            ),
+            ApplicationError::WorkflowCannotDeleteDraft
+            | ApplicationError::WorkflowCannotDeleteActiveVersion
+            | ApplicationError::WorkflowCannotRollbackToDraft
+            | ApplicationError::WorkflowCannotActivateDraft => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "workflow operation rejected",
             ),
         };
 
