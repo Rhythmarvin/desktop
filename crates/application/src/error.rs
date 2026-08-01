@@ -2,7 +2,7 @@ use crate::skill::SkillStorageError;
 use crate::skill_import::SkillImportError;
 use crate::{
     BoxRepositorySource, BranchListingError, RepositoryError, TaskDiffCommentRepositoryError,
-    TaskDiffReaderError, TaskWorktreeProvisionerError, WorkflowRepositoryError,
+    TaskDiffReaderError, TaskWorktreeProvisionerError,
 };
 use ora_domain::DomainModelError;
 use thiserror::Error;
@@ -334,12 +334,8 @@ impl ApplicationError {
     }
 
     /// Maps workflow repository failures into stable application errors.
-    pub(crate) fn from_workflow_repository_error(error: WorkflowRepositoryError) -> Self {
-        match error {
-            WorkflowRepositoryError::OperationFailed(message) => Self::WorkflowRepository {
-                source: RepositoryError::from_message(message),
-            },
-        }
+    pub(crate) fn from_workflow_repository_error(error: RepositoryError) -> Self {
+        Self::WorkflowRepository { source: error }
     }
 }
 

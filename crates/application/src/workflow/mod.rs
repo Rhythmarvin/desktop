@@ -13,4 +13,4 @@ pub use handlers::{
     UpdateWorkflowHandler,
 };
 pub use id_generator::UuidWorkflowIdGenerator;
-pub use ports::{WorkflowIdGenerator, WorkflowRepository, WorkflowRepositoryError};
+pub use ports::{WorkflowIdGenerator, WorkflowRepository};

@@ -62,6 +62,5 @@ pub use workflow::{
     GetDraftHandler, GetVersionHandler, GetWorkflowHandler, ListVersionsHandler,
     ListWorkflowsHandler, PublishWorkflowHandler, RollbackWorkflowHandler, UpdateDraftHandler,
     UpdateWorkflowHandler, UuidWorkflowIdGenerator, WorkflowIdGenerator, WorkflowRepository,
-    WorkflowRepositoryError,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

@@ -1,3 +1,4 @@
+use crate::RepositoryError;
 use ora_domain::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
     WorkflowSummary, WorkflowVersion,
@@ -14,25 +15,25 @@ pub trait WorkflowRepository {
         &self,
         workflow: Workflow,
         draft: WorkflowSnapshot,
-    ) -> Result<CreatedWorkflow, WorkflowRepositoryError>;
+    ) -> Result<CreatedWorkflow, RepositoryError>;
 
     /// Loads one visible workflow by identifier.
     fn find_workflow(
         &self,
         workflow_id: &WorkflowId,
-    ) -> Result<Option<Workflow>, WorkflowRepositoryError>;
+    ) -> Result<Option<Workflow>, RepositoryError>;
 
     /// Loads a workflow together with its draft and currently published snapshot.
     fn get_workflow_detail(
         &self,
         workflow_id: &WorkflowId,
-    ) -> Result<Option<WorkflowDetail>, WorkflowRepositoryError>;
+    ) -> Result<Option<WorkflowDetail>, RepositoryError>;
 
     /// Lists visible workflows with their published version, ordered by creation time.
-    fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, WorkflowRepositoryError>;
+    fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, RepositoryError>;
 
     /// Replaces a visible workflow identified by its stable identifier.
-    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, WorkflowRepositoryError>;
+    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, RepositoryError>;
 
     /// Marks a visible workflow deleted and cascades the soft-delete to all its snapshots
     /// within a single transaction.
@@ -40,7 +41,7 @@ pub trait WorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         deleted_at: i64,
-    ) -> Result<bool, WorkflowRepositoryError>;
+    ) -> Result<bool, RepositoryError>;
 
     /// Loads one visible snapshot by workflow and version string (works for both `"draft"`
     /// and published version identifiers).
@@ -48,14 +49,14 @@ pub trait WorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         version: &str,
-    ) -> Result<Option<WorkflowSnapshot>, WorkflowRepositoryError>;
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError>;
 
     /// Lists published (non-draft, non-deleted) version summaries for a workflow,
     /// ordered by creation time descending.
     fn list_versions(
         &self,
         workflow_id: &WorkflowId,
-    ) -> Result<Vec<WorkflowVersion>, WorkflowRepositoryError>;
+    ) -> Result<Vec<WorkflowVersion>, RepositoryError>;
 
     /// Updates the graph of a workflow's draft snapshot in-place.
     fn update_draft(
@@ -63,7 +64,7 @@ pub trait WorkflowRepository {
         workflow_id: &WorkflowId,
         graph: String,
         updated_at: i64,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError>;
+    ) -> Result<WorkflowSnapshot, RepositoryError>;
 
     /// Publishes the current draft as an immutable snapshot and activates it
     /// (sets `published_snapshot_id`) within a single transaction.
@@ -71,7 +72,7 @@ pub trait WorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         snapshot: WorkflowSnapshot,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError>;
+    ) -> Result<WorkflowSnapshot, RepositoryError>;
 
     /// Copies the graph from a historical snapshot into the draft without changing
     /// the published version pointer.
@@ -80,7 +81,7 @@ pub trait WorkflowRepository {
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
         updated_at: i64,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError>;
+    ) -> Result<WorkflowSnapshot, RepositoryError>;
 
     /// Switches the published version pointer to a different snapshot and syncs its
     /// graph into the draft within a single transaction.
@@ -88,14 +89,14 @@ pub trait WorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError>;
+    ) -> Result<WorkflowSnapshot, RepositoryError>;
 
     /// Marks a visible non-draft, non-active snapshot deleted.
     fn soft_delete_snapshot(
         &self,
         snapshot_id: &WorkflowSnapshotId,
         deleted_at: i64,
-    ) -> Result<bool, WorkflowRepositoryError>;
+    ) -> Result<bool, RepositoryError>;
 }
 
 /// Supplies new workflow and snapshot identifiers for create use cases.
@@ -105,10 +106,4 @@ pub trait WorkflowIdGenerator {
 
     /// Produces the identifier for a newly created snapshot.
     fn generate_snapshot_id(&self) -> WorkflowSnapshotId;
-}
-
-/// Represents storage failures exposed as stable application outcomes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkflowRepositoryError {
-    OperationFailed(String),
 }

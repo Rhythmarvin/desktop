@@ -1,4 +1,4 @@
-use ora_application::{WorkflowRepository, WorkflowRepositoryError};
+use ora_application::{RepositoryError, WorkflowRepository};
 use ora_domain::{
     AuditFields, CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot,
     WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
@@ -27,7 +27,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow: Workflow,
         draft: WorkflowSnapshot,
-    ) -> Result<CreatedWorkflow, WorkflowRepositoryError> {
+    ) -> Result<CreatedWorkflow, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
@@ -64,7 +64,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
     fn find_workflow(
         &self,
         workflow_id: &WorkflowId,
-    ) -> Result<Option<Workflow>, WorkflowRepositoryError> {
+    ) -> Result<Option<Workflow>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
@@ -79,7 +79,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
     fn get_workflow_detail(
         &self,
         workflow_id: &WorkflowId,
-    ) -> Result<Option<WorkflowDetail>, WorkflowRepositoryError> {
+    ) -> Result<Option<WorkflowDetail>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let workflow = {
@@ -130,7 +130,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
-    fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, WorkflowRepositoryError> {
+    fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
@@ -157,7 +157,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
-    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, WorkflowRepositoryError> {
+    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, RepositoryError> {
         let updated = self
             .pool
             .with_connection(|connection| {
@@ -174,7 +174,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         if updated {
             Ok(workflow)
         } else {
-            Err(WorkflowRepositoryError::OperationFailed(
+            Err(RepositoryError::from_message(
                 "workflow not found during update".to_string(),
             ))
         }
@@ -184,7 +184,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         deleted_at: i64,
-    ) -> Result<bool, WorkflowRepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
@@ -220,7 +220,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         version: &str,
-    ) -> Result<Option<WorkflowSnapshot>, WorkflowRepositoryError> {
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
@@ -235,7 +235,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
     fn list_versions(
         &self,
         workflow_id: &WorkflowId,
-    ) -> Result<Vec<WorkflowVersion>, WorkflowRepositoryError> {
+    ) -> Result<Vec<WorkflowVersion>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
@@ -260,7 +260,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         workflow_id: &WorkflowId,
         graph: String,
         updated_at: i64,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError> {
+    ) -> Result<WorkflowSnapshot, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let rows_affected = connection.execute(
@@ -279,7 +279,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
             .and_then(|opt| {
                 opt.ok_or_else(|| {
-                    WorkflowRepositoryError::OperationFailed(
+                    RepositoryError::from_message(
                         "draft not found after update".to_string(),
                     )
                 })
@@ -290,7 +290,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         snapshot: WorkflowSnapshot,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError> {
+    ) -> Result<WorkflowSnapshot, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
@@ -322,7 +322,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
         updated_at: i64,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError> {
+    ) -> Result<WorkflowSnapshot, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let rows_affected = connection.execute(
@@ -346,7 +346,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
             .and_then(|opt| {
                 opt.ok_or_else(|| {
-                    WorkflowRepositoryError::OperationFailed(
+                    RepositoryError::from_message(
                         "draft or target snapshot not found during rollback".to_string(),
                     )
                 })
@@ -357,7 +357,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
-    ) -> Result<WorkflowSnapshot, WorkflowRepositoryError> {
+    ) -> Result<WorkflowSnapshot, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
@@ -386,7 +386,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
             .and_then(|opt| {
                 opt.ok_or_else(|| {
-                    WorkflowRepositoryError::OperationFailed(
+                    RepositoryError::from_message(
                         "draft not found after activation".to_string(),
                     )
                 })
@@ -397,7 +397,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         snapshot_id: &WorkflowSnapshotId,
         deleted_at: i64,
-    ) -> Result<bool, WorkflowRepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 connection
@@ -442,6 +442,6 @@ fn map_snapshot_row(row: &Row<'_>) -> Result<WorkflowSnapshot, crate::DatabaseEr
 }
 
 /// Converts database failures into application-port errors.
-fn workflow_repository_error_from_database(error: crate::DatabaseError) -> WorkflowRepositoryError {
-    WorkflowRepositoryError::OperationFailed(error.to_string())
+fn workflow_repository_error_from_database(error: crate::DatabaseError) -> RepositoryError {
+    RepositoryError::new(error)
 }
