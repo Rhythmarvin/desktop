@@ -47,7 +47,8 @@ const MENU_ITEM_CLASS =
 /**
  * Deploy semantics (product contract):
  * - Mount is 1:1 per (project, definition). Remount refreshes the definition blob.
- * - Every confirm creates a new GraphWorkflowRun under that project.
+ * - Every confirm creates a new pending GraphWorkflowRun under that project
+ *   (execution starts from the run workspace Start control).
  * - First deploy = mount + first run; later deploys = refresh mount + another run.
  */
 export function DeployToProjectDialog({

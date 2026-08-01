@@ -22,10 +22,15 @@ export interface MockPathPolicy {
 }
 
 export interface MockExecutionPlan {
-  /** Reachable nodes in topological order (executable). */
+  /** Reachable nodes in topological order (documentation / tests). */
   order: string[];
   /** Unreachable on the chosen path; engine marks these skipped. */
   skipped: string[];
+  /**
+   * Predecessors inside the reachable subgraph.
+   * The engine starts a node only when every predecessor has succeeded.
+   */
+  predecessors: Record<string, string[]>;
 }
 
 /** Deterministic default: kickoff-aware label heuristics, else first outgoing edge. */
@@ -118,13 +123,18 @@ export function planMockExecution(
   }
 
   const skipped = ids.filter((id) => !reachable.has(id));
-  const order = topologicalOrder(
-    [...reachable],
-    edges.filter(
-      (edge) => reachable.has(edge.source) && reachable.has(edge.target),
-    ),
+  const reachableEdges = edges.filter(
+    (edge) => reachable.has(edge.source) && reachable.has(edge.target),
   );
-  return { order, skipped };
+  const order = topologicalOrder([...reachable], reachableEdges);
+  const predecessors: Record<string, string[]> = {};
+  for (const id of order) {
+    predecessors[id] = [];
+  }
+  for (const edge of reachableEdges) {
+    predecessors[edge.target]?.push(edge.source);
+  }
+  return { order, skipped, predecessors };
 }
 
 /** Kahn order over an arbitrary id subset; appends leftovers for cycles. */

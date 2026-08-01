@@ -4,6 +4,7 @@ import {
   nodeKindUsesTokens,
   planMockExecution,
   topologicalOrder,
+  type MockExecutionPlan,
   type MockPathPolicy,
 } from "./mock-execution-plan";
 import type {
@@ -15,7 +16,7 @@ import type {
 } from "./types";
 
 export interface MockRunEngineOptions {
-  /** Delay between node start and finish. Default 450ms. */
+  /** Duration of each node step. Default 5000ms so Theater switching is tryable. */
   nodeStepMs?: number;
   /** Condition path selection; defaults to kickoff-aware label heuristics. */
   pathPolicy?: MockPathPolicy;
@@ -32,41 +33,112 @@ export interface MockRunEngineHost {
 }
 
 /**
- * Deterministic sequential executor over a frozen DemoWorkflow snapshot.
- * Plans a reachable path (condition = exclusive), then walks that order.
+ * Mock executor over a frozen DemoWorkflow snapshot.
+ * Plans a reachable path (condition = exclusive), then runs ready nodes in
+ * parallel waves: every node whose predecessors have succeeded starts together.
+ * Per-node `data.mockStepMs` overrides the default step duration so staggered
+ * starts/ends can be demonstrated.
  */
 export function createMockRunEngine(
   host: MockRunEngineHost,
   options: MockRunEngineOptions = {},
 ) {
-  const nodeStepMs = options.nodeStepMs ?? 450;
+  const nodeStepMs = options.nodeStepMs ?? 5_000;
   const pathPolicy = options.pathPolicy ?? createDefaultMockPathPolicy();
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Per-run map of nodeId → in-flight step timer. */
+  const timers = new Map<string, Map<string, ReturnType<typeof setTimeout>>>();
+  const plans = new Map<string, MockExecutionPlan>();
 
-  /** Clears any pending step timer for a run (cancel / delete). */
+  /** Resolves step length: node mockStepMs when positive, else engine default. */
+  function stepMsFor(run: GraphWorkflowRun, nodeId: string): number {
+    const node = run.definitionSnapshot.nodes.find((item) => item.id === nodeId);
+    const custom = node?.data.mockStepMs;
+    if (typeof custom === "number" && Number.isFinite(custom) && custom > 0) {
+      return custom;
+    }
+    return nodeStepMs;
+  }
+
+  /** Clears every pending step timer for a run (cancel / delete). */
   function stop(runId: string): void {
-    const timer = timers.get(runId);
-    if (timer !== undefined) {
-      clearTimeout(timer);
+    const byNode = timers.get(runId);
+    if (byNode !== undefined) {
+      for (const timer of byNode.values()) {
+        clearTimeout(timer);
+      }
       timers.delete(runId);
+    }
+    plans.delete(runId);
+  }
+
+  function timersFor(runId: string): Map<string, ReturnType<typeof setTimeout>> {
+    let byNode = timers.get(runId);
+    if (byNode === undefined) {
+      byNode = new Map();
+      timers.set(runId, byNode);
+    }
+    return byNode;
+  }
+
+  /**
+   * Starts every currently ready idle node. When nothing is left to run and no
+   * timers remain, finishes the run as succeeded.
+   */
+  function pump(runId: string): void {
+    const run = host.getRun(runId);
+    const plan = plans.get(runId);
+    if (run === undefined || plan === undefined || isTerminal(run.status)) {
+      return;
+    }
+
+    const ready = plan.order.filter((nodeId) => {
+      const state = run.nodeStates[nodeId];
+      if (state === undefined || state.status !== "idle") {
+        return false;
+      }
+      if (timersFor(runId).has(nodeId)) {
+        return false;
+      }
+      const preds = plan.predecessors[nodeId] ?? [];
+      return preds.every((predId) => {
+        const pred = run.nodeStates[predId];
+        return pred?.status === "succeeded" || pred?.status === "skipped";
+      });
+    });
+
+    for (const nodeId of ready) {
+      beginNode(runId, nodeId);
+    }
+
+    const latest = host.getRun(runId);
+    if (latest === undefined || isTerminal(latest.status)) {
+      return;
+    }
+
+    const allDone = plan.order.every((nodeId) => {
+      const status = latest.nodeStates[nodeId]?.status;
+      return (
+        status === "succeeded"
+        || status === "skipped"
+        || status === "failed"
+        || status === "cancelled"
+      );
+    });
+    if (allDone && timersFor(runId).size === 0) {
+      finishRun(runId, /*status*/ "succeeded");
     }
   }
 
-  /** Schedules the next node, or finishes the run when the queue is empty. */
-  function scheduleNext(runId: string, order: string[], index: number): void {
-    stop(runId);
+  function beginNode(runId: string, nodeId: string): void {
     const run = host.getRun(runId);
     if (run === undefined || isTerminal(run.status)) {
       return;
     }
-
-    if (index >= order.length) {
-      finishRun(runId, /*status*/ "succeeded");
+    if (run.nodeStates[nodeId]?.status !== "idle") {
       return;
     }
-
-    const nodeId = order[index]!;
     const startedAt = host.nowIso();
+    const stepMs = stepMsFor(run, nodeId);
     patchNode(runId, nodeId, {
       status: "running",
       startedAt,
@@ -74,24 +146,29 @@ export function createMockRunEngine(
     host.emit(runId, { type: "node_started", runId, nodeId });
 
     const timer = setTimeout(() => {
-      timers.delete(runId);
+      timersFor(runId).delete(nodeId);
       const current = host.getRun(runId);
       if (current === undefined || current.status === "cancelled") {
         return;
       }
-      completeNode(runId, nodeId, startedAt);
-      scheduleNext(runId, order, index + 1);
-    }, nodeStepMs);
-    timers.set(runId, timer);
+      completeNode(runId, nodeId, startedAt, stepMs);
+      pump(runId);
+    }, stepMs);
+    timersFor(runId).set(nodeId, timer);
   }
 
-  function completeNode(runId: string, nodeId: string, startedAt: string): void {
+  function completeNode(
+    runId: string,
+    nodeId: string,
+    startedAt: string,
+    stepMs: number,
+  ): void {
     const run = host.getRun(runId);
     if (run === undefined) {
       return;
     }
     const finishedAt = host.nowIso();
-    const durationMs = Math.max(nodeStepMs, 1);
+    const durationMs = Math.max(stepMs, 1);
     const node = run.definitionSnapshot.nodes.find((item) => item.id === nodeId);
     const tokenUsage = node && nodeKindUsesTokens(node.data.kind)
       ? stubTokenUsage(nodeId)
@@ -112,7 +189,6 @@ export function createMockRunEngine(
       tokenUsage,
     });
 
-    // Surface a light artifact on agent/output nodes so Step 4 UI has something to show.
     if (node?.data.kind === "agent" || node?.data.kind === "output") {
       const artifact: WorkflowArtifact = {
         id: host.nextArtifactId(),
@@ -199,6 +275,7 @@ export function createMockRunEngine(
       { kickoffInput: run.kickoffInput },
       pathPolicy,
     );
+    plans.set(runId, plan);
 
     const nodeStates = { ...run.nodeStates };
     for (const nodeId of plan.skipped) {
@@ -221,7 +298,7 @@ export function createMockRunEngine(
         status: "skipped",
       });
     }
-    scheduleNext(runId, plan.order, 0);
+    pump(runId);
   }
 
   /** Stops timers, marks active nodes cancelled, and emits run_finished. */

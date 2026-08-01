@@ -127,6 +127,39 @@ export function useDeleteGraphWorkflowRun() {
   });
 }
 
+/** Starts a pending graph workflow run (no-op if already past pending). */
+export function useStartGraphWorkflowRun() {
+  const runtime = useWorkflowRuntime();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      runId,
+      projectId,
+    }: {
+      runId: string;
+      projectId: string;
+    }) => {
+      await runtime.runs.start(runId);
+      return { runId, projectId };
+    },
+    onSuccess: async ({ runId, projectId }) => {
+      const run = await runtime.runs.get(runId);
+      if (run !== null) {
+        queryClient.setQueryData(queryKeys.workflowRun(runId), run);
+        queryClient.setQueryData(
+          queryKeys.workflowRuns(projectId),
+          (previous: GraphWorkflowRun[] | undefined) => {
+            if (previous === undefined) {
+              return previous;
+            }
+            return previous.map((item) => (item.id === runId ? run : item));
+          },
+        );
+      }
+    },
+  });
+}
+
 /** Cancels an in-flight graph workflow run without deleting it. */
 export function useCancelGraphWorkflowRun() {
   const runtime = useWorkflowRuntime();
@@ -156,6 +189,33 @@ export function useCancelGraphWorkflowRun() {
           },
         );
       }
+    },
+  });
+}
+
+/**
+ * Creates a fresh pending run from a finished one, starts it, and returns the new record.
+ * Mirrors Settings “Run again”: history stays on the old row; execution continues on a sibling.
+ */
+export function useRerunGraphWorkflowRun() {
+  const runtime = useWorkflowRuntime();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (source: GraphWorkflowRun) => {
+      const created = await runtime.runs.create({
+        projectId: source.projectId,
+        definitionId: source.definitionId,
+        kickoffInput: source.kickoffInput,
+      });
+      await runtime.runs.start(created.id);
+      const started = await runtime.runs.get(created.id);
+      return started ?? created;
+    },
+    onSuccess: (run) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.workflowRuns(run.projectId),
+      });
+      queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
     },
   });
 }

@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockWorkflow } from "@ora/workflow-mock";
+import {
+  createMockWorkflow,
+  createParallelMockWorkflow,
+  createStaggeredParallelMockWorkflow,
+} from "@ora/workflow-mock";
 import { createMemoryWorkflowRuntime } from "./memory-workflow-runtime";
 import { planMockExecution } from "./mock-execution-plan";
 import { executionOrder } from "./mock-run-engine";
@@ -219,6 +223,104 @@ describe("mock run engine", () => {
     expect(finished?.nodeStates.output?.status).toBe("succeeded");
   });
 
+  it("runs independent fan-out branches in parallel", async () => {
+    const runtime = createMemoryWorkflowRuntime({
+      nodeStepMs: 100,
+      autoStart: false,
+    });
+    const definition = createParallelMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const run = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    await runtime.runs.start(run.id);
+
+    // start → gather (two sequential waves)
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+
+    const mid = await runtime.runs.get(run.id);
+    expect(mid?.nodeStates.security?.status).toBe("running");
+    expect(mid?.nodeStates.quality?.status).toBe("running");
+    expect(mid?.nodeStates.docs?.status).toBe("running");
+
+    // Drain remaining waves (parallel trio + synthesize + output)
+    for (let i = 0; i < 4; i += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(await runtime.runs.get(run.id)).toEqual(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+  });
+
+  it("staggers parallel starts and ends via per-node mockStepMs", async () => {
+    const runtime = createMemoryWorkflowRuntime({
+      // Default would not apply — every fixture node sets mockStepMs.
+      nodeStepMs: 50_000,
+      autoStart: false,
+    });
+    const definition = createStaggeredParallelMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const run = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    await runtime.runs.start(run.id);
+
+    await vi.advanceTimersByTimeAsync(800);
+    let snap = await runtime.runs.get(run.id);
+    expect(snap?.nodeStates).toEqual(
+      expect.objectContaining({
+        start: expect.objectContaining({ status: "succeeded", durationMs: 800 }),
+        quick_scan: expect.objectContaining({ status: "running" }),
+        lint: expect.objectContaining({ status: "running" }),
+        slow_index: expect.objectContaining({ status: "running" }),
+        deep_security: expect.objectContaining({ status: "idle" }),
+        docs_pass: expect.objectContaining({ status: "idle" }),
+      }),
+    );
+
+    // quick_scan finishes first → deep_security starts while lint/index still run
+    await vi.advanceTimersByTimeAsync(1_500);
+    snap = await runtime.runs.get(run.id);
+    expect(snap?.nodeStates.quick_scan).toEqual(
+      expect.objectContaining({ status: "succeeded", durationMs: 1_500 }),
+    );
+    expect(snap?.nodeStates.deep_security?.status).toBe("running");
+    expect(snap?.nodeStates.lint?.status).toBe("running");
+    expect(snap?.nodeStates.slow_index?.status).toBe("running");
+    expect(snap?.nodeStates.docs_pass?.status).toBe("idle");
+
+    // lint ends; deep_security + slow_index still overlap
+    await vi.advanceTimersByTimeAsync(2_000);
+    snap = await runtime.runs.get(run.id);
+    expect(snap?.nodeStates.lint).toEqual(
+      expect.objectContaining({ status: "succeeded", durationMs: 3_500 }),
+    );
+    expect(snap?.nodeStates.deep_security?.status).toBe("running");
+    expect(snap?.nodeStates.slow_index?.status).toBe("running");
+    expect(snap?.nodeStates.docs_pass?.status).toBe("idle");
+
+    // slow_index ends → docs_pass starts late while deep_security still running
+    await vi.advanceTimersByTimeAsync(2_000);
+    snap = await runtime.runs.get(run.id);
+    expect(snap?.nodeStates.slow_index).toEqual(
+      expect.objectContaining({ status: "succeeded", durationMs: 5_500 }),
+    );
+    expect(snap?.nodeStates.docs_pass?.status).toBe("running");
+    expect(snap?.nodeStates.deep_security?.status).toBe("running");
+    expect(snap?.nodeStates.join?.status).toBe("idle");
+
+    // Drain deep_security (2s left), docs_pass (2s), join, output
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await runtime.runs.get(run.id)).toEqual(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+  });
+
   it("ignores start() while a run is already running", async () => {
     const runtime = createMemoryWorkflowRuntime({
       nodeStepMs: 200,
@@ -240,7 +342,10 @@ describe("mock run engine", () => {
   });
 
   it("stops progression when cancelled mid-run", async () => {
-    const runtime = createMemoryWorkflowRuntime({ nodeStepMs: 200 });
+    const runtime = createMemoryWorkflowRuntime({
+      nodeStepMs: 200,
+      autoStart: true,
+    });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     const types: string[] = [];
@@ -266,7 +371,10 @@ describe("mock run engine", () => {
   });
 
   it("keeps concurrent runs independent when one is cancelled", async () => {
-    const runtime = createMemoryWorkflowRuntime({ nodeStepMs: 100 });
+    const runtime = createMemoryWorkflowRuntime({
+      nodeStepMs: 100,
+      autoStart: true,
+    });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     const first = await runtime.runs.create({

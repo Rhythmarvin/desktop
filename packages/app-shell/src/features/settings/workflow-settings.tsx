@@ -15,7 +15,6 @@ import {
   type XYPosition,
 } from "@xyflow/react";
 import {
-  IconPlayerPlay,
   IconRoute,
 } from "@tabler/icons-react";
 import {
@@ -32,12 +31,10 @@ import {
   createMockWorkflowNode,
   createMockWorkflows,
   parseDemoWorkflow,
-  runDemoWorkflow,
   type DemoWorkflow,
   type WorkflowCapabilities,
   type WorkflowNodeData,
   type WorkflowNodeKind,
-  type WorkflowRunResult,
 } from "@ora/workflow-mock";
 import { WorkflowCanvas } from "./workflow-canvas";
 import { WorkflowInspector } from "./workflow-inspector";
@@ -104,9 +101,6 @@ function WorkflowSettingsContent({
   );
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>("code-review");
   const [managerError, setManagerError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState<WorkflowRunResult | null>(null);
-  const runRequestRef = useRef(0);
   const editorLayoutRef = useRef<HTMLDivElement>(null);
   const libraryPanelRef = useRef<ResizablePanelHandle | null>(null);
   const inspectorPanelRef = useRef<ResizablePanelHandle | null>(null);
@@ -139,7 +133,7 @@ function WorkflowSettingsContent({
     () => workflow?.nodes.find((node) => node.selected === true) ?? null,
     [workflow],
   );
-  const inspectorAvailable = selectedNode !== null || running || runResult !== null;
+  const inspectorAvailable = selectedNode !== null;
 
   useEffect(() => {
     if (inspectorAvailable) {
@@ -288,10 +282,7 @@ function WorkflowSettingsContent({
   /** Switches the active graph while preserving its React Flow snapshot. */
   function selectWorkflow(workflowId: string): void {
     commitCurrentWorkflowSnapshot();
-    runRequestRef.current += 1;
-    setRunning(false);
     setSelectedWorkflowId(workflowId);
-    setRunResult(null);
     setManagerError(null);
   }
 
@@ -322,9 +313,7 @@ function WorkflowSettingsContent({
     setManagerError(null);
     setWorkflows((current) => current.filter((candidate) => candidate.id !== workflowId));
     if (selectedWorkflowId === workflowId) {
-      runRequestRef.current += 1;
       setSelectedWorkflowId(null);
-      setRunResult(null);
     }
   }
 
@@ -413,37 +402,6 @@ function WorkflowSettingsContent({
     }));
   }
 
-  /** Runs the deterministic mock preview and exposes progress before showing its trace. */
-  async function runWorkflow(input: string): Promise<void> {
-    const draft = commitCurrentWorkflowSnapshot();
-    if (draft === null) {
-      return;
-    }
-    expandInspector();
-    const request = ++runRequestRef.current;
-    setRunning(true);
-    setRunResult(null);
-    try {
-      const result = await runDemoWorkflow(draft, input, locale);
-      if (runRequestRef.current === request) {
-        setRunResult(result);
-      }
-    } catch {
-      if (runRequestRef.current === request) {
-        setRunResult({
-          status: "failed",
-          durationMs: 0,
-          output: t("settings.workflow.runError"),
-          steps: [],
-        });
-      }
-    } finally {
-      if (runRequestRef.current === request) {
-        setRunning(false);
-      }
-    }
-  }
-
   return (
     <div
       className="flex h-full min-h-0 flex-col bg-background"
@@ -452,8 +410,6 @@ function WorkflowSettingsContent({
           event.key === "Escape"
           && !event.defaultPrevented
           && selectedNode !== null
-          && !running
-          && runResult === null
         ) {
           event.preventDefault();
           event.stopPropagation();
@@ -491,15 +447,6 @@ function WorkflowSettingsContent({
         </div>
         <div className="flex items-center gap-2">
           <DeployWorkflowButton workflow={workflow} />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void runWorkflow("")}
-            disabled={workflow === null || running}
-          >
-            <IconPlayerPlay />
-            <span className="hidden sm:inline">{t("settings.workflow.testRun")}</span>
-          </Button>
         </div>
       </header>
       <div ref={editorLayoutRef} className="min-h-0 flex-1">
@@ -645,8 +592,6 @@ function WorkflowSettingsContent({
             >
               <WorkflowInspector
                 node={selectedNode}
-                running={running}
-                runResult={runResult}
                 capabilities={capabilities}
                 onUpdate={(updatedNode) =>
                   updateWorkflow((current) => ({
@@ -660,8 +605,6 @@ function WorkflowSettingsContent({
                   void deleteElements({ nodes: [{ id: nodeId }] });
                 }}
                 onCloseNode={closeNodeInspector}
-                onCloseRun={() => setRunResult(null)}
-                onRun={(input) => void runWorkflow(input)}
               />
             </div>
           </ResizablePanel>

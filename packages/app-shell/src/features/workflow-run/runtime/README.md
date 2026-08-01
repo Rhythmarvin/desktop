@@ -38,11 +38,16 @@ Ports and in-memory mock for project workflow mounts and graph runs.
   nodes it picks **one** outgoing edge via `MockPathPolicy` (default is
   kickoff-aware label heuristics; otherwise first edge). Unreachable nodes are
   marked `skipped` and emit `node_finished` with that status.
+- **Scheduling**: ready-set waves — every reachable node whose predecessors
+  have succeeded starts together (true fan-out parallelism). Deploy library
+  workflow **错开并行演示 / Staggered parallel demo** for unequal start/end
+  times (`data.mockStepMs`), or **并行审查演示 / Parallel review demo** for a
+  synchronized fan-out (Theater shows one card at a time with a parallel switcher).
 - **Start**: only from `pending`. Re-entrant `start` is a no-op (HITL resume will
   be a separate API).
 - **Tokens**: stubbed only for `prompt` / `agent` / `tool` kinds.
 - **Artifacts**: markdown stubs on `agent` / `output` for Step 4.
-- **Options**: `nodeStepMs` (default 450), `autoStart` (default true; kickoff UI
-  can create then `start`), injectable `pathPolicy`.
+- **Options**: `nodeStepMs` (default 5000), `autoStart` (default false; workspace
+  Start calls `runs.start`), injectable `pathPolicy`.
 - Kickoff text is stored on the run and fed into path planning when provided.
-  Deploy does not collect it; the main workspace start flow will.
+  Deploy creates a pending run only; the workspace Start control begins execution.

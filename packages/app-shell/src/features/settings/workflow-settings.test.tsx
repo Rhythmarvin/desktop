@@ -59,8 +59,7 @@ describe("WorkflowSettings", () => {
     await appI18n.changeLanguage("zh-CN");
   });
 
-  it("loads the mock graph and exposes a deterministic preview", async () => {
-    const user = userEvent.setup();
+  it("loads the mock graph and deploy control without an in-settings test run", async () => {
     renderSettings();
 
     expect(await screen.findByText("代码审查工作流")).toBeInTheDocument();
@@ -71,17 +70,8 @@ describe("WorkflowSettings", () => {
     expect(screen.getByRole("separator", {
       name: "调整节点配置宽度；双击恢复默认宽度",
     })).toBeInTheDocument();
-
-    await user.click(screen.getAllByRole("button", { name: "测试运行" })[0]);
-
-    expect(await screen.findByText("模拟运行成功")).toBeInTheDocument();
-    expect(screen.getByText(/发现 2 个建议项，未发现阻塞问题。/)).toBeInTheDocument();
-
-    const pane = document.querySelector(".react-flow__pane");
-    expect(pane).not.toBeNull();
-    fireEvent.click(pane!);
-
-    expect(screen.getByText("模拟运行成功")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "部署到项目" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "测试运行" })).not.toBeInTheDocument();
   });
 
   it("zooms around the pointer with the mouse wheel", async () => {
@@ -454,7 +444,7 @@ describe("WorkflowSettings", () => {
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("发布复盘")).toBeInTheDocument();
-      expect(screen.getByText("4 个工作流")).toBeInTheDocument();
+      expect(screen.getByText("6 个工作流")).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "重命名发布复盘" }));
@@ -482,17 +472,6 @@ describe("WorkflowSettings", () => {
     expect(await screen.findByDisplayValue("代码审查工作流")).toBeInTheDocument();
   });
 
-  it("runs the edited session draft visible in the editor", async () => {
-    const user = userEvent.setup();
-    renderSettings();
-    const nameInput = await screen.findByLabelText("工作流名称");
-
-    fireEvent.change(nameInput, { target: { value: "未保存草稿" } });
-    await user.click(screen.getAllByRole("button", { name: "测试运行" })[0]);
-
-    expect(await screen.findByText(/已完成“未保存草稿”的模拟运行/)).toBeInTheDocument();
-  });
-
   it("preserves the current draft when the display language changes", async () => {
     renderSettings();
     const nameInput = await screen.findByLabelText("工作流名称");
@@ -506,7 +485,6 @@ describe("WorkflowSettings", () => {
 
   it("localizes workflow chrome and mock content in English", async () => {
     await appI18n.changeLanguage("en-US");
-    const user = userEvent.setup();
     renderSettings();
 
     expect(await screen.findByText("Code review workflow")).toBeInTheDocument();
@@ -514,10 +492,7 @@ describe("WorkflowSettings", () => {
     expect(
       screen.getByText("Scroll to zoom · Drag to pan · Nodes snap to grid"),
     ).toBeInTheDocument();
-
-    await user.click(screen.getAllByRole("button", { name: "Test run" })[0]);
-
-    expect(await screen.findByText("Simulation successful")).toBeInTheDocument();
-    expect(screen.getByText(/Found 2 suggestions and no blocking issues./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deploy to project" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Test run" })).not.toBeInTheDocument();
   });
 });

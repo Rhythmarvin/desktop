@@ -1,14 +1,8 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  IconCircleCheck,
-  IconCircleX,
-  IconClock,
   IconLayoutSidebarRightCollapse,
-  IconPlayerPlay,
   IconSettings,
   IconTrash,
-  IconX,
 } from "@tabler/icons-react";
 import {
   Button,
@@ -24,30 +18,22 @@ import {
 import {
   type WorkflowNodeData,
   type WorkflowCapabilities,
-  type WorkflowRunResult,
 } from "@ora/workflow-mock";
 import type { Node } from "@xyflow/react";
 import { getNodeMetadata } from "./workflow-node-metadata";
 
 interface WorkflowInspectorProps {
   node: Node<WorkflowNodeData, "workflow"> | null;
-  runResult: WorkflowRunResult | null;
-  running: boolean;
   capabilities: WorkflowCapabilities;
   onUpdate: (node: Node<WorkflowNodeData, "workflow">) => void;
   onDelete: (nodeId: string) => void;
-  onCloseRun: () => void;
   onCloseNode: () => void;
-  onRun: (input: string) => void;
 }
 
-/** Switches between node configuration and a compact mock execution trace. */
+/** Right-rail editor for the selected workflow node (definition only). */
 export function WorkflowInspector(props: WorkflowInspectorProps) {
-  if (props.running || props.runResult !== null) {
-    return <WorkflowRunPreview {...props} />;
-  }
   if (props.node === null) {
-    return <WorkflowInspectorEmpty onRun={props.onRun} />;
+    return <WorkflowInspectorEmpty />;
   }
   return (
     <WorkflowNodeInspector
@@ -60,8 +46,8 @@ export function WorkflowInspector(props: WorkflowInspectorProps) {
   );
 }
 
-/** Guides first-time users toward selecting a node while keeping preview readily available. */
-function WorkflowInspectorEmpty({ onRun }: { onRun: (input: string) => void }) {
+/** Shown when the inspector is open but no node is selected. */
+function WorkflowInspectorEmpty() {
   const { t } = useTranslation();
   return (
     <aside className="flex min-h-0 flex-1 flex-col border-l border-border bg-background">
@@ -77,10 +63,6 @@ function WorkflowInspectorEmpty({ onRun }: { onRun: (input: string) => void }) {
         <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
           {t("settings.workflow.noSelectionHint")}
         </p>
-        <Button className="mt-4" size="sm" onClick={() => onRun("")}>
-          <IconPlayerPlay />
-          {t("settings.workflow.testRun")}
-        </Button>
       </div>
     </aside>
   );
@@ -234,112 +216,6 @@ function WorkflowNodeInspector({
         >
           <IconTrash />
           {t("settings.workflow.deleteNode")}
-        </Button>
-      </div>
-    </aside>
-  );
-}
-
-/** Displays deterministic mock progress and output without implying a real agent was executed. */
-function WorkflowRunPreview({
-  running,
-  runResult,
-  onCloseRun,
-  onRun,
-}: WorkflowInspectorProps) {
-  const { t } = useTranslation();
-  const [input, setInput] = useState(() => t("settings.workflow.previewInput"));
-  const succeeded = runResult?.status !== "failed";
-  const ResultIcon = succeeded ? IconCircleCheck : IconCircleX;
-
-  return (
-    <aside className="flex min-h-0 flex-1 flex-col border-l border-border bg-background" aria-live="polite">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <h3 className="text-xs font-semibold">{t("settings.workflow.testRun")}</h3>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">{t("settings.workflow.mockNotice")}</p>
-        </div>
-        <Button variant="ghost" size="icon-sm" aria-label={t("settings.workflow.closePreview")} onClick={onCloseRun}>
-          <IconX />
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {running ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <span className="relative mb-3 flex size-11 items-center justify-center rounded-full bg-primary/10">
-              <IconPlayerPlay className="size-5 animate-pulse" />
-            </span>
-            <p className="text-xs font-medium">{t("settings.workflow.running")}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">{t("settings.workflow.runningHint")}</p>
-          </div>
-        ) : runResult !== null ? (
-          <div className="space-y-4">
-            <div
-              className={`flex items-center gap-2 rounded-lg border p-3 ${
-                succeeded
-                  ? "border-emerald-500/25 bg-emerald-500/8"
-                  : "border-destructive/25 bg-destructive/8"
-              }`}
-            >
-              <ResultIcon
-                className={`size-4 ${
-                  succeeded
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-destructive"
-                }`}
-              />
-              <div>
-                <p className="text-xs font-medium">
-                  {t(
-                    succeeded
-                      ? "settings.workflow.runSuccess"
-                      : "settings.workflow.runFailed",
-                  )}
-                </p>
-                <p className="text-[10px] text-muted-foreground">{runResult.durationMs} ms</p>
-              </div>
-            </div>
-            <div>
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("settings.workflow.trace")}</p>
-              <ol className="space-y-2">
-                {runResult.steps.map((step) => (
-                  <li key={step.nodeId} className="flex items-center gap-2 text-[11px]">
-                    <ResultIcon
-                      className={`size-3.5 ${
-                        succeeded
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-destructive"
-                      }`}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{step.summary}</span>
-                    <span className="flex items-center gap-1 tabular-nums text-muted-foreground">
-                      <IconClock className="size-3" />
-                      {step.durationMs} ms
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <div>
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("settings.workflow.output")}</p>
-              <pre data-selectable className="whitespace-pre-wrap rounded-lg bg-muted/70 p-3 font-sans text-[11px] leading-5">
-                {runResult.output}
-              </pre>
-            </div>
-          </div>
-        ) : null}
-      </div>
-      <div className="space-y-2 border-t border-border p-3">
-        <Label htmlFor="workflow-preview-input" className="text-[10px]">{t("settings.workflow.testInput")}</Label>
-        <Textarea
-          id="workflow-preview-input"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          className="min-h-16 resize-none text-xs"
-        />
-        <Button className="w-full" size="sm" disabled={running} onClick={() => onRun(input)}>
-          <IconPlayerPlay />
-          {t("settings.workflow.runAgain")}
         </Button>
       </div>
     </aside>

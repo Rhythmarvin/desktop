@@ -18,12 +18,11 @@ type Listener = (event: WorkflowRunEvent) => void;
 type ChangeListener = (run: GraphWorkflowRun) => void;
 
 export interface MemoryWorkflowRuntimeOptions {
-  /** Delay between mock node steps. Default 450ms. */
+  /** Delay between mock node steps. Default 5000ms (time to switch parallel acts). */
   nodeStepMs?: number;
   /**
-   * When true (default), create() starts the mock engine immediately.
-   * Tests that only assert mount/snapshot plumbing can set false.
-   * Future kickoff UI can create with autoStart false then call start().
+   * When true, create() starts the mock engine immediately.
+   * Default false: deploy only creates a pending run; workspace Start kicks off.
    */
   autoStart?: boolean;
   /** Injectable condition-branch policy for the mock engine. */
@@ -55,7 +54,7 @@ function idleNodeStates(workflow: DemoWorkflow): Record<string, GraphWorkflowNod
 export function createMemoryWorkflowRuntime(
   options: MemoryWorkflowRuntimeOptions = {},
 ): WorkflowRuntime {
-  const autoStart = options.autoStart ?? true;
+  const autoStart = options.autoStart ?? false;
   const definitions = new Map<string, DemoWorkflow>();
   const mounts: ProjectWorkflowMount[] = [];
   const runs = new Map<string, GraphWorkflowRun>();

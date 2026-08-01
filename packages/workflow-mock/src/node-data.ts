@@ -19,4 +19,9 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   model?: string;
   tool?: string;
   condition?: string;
+  /**
+   * Optional mock-engine step duration (ms). When set, that node runs for this
+   * long instead of the runtime default — used for staggered parallel demos.
+   */
+  mockStepMs?: number;
 }
