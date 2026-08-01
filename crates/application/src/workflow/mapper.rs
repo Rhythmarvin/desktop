@@ -1,5 +1,6 @@
-use ora_contracts;
-use ora_domain::{CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion};
+use ora_domain::{
+    CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
+};
 
 /// Converts a domain workflow into its public contract representation.
 pub(crate) fn map_workflow(workflow: Workflow) -> ora_contracts::Workflow {
@@ -45,7 +46,9 @@ pub(crate) fn map_workflow_version(version: WorkflowVersion) -> ora_contracts::W
 }
 
 /// Converts a created workflow result into its public contract representation.
-pub(crate) fn map_created_workflow(created: CreatedWorkflow) -> ora_contracts::CreateWorkflowResponse {
+pub(crate) fn map_created_workflow(
+    created: CreatedWorkflow,
+) -> ora_contracts::CreateWorkflowResponse {
     ora_contracts::CreateWorkflowResponse {
         workflow: map_workflow(created.workflow),
         draft: map_snapshot(created.draft),

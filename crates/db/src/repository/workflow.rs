@@ -37,7 +37,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                     params![
                         workflow.id.as_ref(),
                         &workflow.name,
-                        workflow.published_snapshot_id.as_ref().map(|id| id.as_ref()),
+                        workflow.published_snapshot_id.as_ref().map(AsRef::as_ref),
                         workflow.audit_fields.created_at,
                         workflow.audit_fields.updated_at,
                         bool_to_sqlite(workflow.audit_fields.is_deleted),
@@ -157,10 +157,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
-    fn update_workflow(
-        &self,
-        workflow: Workflow,
-    ) -> Result<Workflow, WorkflowRepositoryError> {
+    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, WorkflowRepositoryError> {
         let updated = self
             .pool
             .with_connection(|connection| {
@@ -445,8 +442,6 @@ fn map_snapshot_row(row: &Row<'_>) -> Result<WorkflowSnapshot, crate::DatabaseEr
 }
 
 /// Converts database failures into application-port errors.
-fn workflow_repository_error_from_database(
-    error: crate::DatabaseError,
-) -> WorkflowRepositoryError {
+fn workflow_repository_error_from_database(error: crate::DatabaseError) -> WorkflowRepositoryError {
     WorkflowRepositoryError::OperationFailed(error.to_string())
 }
