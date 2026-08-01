@@ -1,4 +1,6 @@
 import type { DemoWorkflow } from "@ora/workflow-mock";
+import { createMockRunEngine } from "./mock-run-engine";
+import type { MockPathPolicy } from "./mock-execution-plan";
 import type {
   WorkflowHostRepository,
   WorkflowRunRepository,
@@ -7,13 +9,26 @@ import type {
 import type {
   GraphWorkflowNodeState,
   GraphWorkflowRun,
-  GraphWorkflowRunStatus,
   ProjectWorkflowMount,
   WorkflowArtifact,
   WorkflowRunEvent,
 } from "./types";
 
 type Listener = (event: WorkflowRunEvent) => void;
+type ChangeListener = (run: GraphWorkflowRun) => void;
+
+export interface MemoryWorkflowRuntimeOptions {
+  /** Delay between mock node steps. Default 450ms. */
+  nodeStepMs?: number;
+  /**
+   * When true (default), create() starts the mock engine immediately.
+   * Tests that only assert mount/snapshot plumbing can set false.
+   * Future kickoff UI can create with autoStart false then call start().
+   */
+  autoStart?: boolean;
+  /** Injectable condition-branch policy for the mock engine. */
+  pathPolicy?: MockPathPolicy;
+}
 
 /** Local-time ISO timestamp for run metadata (Ora prefers local clocks). */
 function nowIso(): string {
@@ -35,14 +50,20 @@ function idleNodeStates(workflow: DemoWorkflow): Record<string, GraphWorkflowNod
 /**
  * In-memory Host + Run repositories for MVP.
  * Definition blobs live here after deploy; `@ora/workflow-mock` stays free of persistence.
+ * The mock engine advances nodes on a timer and emits WorkflowRunEvent frames.
  */
-export function createMemoryWorkflowRuntime(): WorkflowRuntime {
+export function createMemoryWorkflowRuntime(
+  options: MemoryWorkflowRuntimeOptions = {},
+): WorkflowRuntime {
+  const autoStart = options.autoStart ?? true;
   const definitions = new Map<string, DemoWorkflow>();
   const mounts: ProjectWorkflowMount[] = [];
   const runs = new Map<string, GraphWorkflowRun>();
   const artifacts = new Map<string, WorkflowArtifact[]>();
   const listeners = new Map<string, Set<Listener>>();
+  const changeListeners = new Set<ChangeListener>();
   let runSeq = 0;
+  let artifactSeq = 0;
 
   const emit = (runId: string, event: WorkflowRunEvent) => {
     const set = listeners.get(runId);
@@ -53,6 +74,34 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
       listener(event);
     }
   };
+
+  const notifyChanged = (run: GraphWorkflowRun) => {
+    for (const listener of changeListeners) {
+      listener(run);
+    }
+  };
+
+  const engine = createMockRunEngine(
+    {
+      getRun: (runId) => runs.get(runId),
+      setRun: (run) => {
+        runs.set(run.id, run);
+      },
+      appendArtifact: (artifact) => {
+        const list = artifacts.get(artifact.runId) ?? [];
+        list.push(artifact);
+        artifacts.set(artifact.runId, list);
+      },
+      emit,
+      notifyChanged,
+      nowIso,
+      nextArtifactId: () => {
+        artifactSeq += 1;
+        return `wart-${artifactSeq}`;
+      },
+    },
+    { nodeStepMs: options.nodeStepMs, pathPolicy: options.pathPolicy },
+  );
 
   const host: WorkflowHostRepository = {
     async listMounts(projectId) {
@@ -138,7 +187,6 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
         definitionId,
         definitionSnapshot: snapshot,
         name: snapshot.name,
-        // Step 1 leaves runs pending; Step 2 mock engine advances them.
         status: "pending",
         kickoffInput,
         nodeStates: idleNodeStates(snapshot),
@@ -148,7 +196,20 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
       };
       runs.set(run.id, run);
       artifacts.set(run.id, []);
-      return structuredClone(run);
+      if (autoStart) {
+        engine.start(run.id);
+      }
+      const current = runs.get(run.id)!;
+      notifyChanged(current);
+      return structuredClone(current);
+    },
+
+    async start(runId) {
+      const run = runs.get(runId);
+      if (run === undefined) {
+        throw new Error(`Unknown workflow run ${runId}`);
+      }
+      engine.start(runId);
     },
 
     async cancel(runId) {
@@ -156,36 +217,7 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
       if (run === undefined) {
         throw new Error(`Unknown workflow run ${runId}`);
       }
-      if (
-        run.status === "succeeded"
-        || run.status === "failed"
-        || run.status === "cancelled"
-        || run.status === "partial_failed"
-      ) {
-        return;
-      }
-      const finishedAt = nowIso();
-      const nextStatus: GraphWorkflowRunStatus = "cancelled";
-      const nodeStates = { ...run.nodeStates };
-      for (const [nodeId, state] of Object.entries(nodeStates)) {
-        if (state.status === "running" || state.status === "awaiting_input") {
-          nodeStates[nodeId] = { ...state, status: "cancelled", finishedAt };
-        }
-      }
-      const updated: GraphWorkflowRun = {
-        ...run,
-        status: nextStatus,
-        nodeStates,
-        updatedAt: finishedAt,
-        finishedAt,
-      };
-      runs.set(runId, updated);
-      emit(runId, {
-        type: "run_finished",
-        runId,
-        status: nextStatus,
-        totals: updated.totals,
-      });
+      engine.cancel(runId);
     },
 
     async delete(runId) {
@@ -199,7 +231,9 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
         || run.status === "running"
         || run.status === "awaiting_input"
       ) {
-        await runRepo.cancel(runId);
+        engine.cancel(runId);
+      } else {
+        engine.stop(runId);
       }
       runs.delete(runId);
       artifacts.delete(runId);
@@ -221,6 +255,7 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
         updatedAt: nowIso(),
       };
       runs.set(runId, updated);
+      notifyChanged(updated);
       return structuredClone(updated);
     },
 
@@ -245,6 +280,13 @@ export function createMemoryWorkflowRuntime(): WorkflowRuntime {
         if (set.size === 0) {
           listeners.delete(runId);
         }
+      };
+    },
+
+    watch(onChange) {
+      changeListeners.add(onChange);
+      return () => {
+        changeListeners.delete(onChange);
       };
     },
   };

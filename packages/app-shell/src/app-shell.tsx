@@ -26,6 +26,7 @@ import { AppI18nProvider } from "./i18n/i18n";
 import type { CurrentUser } from "./lib/types";
 import { createAppQueryClient } from "./state/query-client";
 import { useGitIdentityUser } from "./state/hooks/use-git-identity";
+import { useGraphWorkflowRunLiveSync } from "./state/hooks/use-graph-workflow-runs";
 import { useSessionUnreadSync } from "./state/hooks/use-session-unread-sync";
 import { useUiStore } from "./state/stores/ui-store";
 import { startThemeSubscription } from "./state/stores/settings-store";
@@ -65,6 +66,8 @@ function AppShellContent({ client, chatStore, platform, user: injectedUser }: Ap
   useEffect(() => startThemeSubscription(), []);
   // Track which sessions finished a turn while the user was looking elsewhere.
   useSessionUnreadSync(chatStore);
+  // Keep sidebar / workspace run status current as the mock engine advances.
+  useGraphWorkflowRunLiveSync();
 
   // Derive the sidebar user from the host's global Git identity unless a caller
   // (tests, storybook) injects an explicit user to render instead.

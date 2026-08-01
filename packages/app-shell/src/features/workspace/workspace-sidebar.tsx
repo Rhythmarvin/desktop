@@ -25,6 +25,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconMessageCircle,
   IconPencil,
+  IconPlayerStop,
   IconPlus,
   IconRoute,
   IconSearch,
@@ -38,7 +39,7 @@ import { localizeContractError } from "../../i18n/contract-error";
 import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
-import { useGraphWorkflowRuns } from "../../state/hooks/use-graph-workflow-runs";
+import { useGraphWorkflowRuns, useCancelGraphWorkflowRun } from "../../state/hooks/use-graph-workflow-runs";
 import { useUiStore } from "../../state/stores/ui-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import { useUnreadSessionsStore } from "../../state/stores/unread-sessions-store";
@@ -529,33 +530,45 @@ function ProjectWorkflowRunRows({
 }) {
   const { t } = useTranslation();
   const runsQuery = useGraphWorkflowRuns(projectId);
+  const cancelRun = useCancelGraphWorkflowRun();
   const runs = runsQuery.data ?? [];
   return (
     <>
-      {runs.map((run) => (
-        <TreeRow
-          key={run.id}
-          depth={1}
-          active={activeRunId === run.id}
-          icon={(
-            <span className="relative flex size-[18px] items-center justify-center">
-              <IconRoute className="size-4 text-muted-foreground" aria-hidden />
-              <span
-                className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${runStatusClass(run.status)}`}
-                aria-label={t(`workflowRun.status.${run.status}`)}
+      {runs.map((run) => {
+        const canCancel =
+          run.status === "pending"
+          || run.status === "running"
+          || run.status === "awaiting_input";
+        return (
+          <TreeRow
+            key={run.id}
+            depth={1}
+            active={activeRunId === run.id}
+            icon={(
+              <span className="relative flex size-[18px] items-center justify-center">
+                <IconRoute className="size-4 text-muted-foreground" aria-hidden />
+                <span
+                  className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${runStatusClass(run.status)}`}
+                  aria-label={t(`workflowRun.status.${run.status}`)}
+                />
+              </span>
+            )}
+            label={run.name}
+            onClick={() => onSelectRun(run.id)}
+            menu={(
+              <EntityMenu
+                onEdit={() => onEditRun({ id: run.id, name: run.name })}
+                onCancel={canCancel
+                  ? () => {
+                    void cancelRun.mutateAsync({ runId: run.id, projectId });
+                  }
+                  : undefined}
+                onDelete={() => onDeleteRun({ id: run.id, name: run.name })}
               />
-            </span>
-          )}
-          label={run.name}
-          onClick={() => onSelectRun(run.id)}
-          menu={(
-            <EntityMenu
-              onEdit={() => onEditRun({ id: run.id, name: run.name })}
-              onDelete={() => onDeleteRun({ id: run.id, name: run.name })}
-            />
-          )}
-        />
-      ))}
+            )}
+          />
+        );
+      })}
     </>
   );
 }
@@ -613,7 +626,15 @@ function NewDirectChatButton({ onClick }: { onClick: () => void }) {
 }
 
 /** Provides contextual CRUD commands without making every tree row visually noisy. */
-function EntityMenu({ onEdit, onDelete }: { onEdit?: () => void; onDelete: () => void }) {
+function EntityMenu({
+  onEdit,
+  onCancel,
+  onDelete,
+}: {
+  onEdit?: () => void;
+  onCancel?: () => void;
+  onDelete: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <DropdownMenu>
@@ -622,6 +643,12 @@ function EntityMenu({ onEdit, onDelete }: { onEdit?: () => void; onDelete: () =>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         {onEdit && <DropdownMenuItem onClick={onEdit}><IconPencil />{t("common.edit")}</DropdownMenuItem>}
+        {onCancel && (
+          <DropdownMenuItem onClick={onCancel}>
+            <IconPlayerStop />
+            {t("workflowRun.cancelAction")}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem variant="destructive" onClick={onDelete}><IconTrash />{t("common.delete")}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

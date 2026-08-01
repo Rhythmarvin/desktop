@@ -7,8 +7,8 @@ Product UI and mock runtime for **graph workflow runs** attached to projects
 
 - Host project mounts of workflow definitions and create/list `GraphWorkflowRun`
   instances (mock Host/Run repositories today; shape ready to extract).
-- Render the Run Workspace when `workflowRunId` is selected (Theater / overview
-  arrive in later steps; Step 1 is navigation + placeholder).
+- Render the Run Workspace when `workflowRunId` is selected (pre-Theater progress
+  panel today; Theater / overview arrive in later steps).
 - Keep OpenSpec composer stepper (`features/workflow` + `workflow-store`) and
   settings React Flow editor (`settings/workflow-flow`) out of this module.
 
@@ -30,9 +30,12 @@ Product UI and mock runtime for **graph workflow runs** attached to projects
 
 ## Interactions
 
-- Deploy (settings): searchable project picker (Command), then mount upsert +
-  create run, select that run, and close settings.
+- Deploy (settings): searchable project picker, then mount upsert + create
+  run, select that run, and close settings. Kickoff input belongs in the main
+  workspace UI later (`create` / path policy already accept `kickoffInput`).
 - Selection: `useWorkspaceSelectionStore.selectWorkflowRun`.
 - Lists: react-query via `queryKeys.workflowMounts` /
   `workflowMountsByDefinition` / `workflowRuns`.
-- Runtime: `WorkflowRuntimeProvider` in `AppShell` (memory impl for MVP).
+- Runtime: `WorkflowRuntimeProvider` in `AppShell` (memory + mock engine).
+  `useGraphWorkflowRunLiveSync` patches run caches via `runs.watch`.
+  Sidebar supports cancel (keep row) and delete (cancel then remove).

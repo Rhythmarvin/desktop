@@ -1,8 +1,41 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { DemoWorkflow } from "@ora/workflow-mock";
 import { useWorkflowRuntime } from "../../features/workflow-run/runtime/workflow-runtime-context";
+import type { GraphWorkflowRun } from "../../features/workflow-run/runtime/types";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import { queryKeys } from "./query-keys";
+
+/**
+ * Keeps react-query run caches in sync with mock-engine mutations
+ * so sidebar status dots update without a Theater UI yet.
+ */
+export function useGraphWorkflowRunLiveSync() {
+  const runtime = useWorkflowRuntime();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    return runtime.runs.watch((run) => {
+      const clone = structuredClone(run);
+      queryClient.setQueryData(queryKeys.workflowRun(run.id), clone);
+      // Patch the project list in place to avoid refetch flicker on every node tick.
+      queryClient.setQueryData(
+        queryKeys.workflowRuns(run.projectId),
+        (previous: GraphWorkflowRun[] | undefined) => {
+          if (previous === undefined) {
+            return previous;
+          }
+          const index = previous.findIndex((item) => item.id === run.id);
+          if (index < 0) {
+            return [clone, ...previous];
+          }
+          const next = previous.slice();
+          next[index] = clone;
+          return next;
+        },
+      );
+    });
+  }, [runtime, queryClient]);
+}
 
 /** Lists graph workflow runs for a project (D1: react-query list). */
 export function useGraphWorkflowRuns(projectId: string | null | undefined) {
@@ -89,6 +122,39 @@ export function useDeleteGraphWorkflowRun() {
       const selection = useWorkspaceSelectionStore.getState().selection;
       if (selection.workflowRunId === runId) {
         useWorkspaceSelectionStore.getState().clearWorkflowRunSelection(projectId);
+      }
+    },
+  });
+}
+
+/** Cancels an in-flight graph workflow run without deleting it. */
+export function useCancelGraphWorkflowRun() {
+  const runtime = useWorkflowRuntime();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      runId,
+      projectId,
+    }: {
+      runId: string;
+      projectId: string;
+    }) => {
+      await runtime.runs.cancel(runId);
+      return { runId, projectId };
+    },
+    onSuccess: async ({ runId, projectId }) => {
+      const run = await runtime.runs.get(runId);
+      if (run !== null) {
+        queryClient.setQueryData(queryKeys.workflowRun(runId), run);
+        queryClient.setQueryData(
+          queryKeys.workflowRuns(projectId),
+          (previous: GraphWorkflowRun[] | undefined) => {
+            if (previous === undefined) {
+              return previous;
+            }
+            return previous.map((item) => (item.id === runId ? run : item));
+          },
+        );
       }
     },
   });

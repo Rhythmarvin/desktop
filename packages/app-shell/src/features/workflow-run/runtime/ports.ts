@@ -38,6 +38,11 @@ export interface WorkflowRunRepository {
     definitionId: string;
     kickoffInput?: string;
   }) => Promise<GraphWorkflowRun>;
+  /**
+   * Starts a pending run (mock engine). No-op when already running or terminal.
+   * Create() auto-starts by default; this supports deferred kickoff and tests.
+   */
+  start: (runId: string) => Promise<void>;
   cancel: (runId: string) => Promise<void>;
   /**
    * Removes a run from the project list. Active runs are cancelled first so
@@ -53,13 +58,18 @@ export interface WorkflowRunRepository {
   ) => Promise<void>;
   listArtifacts: (runId: string) => Promise<WorkflowArtifact[]>;
   /**
-   * Subscribes to run events. Step 1 may be a no-op until the mock engine
-   * advances nodes in Step 2; callers should still unregister on unmount.
+   * Subscribes to run events (node progress, artifacts, finish).
+   * Callers must unregister on unmount.
    */
   subscribe: (
     runId: string,
     onEvent: (event: WorkflowRunEvent) => void,
   ) => Unsubscribe;
+  /**
+   * Fires whenever a run record mutates (engine steps, cancel, rename).
+   * Used to invalidate react-query caches so sidebar status stays live.
+   */
+  watch: (onChange: (run: GraphWorkflowRun) => void) => Unsubscribe;
 }
 
 /** Combined runtime port so the shell can inject one memory (or future HTTP) impl. */

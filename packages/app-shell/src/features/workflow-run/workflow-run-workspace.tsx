@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@ora/ui";
 import {
@@ -19,7 +20,7 @@ function statusLabelKey(status: GraphWorkflowRunStatus): string {
 }
 
 /**
- * Step 1 placeholder for the Run Workspace (D2 third branch).
+ * Pre-Theater workspace shell: live status + path progress from the mock engine.
  * Theater / overview / artifacts land in Steps 3–5.
  */
 export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
@@ -28,6 +29,34 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const runQuery = useGraphWorkflowRun(runId);
   const run = runQuery.data ?? null;
+
+  const progress = useMemo(() => {
+    if (run === null) {
+      return null;
+    }
+    const states = Object.values(run.nodeStates);
+    const total = states.length;
+    const succeeded = states.filter((state) => state.status === "succeeded").length;
+    const skipped = states.filter((state) => state.status === "skipped").length;
+    let runningNodeTitle: string | undefined;
+    for (const [nodeId, state] of Object.entries(run.nodeStates)) {
+      if (state.status === "running") {
+        runningNodeTitle = run.definitionSnapshot.nodes.find(
+          (node) => node.id === nodeId,
+        )?.data.title;
+        break;
+      }
+    }
+    return {
+      total,
+      succeeded,
+      skipped,
+      done: succeeded + skipped,
+      runningNodeTitle,
+      totalTokens: run.totals.tokenUsage?.totalTokens,
+      durationMs: run.totals.durationMs,
+    };
+  }, [run]);
 
   return (
     <main
@@ -70,7 +99,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {t("workflowRun.placeholderBody")}
           </p>
-          {run && (
+          {run && progress && (
             <dl className="mt-8 grid gap-px overflow-hidden rounded-md border border-border bg-border text-left sm:grid-cols-2">
               <div className="bg-background p-4">
                 <dt className="text-xs text-muted-foreground">
@@ -82,12 +111,49 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
               </div>
               <div className="bg-background p-4">
                 <dt className="text-xs text-muted-foreground">
-                  {t("workflowRun.field.nodes")}
+                  {t("workflowRun.field.progress")}
                 </dt>
-                <dd className="mt-1 text-sm font-medium">
-                  {run.definitionSnapshot.nodes.length}
+                <dd className="mt-1 text-sm font-medium tabular-nums">
+                  {t("workflowRun.progressValue", {
+                    done: progress.done,
+                    total: progress.total,
+                  })}
+                  {progress.skipped > 0
+                    ? ` · ${t("workflowRun.skippedCount", { count: progress.skipped })}`
+                    : ""}
                 </dd>
               </div>
+              <div className="bg-background p-4 sm:col-span-2">
+                <dt className="text-xs text-muted-foreground">
+                  {t("workflowRun.field.currentNode")}
+                </dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {progress.runningNodeTitle
+                    ?? (run.status === "succeeded"
+                      ? t("workflowRun.currentNodeDone")
+                      : run.status === "cancelled"
+                        ? t("workflowRun.currentNodeCancelled")
+                        : t("workflowRun.currentNodeIdle"))}
+                </dd>
+              </div>
+              {(progress.totalTokens !== undefined || progress.durationMs !== undefined) && (
+                <div className="bg-background p-4 sm:col-span-2">
+                  <dt className="text-xs text-muted-foreground">
+                    {t("workflowRun.field.totals")}
+                  </dt>
+                  <dd className="mt-1 text-sm font-medium tabular-nums text-muted-foreground">
+                    {progress.totalTokens !== undefined
+                      && t("workflowRun.totalsTokens", { count: progress.totalTokens })}
+                    {progress.totalTokens !== undefined && progress.durationMs !== undefined
+                      ? " · "
+                      : ""}
+                    {progress.durationMs !== undefined
+                      && t("workflowRun.totalsDuration", {
+                        ms: progress.durationMs,
+                      })}
+                  </dd>
+                </div>
+              )}
             </dl>
           )}
         </section>

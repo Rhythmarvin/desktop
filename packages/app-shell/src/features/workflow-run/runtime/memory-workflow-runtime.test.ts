@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockWorkflow } from "@ora/workflow-mock";
 import { createMemoryWorkflowRuntime } from "./memory-workflow-runtime";
+import { planMockExecution } from "./mock-execution-plan";
+import { executionOrder } from "./mock-run-engine";
 
 describe("createMemoryWorkflowRuntime", () => {
   it("mounts the same definition on multiple projects by reference", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     await runtime.host.mount("p2", definition);
@@ -17,7 +19,7 @@ describe("createMemoryWorkflowRuntime", () => {
   });
 
   it("freezes a definition snapshot when creating a run", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     const run = await runtime.runs.create({
@@ -40,7 +42,7 @@ describe("createMemoryWorkflowRuntime", () => {
   });
 
   it("rejects create when the definition is not mounted on the project", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     await expect(
@@ -49,7 +51,7 @@ describe("createMemoryWorkflowRuntime", () => {
   });
 
   it("cancels an open run and emits run_finished", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     const run = await runtime.runs.create({
@@ -69,7 +71,7 @@ describe("createMemoryWorkflowRuntime", () => {
   });
 
   it("upserts a single mount but allows multiple runs on the same project", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     definition.description = "updated blob";
@@ -92,7 +94,7 @@ describe("createMemoryWorkflowRuntime", () => {
   });
 
   it("deletes one run without affecting a sibling run", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     const first = await runtime.runs.create({
@@ -111,7 +113,7 @@ describe("createMemoryWorkflowRuntime", () => {
   });
 
   it("renames a run without changing its definition snapshot", async () => {
-    const runtime = createMemoryWorkflowRuntime();
+    const runtime = createMemoryWorkflowRuntime({ autoStart: false });
     const definition = createMockWorkflow("zh-CN");
     await runtime.host.mount("p1", definition);
     const run = await runtime.runs.create({
@@ -126,5 +128,193 @@ describe("createMemoryWorkflowRuntime", () => {
         definitionSnapshot: run.definitionSnapshot,
       }),
     );
+  });
+});
+
+describe("mock run engine", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("emits ordered run/node events through completion on the default path", async () => {
+    const runtime = createMemoryWorkflowRuntime({
+      nodeStepMs: 100,
+      autoStart: false,
+    });
+    const definition = createMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const run = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    expect(run.status).toBe("pending");
+
+    const events: string[] = [];
+    const unsubscribe = runtime.runs.subscribe(run.id, (event) => {
+      if (event.type === "node_started" || event.type === "node_finished") {
+        events.push(`${event.type}:${event.nodeId}:${event.type === "node_finished" ? event.status : ""}`);
+      } else {
+        events.push(event.type);
+      }
+    });
+
+    await runtime.runs.start(run.id);
+    expect(await runtime.runs.get(run.id)).toEqual(
+      expect.objectContaining({ status: "running" }),
+    );
+    expect(events[0]).toBe("run_started");
+
+    const plan = planMockExecution(definition, {});
+    for (let i = 0; i < plan.order.length; i += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    unsubscribe();
+
+    const finished = await runtime.runs.get(run.id);
+    expect(finished?.status).toBe("succeeded");
+    expect(finished?.totals.tokenUsage?.totalTokens).toBeGreaterThan(0);
+    expect(events[0]).toBe("run_started");
+    expect(events.at(-1)).toBe("run_finished");
+    for (const nodeId of plan.order) {
+      expect(events).toContain(`node_started:${nodeId}:`);
+      expect(events).toContain(`node_finished:${nodeId}:succeeded`);
+    }
+    // Default zh path takes「需要检查」so tests stays reachable — nothing skipped.
+    expect(plan.skipped).toEqual([]);
+    expect(finished?.nodeStates.start?.tokenUsage).toBeUndefined();
+    expect(finished?.nodeStates.understand?.tokenUsage?.totalTokens).toBeGreaterThan(0);
+    const artifacts = await runtime.runs.listArtifacts(run.id);
+    expect(artifacts.length).toBeGreaterThan(0);
+  });
+
+  it("skips the validation branch when kickoff prefers documentation", async () => {
+    const runtime = createMemoryWorkflowRuntime({
+      nodeStepMs: 50,
+      autoStart: false,
+    });
+    const definition = createMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const run = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+      kickoffInput: "只更新 README 文档说明",
+    });
+    await runtime.runs.start(run.id);
+    const plan = planMockExecution(definition, {
+      kickoffInput: "只更新 README 文档说明",
+    });
+    expect(plan.skipped).toContain("tests");
+    expect((await runtime.runs.get(run.id))?.nodeStates.tests?.status).toBe("skipped");
+
+    for (let i = 0; i < plan.order.length; i += 1) {
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    const finished = await runtime.runs.get(run.id);
+    expect(finished?.status).toBe("succeeded");
+    expect(finished?.nodeStates.tests?.status).toBe("skipped");
+    expect(finished?.nodeStates.output?.status).toBe("succeeded");
+  });
+
+  it("ignores start() while a run is already running", async () => {
+    const runtime = createMemoryWorkflowRuntime({
+      nodeStepMs: 200,
+      autoStart: false,
+    });
+    const definition = createMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const run = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    const events: string[] = [];
+    runtime.runs.subscribe(run.id, (event) => {
+      events.push(event.type);
+    });
+    await runtime.runs.start(run.id);
+    await runtime.runs.start(run.id);
+    expect(events.filter((type) => type === "run_started")).toHaveLength(1);
+  });
+
+  it("stops progression when cancelled mid-run", async () => {
+    const runtime = createMemoryWorkflowRuntime({ nodeStepMs: 200 });
+    const definition = createMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const types: string[] = [];
+    const run = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    runtime.runs.subscribe(run.id, (event) => {
+      types.push(event.type);
+    });
+
+    await vi.advanceTimersByTimeAsync(200);
+    await runtime.runs.cancel(run.id);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(await runtime.runs.get(run.id)).toEqual(
+      expect.objectContaining({ status: "cancelled" }),
+    );
+    expect(types.filter((type) => type === "run_finished")).toHaveLength(1);
+    expect(types.at(-1)).toBe("run_finished");
+    const finishedCount = types.filter((type) => type === "node_finished").length;
+    expect(finishedCount).toBeLessThan(definition.nodes.length);
+  });
+
+  it("keeps concurrent runs independent when one is cancelled", async () => {
+    const runtime = createMemoryWorkflowRuntime({ nodeStepMs: 100 });
+    const definition = createMockWorkflow("zh-CN");
+    await runtime.host.mount("p1", definition);
+    const first = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    const second = await runtime.runs.create({
+      projectId: "p1",
+      definitionId: definition.id,
+    });
+    await runtime.runs.cancel(first.id);
+    const plan = planMockExecution(definition, {});
+    for (let i = 0; i < plan.order.length; i += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(await runtime.runs.get(first.id)).toEqual(
+      expect.objectContaining({ status: "cancelled" }),
+    );
+    expect(await runtime.runs.get(second.id)).toEqual(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+  });
+});
+
+describe("planMockExecution", () => {
+  it("orders mock workflow nodes with start first on the default path", () => {
+    const workflow = createMockWorkflow("zh-CN");
+    const plan = planMockExecution(workflow);
+    expect(plan.order[0]).toBe("start");
+    expect(plan.order).toContain("output");
+    expect(plan.order.indexOf("understand")).toBeLessThan(plan.order.indexOf("quality"));
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it("marks the unused exclusive branch as skipped for doc kickoff", () => {
+    const workflow = createMockWorkflow("zh-CN");
+    const plan = planMockExecution(workflow, { kickoffInput: "文档说明更新" });
+    expect(plan.skipped).toEqual(["tests"]);
+    expect(plan.order).not.toContain("tests");
+    expect(plan.order).toContain("review");
+  });
+});
+
+describe("executionOrder", () => {
+  it("returns full-graph topo without applying exclusivity", () => {
+    const workflow = createMockWorkflow("zh-CN");
+    const order = executionOrder(workflow);
+    expect(order).toHaveLength(workflow.nodes.length);
+    expect(order[0]).toBe("start");
   });
 });
