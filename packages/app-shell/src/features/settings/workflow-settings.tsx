@@ -15,6 +15,7 @@ import {
   type XYPosition,
 } from "@xyflow/react";
 import {
+  IconDownload,
   IconRoute,
 } from "@tabler/icons-react";
 import {
@@ -38,6 +39,7 @@ import {
   type WorkflowNodeKind,
 } from "@ora/workflow-mock";
 import type { AgentCli, AgentCliModels } from "@ora/contracts";
+import { usePlatform } from "@ora/platform";
 import { WorkflowCanvas } from "./workflow-canvas";
 import { WorkflowInspector } from "./workflow-inspector";
 import { WorkflowManager } from "./workflow-manager";
@@ -96,6 +98,12 @@ function uniqueGraphId(prefix: string, existingIds: Iterable<string>): {
   return { id: `${prefix}-${sequence}`, sequence };
 }
 
+/** Produces a portable filename while retaining the workflow name for the save dialog. */
+function workflowExportFileName(name: string): string {
+  const safeName = name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, " ").trim();
+  return `${safeName === "" ? "workflow" : safeName}.reactflow.json`;
+}
+
 /** Provides one React Flow store to the canvas and its sibling inspector. */
 export function WorkflowSettings(props: WorkflowSettingsProps = {}) {
   return (
@@ -110,6 +118,7 @@ function WorkflowSettingsContent({
   capabilities: capabilitiesOverride,
 }: WorkflowSettingsProps) {
   const { i18n, t } = useTranslation();
+  const platform = usePlatform();
   const { deleteElements, toObject } = useReactFlow<Node<WorkflowNodeData, "workflow">, Edge>();
   const {
     data: agentModelGroups = [],
@@ -397,6 +406,23 @@ function WorkflowSettingsContent({
     }
   }
 
+  /** Serializes the live React Flow snapshot and sends it through the host save flow. */
+  async function exportWorkflow(): Promise<void> {
+    const snapshot = commitCurrentWorkflowSnapshot();
+    if (snapshot === null) {
+      return;
+    }
+    setManagerError(null);
+    try {
+      await platform.saveTextFile({
+        defaultFileName: workflowExportFileName(snapshot.name),
+        content: `${JSON.stringify(snapshot, null, 2)}\n`,
+      });
+    } catch {
+      setManagerError(t("settings.workflow.exportError"));
+    }
+  }
+
   /** Adds a catalog node at a canvas-provided position and selects it for immediate editing. */
   function addNode(kind: WorkflowNodeKind, position: XYPosition): void {
     if (
@@ -511,6 +537,15 @@ function WorkflowSettingsContent({
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={workflow === null}
+            onClick={() => void exportWorkflow()}
+          >
+            <IconDownload />
+            {t("settings.workflow.exportWorkflow")}
+          </Button>
           <DeployWorkflowButton workflow={workflow} />
         </div>
       </header>

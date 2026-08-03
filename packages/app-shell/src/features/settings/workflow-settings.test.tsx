@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { createChatStore } from "@ora/chat";
+import { PlatformProvider } from "@ora/platform";
 import { appI18n } from "../../i18n/i18n-instance";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
 import { createMockClient, createMockClientState } from "../../test/mock-client";
+import { createStubPlatform } from "../../test/stub-platform";
 import { WorkflowSettings } from "./workflow-settings";
 
 /** Shell providers required by Deploy-to-project (runtime + react-query). */
@@ -19,7 +21,9 @@ function renderSettings(ui: ReactElement = <WorkflowSettings />): RenderResult {
   );
   return render(
     <Wrapper>
-      <AppI18nProvider>{ui}</AppI18nProvider>
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>{ui}</AppI18nProvider>
+      </PlatformProvider>
     </Wrapper>,
   );
 }
@@ -71,6 +75,7 @@ describe("WorkflowSettings", () => {
       name: "调整节点配置宽度；双击恢复默认宽度",
     })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "部署到项目" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出工作流" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "测试运行" })).not.toBeInTheDocument();
   });
 

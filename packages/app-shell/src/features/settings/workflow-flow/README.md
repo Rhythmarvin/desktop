@@ -37,6 +37,8 @@ React Flow–based canvas for the session-only settings workflow demo.
 - Each session workflow carries a `ReactFlowJsonObject`; graph transitions
   capture it with `toObject()` so nodes, edges, selection, and viewport restore
   from the same React Flow snapshot.
+- Workflow export captures that same live `toObject()` snapshot before handing
+  the pretty-printed JSON to the host save flow.
 - Catalog drops only commit inside canvas bounds and snap to the visible grid.
 
 ## Interactions
