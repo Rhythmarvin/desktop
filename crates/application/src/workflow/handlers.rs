@@ -15,7 +15,10 @@ use crate::workflow::mapper::{
     map_created_workflow, map_snapshot, map_workflow, map_workflow_detail, map_workflow_summary,
     map_workflow_version,
 };
-use crate::workflow::ports::{DeleteSnapshotResult, WorkflowIdGenerator, WorkflowRepository};
+use crate::workflow::ports::{
+    ActivateVersionResult, DeleteSnapshotResult, PublishSnapshotResult, RollbackDraftResult,
+    UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator, WorkflowRepository,
+};
 use crate::{ApplicationError, Clock};
 
 const DRAFT_VERSION: &str = "draft";
@@ -193,11 +196,18 @@ where
 
         let updated = self
             .repository
-            .update_workflow(workflow)
-            .map_err(ApplicationError::from_workflow_repository_error)?
-            .ok_or_else(|| ApplicationError::WorkflowNotFound {
+            .update_workflow(
+                &workflow_id,
+                workflow.name,
+                workflow.audit_fields.updated_at,
+            )
+            .map_err(ApplicationError::from_workflow_repository_error)?;
+
+        let UpdateWorkflowResult::Updated(updated) = updated else {
+            return Err(ApplicationError::WorkflowNotFound {
                 workflow_id: workflow_id.to_string(),
-            })?;
+            });
+        };
 
         Ok(UpdateWorkflowResponse {
             workflow: map_workflow(updated),
@@ -307,10 +317,22 @@ where
                 request.graph,
                 self.clock.now_timestamp_millis(),
             )
-            .map_err(ApplicationError::from_workflow_repository_error)?
-            .ok_or_else(|| ApplicationError::WorkflowNotFound {
-                workflow_id: workflow_id.to_string(),
-            })?;
+            .map_err(ApplicationError::from_workflow_repository_error)?;
+
+        let updated = match updated {
+            UpdateDraftResult::Updated(snapshot) => snapshot,
+            UpdateDraftResult::WorkflowNotFound => {
+                return Err(ApplicationError::WorkflowNotFound {
+                    workflow_id: workflow_id.to_string(),
+                });
+            }
+            UpdateDraftResult::DraftNotFound => {
+                return Err(ApplicationError::WorkflowSnapshotNotFound {
+                    workflow_id: workflow_id.to_string(),
+                    version: DRAFT_VERSION.to_string(),
+                });
+            }
+        };
 
         Ok(UpdateDraftResponse {
             snapshot: map_snapshot(updated),
@@ -369,37 +391,34 @@ where
                 }
                 v
             }
-            None => format!("v{now}-{snapshot_id}"),
+            None => format!("v{now}"),
         };
-
-        // Read the draft to copy its graph
-        let draft = self
-            .repository
-            .find_snapshot_by_version(&workflow_id, DRAFT_VERSION)
-            .map_err(ApplicationError::from_workflow_repository_error)?
-            .ok_or_else(|| ApplicationError::WorkflowNotFound {
-                workflow_id: workflow_id.to_string(),
-            })?;
-
-        let version_for_error = version.clone();
-        let snapshot = WorkflowSnapshot::new(
-            snapshot_id,
-            workflow_id.clone(),
-            version,
-            draft.graph,
-            now,
-            /*updated_at*/ None,
-            /*is_deleted*/ false,
-        );
 
         let created = self
             .repository
-            .publish_snapshot(&workflow_id, snapshot)
-            .map_err(ApplicationError::from_workflow_repository_error)?
-            .ok_or_else(|| ApplicationError::WorkflowVersionAlreadyExists {
-                workflow_id: workflow_id.to_string(),
-                version: version_for_error,
-            })?;
+            .publish_snapshot(&workflow_id, snapshot_id, version.clone(), now)
+            .map_err(ApplicationError::from_workflow_repository_error)?;
+
+        let created = match created {
+            PublishSnapshotResult::Published(snapshot) => snapshot,
+            PublishSnapshotResult::WorkflowNotFound => {
+                return Err(ApplicationError::WorkflowNotFound {
+                    workflow_id: workflow_id.to_string(),
+                });
+            }
+            PublishSnapshotResult::DraftNotFound => {
+                return Err(ApplicationError::WorkflowSnapshotNotFound {
+                    workflow_id: workflow_id.to_string(),
+                    version: DRAFT_VERSION.to_string(),
+                });
+            }
+            PublishSnapshotResult::VersionAlreadyExists => {
+                return Err(ApplicationError::WorkflowVersionAlreadyExists {
+                    workflow_id: workflow_id.to_string(),
+                    version,
+                });
+            }
+        };
 
         Ok(PublishWorkflowResponse {
             snapshot: map_snapshot(created),
@@ -432,16 +451,6 @@ where
         let workflow_id = WorkflowId::new(request.workflow_id);
         let snapshot_id = WorkflowSnapshotId::new(request.snapshot_id);
 
-        let draft = self
-            .repository
-            .find_snapshot_by_version(&workflow_id, DRAFT_VERSION)
-            .map_err(ApplicationError::from_workflow_repository_error)?;
-        if let Some(draft) = draft
-            && draft.id == snapshot_id
-        {
-            return Err(ApplicationError::WorkflowCannotRollbackToDraft);
-        }
-
         let updated = self
             .repository
             .rollback_draft(
@@ -449,11 +458,31 @@ where
                 &snapshot_id,
                 self.clock.now_timestamp_millis(),
             )
-            .map_err(ApplicationError::from_workflow_repository_error)?
-            .ok_or_else(|| ApplicationError::WorkflowSnapshotNotFound {
-                workflow_id: workflow_id.to_string(),
-                version: snapshot_id.to_string(),
-            })?;
+            .map_err(ApplicationError::from_workflow_repository_error)?;
+
+        let updated = match updated {
+            RollbackDraftResult::DraftUpdated(snapshot) => snapshot,
+            RollbackDraftResult::WorkflowNotFound => {
+                return Err(ApplicationError::WorkflowNotFound {
+                    workflow_id: workflow_id.to_string(),
+                });
+            }
+            RollbackDraftResult::SnapshotNotFound => {
+                return Err(ApplicationError::WorkflowSnapshotNotFound {
+                    workflow_id: workflow_id.to_string(),
+                    version: snapshot_id.to_string(),
+                });
+            }
+            RollbackDraftResult::DraftSnapshot => {
+                return Err(ApplicationError::WorkflowCannotRollbackToDraft);
+            }
+            RollbackDraftResult::DraftNotFound => {
+                return Err(ApplicationError::WorkflowSnapshotNotFound {
+                    workflow_id: workflow_id.to_string(),
+                    version: DRAFT_VERSION.to_string(),
+                });
+            }
+        };
 
         Ok(RollbackWorkflowResponse {
             snapshot: map_snapshot(updated),
@@ -486,16 +515,6 @@ where
         let workflow_id = WorkflowId::new(request.workflow_id);
         let snapshot_id = WorkflowSnapshotId::new(request.snapshot_id);
 
-        let draft = self
-            .repository
-            .find_snapshot_by_version(&workflow_id, DRAFT_VERSION)
-            .map_err(ApplicationError::from_workflow_repository_error)?;
-        if let Some(draft) = draft
-            && draft.id == snapshot_id
-        {
-            return Err(ApplicationError::WorkflowCannotActivateDraft);
-        }
-
         let updated = self
             .repository
             .activate_version(
@@ -503,11 +522,31 @@ where
                 &snapshot_id,
                 self.clock.now_timestamp_millis(),
             )
-            .map_err(ApplicationError::from_workflow_repository_error)?
-            .ok_or_else(|| ApplicationError::WorkflowSnapshotNotFound {
-                workflow_id: workflow_id.to_string(),
-                version: snapshot_id.to_string(),
-            })?;
+            .map_err(ApplicationError::from_workflow_repository_error)?;
+
+        let updated = match updated {
+            ActivateVersionResult::Activated(snapshot) => snapshot,
+            ActivateVersionResult::WorkflowNotFound => {
+                return Err(ApplicationError::WorkflowNotFound {
+                    workflow_id: workflow_id.to_string(),
+                });
+            }
+            ActivateVersionResult::SnapshotNotFound => {
+                return Err(ApplicationError::WorkflowSnapshotNotFound {
+                    workflow_id: workflow_id.to_string(),
+                    version: snapshot_id.to_string(),
+                });
+            }
+            ActivateVersionResult::DraftSnapshot => {
+                return Err(ApplicationError::WorkflowCannotActivateDraft);
+            }
+            ActivateVersionResult::DraftNotFound => {
+                return Err(ApplicationError::WorkflowSnapshotNotFound {
+                    workflow_id: workflow_id.to_string(),
+                    version: DRAFT_VERSION.to_string(),
+                });
+            }
+        };
 
         Ok(ActivateWorkflowResponse {
             snapshot: map_snapshot(updated),

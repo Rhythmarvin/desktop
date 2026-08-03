@@ -27,7 +27,7 @@ Additional operations keep the version model flexible without data loss:
 
 `WorkflowId` and `WorkflowSnapshotId` are UUID-backed newtypes following the same `define_id!` macro convention as every other domain entity.
 
-Snapshot versions are strings. The draft is identified by the reserved string `"draft"`. Published versions can be user-provided (e.g. `"v1.0.0"`) or automatically derived from the application clock and a snapshot UUID. User-provided versions must be non-blank, at most 128 bytes, and safe for a single URL path segment. A partial unique index prevents duplicate visible versions within one workflow, so a soft-deleted version name may be reused.
+Snapshot versions are strings. The draft is identified by the reserved string `"draft"`. Published versions can be user-provided (e.g. `"v1.0.0"`) or automatically derived as `v{timestamp_millis}` from the same injected application clock that supplies `created_at`. User-provided versions must be non-blank, at most 128 bytes, and safe for a single URL path segment. A partial unique index prevents duplicate visible versions within one workflow, so a soft-deleted version name may be reused.
 
 ## Graph storage
 

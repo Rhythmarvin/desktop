@@ -58,10 +58,11 @@ pub use task_diff::{
     UuidTaskDiffCommentIdGenerator, task_diff_id,
 };
 pub use workflow::{
-    ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler, DeleteSnapshotResult,
-    DeleteWorkflowHandler, GetDraftHandler, GetVersionHandler, GetWorkflowHandler,
-    ListVersionsHandler, ListWorkflowsHandler, PublishWorkflowHandler, RollbackWorkflowHandler,
-    UpdateDraftHandler, UpdateWorkflowHandler, UuidWorkflowIdGenerator, WorkflowIdGenerator,
-    WorkflowRepository,
+    ActivateVersionResult, ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler,
+    DeleteSnapshotResult, DeleteWorkflowHandler, GetDraftHandler, GetVersionHandler,
+    GetWorkflowHandler, ListVersionsHandler, ListWorkflowsHandler, PublishSnapshotResult,
+    PublishWorkflowHandler, RollbackDraftResult, RollbackWorkflowHandler, UpdateDraftHandler,
+    UpdateDraftResult, UpdateWorkflowHandler, UpdateWorkflowResult, UuidWorkflowIdGenerator,
+    WorkflowIdGenerator, WorkflowRepository,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

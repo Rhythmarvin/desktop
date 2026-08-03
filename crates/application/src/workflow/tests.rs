@@ -7,13 +7,15 @@ use ora_domain::{
 use pretty_assertions::assert_eq;
 
 use super::{
-    DeleteSnapshotResult, PublishWorkflowHandler, WorkflowIdGenerator, WorkflowRepository,
+    ActivateVersionResult, DeleteSnapshotResult, PublishSnapshotResult, PublishWorkflowHandler,
+    RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator,
+    WorkflowRepository,
 };
 use crate::{ApplicationError, Clock, RepositoryError};
 
-/// Verifies automatic versions derive from the injected clock and remain collision-resistant.
+/// Verifies automatic versions derive from the injected clock used for snapshot timestamps.
 #[test]
-fn publish_uses_the_injected_clock_and_snapshot_id_for_automatic_versions() {
+fn publish_uses_the_injected_clock_for_automatic_versions() {
     let handler = PublishWorkflowHandler::new(
         Arc::new(PublishRepository::new(draft_snapshot())),
         FixedWorkflowIdGenerator,
@@ -32,7 +34,7 @@ fn publish_uses_the_injected_clock_and_snapshot_id_for_automatic_versions() {
         ora_contracts::WorkflowSnapshot {
             id: "snapshot-1".to_string(),
             workflow_id: "workflow-1".to_string(),
-            version: "v42-snapshot-1".to_string(),
+            version: "v42".to_string(),
             graph: "{\"nodes\":[]}".to_string(),
             created_at: 42,
             updated_at: None,
@@ -100,7 +102,12 @@ impl WorkflowRepository for PublishRepository {
         unreachable!("publish tests never list workflows")
     }
 
-    fn update_workflow(&self, _workflow: Workflow) -> Result<Option<Workflow>, RepositoryError> {
+    fn update_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
+        _name: String,
+        _updated_at: i64,
+    ) -> Result<UpdateWorkflowResult, RepositoryError> {
         unreachable!("publish tests never update workflows")
     }
 
@@ -133,16 +140,26 @@ impl WorkflowRepository for PublishRepository {
         _workflow_id: &WorkflowId,
         _graph: String,
         _updated_at: i64,
-    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+    ) -> Result<UpdateDraftResult, RepositoryError> {
         unreachable!("publish tests never update drafts")
     }
 
     fn publish_snapshot(
         &self,
         _workflow_id: &WorkflowId,
-        snapshot: WorkflowSnapshot,
-    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
-        Ok(Some(snapshot))
+        snapshot_id: WorkflowSnapshotId,
+        version: String,
+        created_at: i64,
+    ) -> Result<PublishSnapshotResult, RepositoryError> {
+        Ok(PublishSnapshotResult::Published(WorkflowSnapshot::new(
+            snapshot_id,
+            self.draft.workflow_id.clone(),
+            version,
+            self.draft.graph.clone(),
+            created_at,
+            /*updated_at*/ None,
+            /*is_deleted*/ false,
+        )))
     }
 
     fn rollback_draft(
@@ -150,7 +167,7 @@ impl WorkflowRepository for PublishRepository {
         _workflow_id: &WorkflowId,
         _snapshot_id: &WorkflowSnapshotId,
         _updated_at: i64,
-    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+    ) -> Result<RollbackDraftResult, RepositoryError> {
         unreachable!("publish tests never roll back drafts")
     }
 
@@ -159,7 +176,7 @@ impl WorkflowRepository for PublishRepository {
         _workflow_id: &WorkflowId,
         _snapshot_id: &WorkflowSnapshotId,
         _updated_at: i64,
-    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+    ) -> Result<ActivateVersionResult, RepositoryError> {
         unreachable!("publish tests never activate versions")
     }
 

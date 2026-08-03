@@ -1,10 +1,14 @@
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Barrier},
+    thread,
+};
 
 use ora_application::{
-    AgentDefinitionRepository, DeleteSnapshotResult, ProjectRepository,
-    ProjectWorkContextRepository, RepositoryError, SessionRepository, SkillImportCommitError,
-    SkillImportUnitOfWork, SkillRepository, TaskRepository, WorkflowRepository,
-    WorktreeRepository,
+    ActivateVersionResult, AgentDefinitionRepository, DeleteSnapshotResult, ProjectRepository,
+    ProjectWorkContextRepository, PublishSnapshotResult, RepositoryError, RollbackDraftResult,
+    SessionRepository, SkillImportCommitError, SkillImportUnitOfWork, SkillRepository,
+    TaskRepository, WorkflowRepository, WorktreeRepository,
 };
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
@@ -21,8 +25,7 @@ use crate::{
     SqliteAgentDefinitionRepository, SqliteCascadeRepository, SqliteProjectRepository,
     SqliteProjectWorkContextRepository, SqliteSessionRepository, SqliteSkillImportUnitOfWork,
     SqliteSkillRepository, SqliteTaskRepository, SqliteWorkflowRepository,
-    SqliteWorktreeRepository, TimestampSource,
-    default_migration_catalog,
+    SqliteWorktreeRepository, TimestampSource, default_migration_catalog,
 };
 
 /// Verifies catalog repositories use stable identifiers and hide soft-deleted rows.
@@ -147,6 +150,8 @@ fn skill_import_unit_of_work_commits_on_success_and_rolls_back_on_promote_failur
             .unwrap(),
         None
     );
+}
+
 /// Verifies lifecycle commands cannot use another workflow's snapshot as their source.
 #[test]
 fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
@@ -161,18 +166,23 @@ fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
         .create_workflow(workflow_b.clone(), draft_b.clone())
         .unwrap();
 
-    let snapshot_b = published_snapshot("snapshot-b", &workflow_b.id, "v1", "{\"nodes\":[2]}", 30);
+    let snapshot_b = published_snapshot("snapshot-b", &workflow_b.id, "v1", &draft_b.graph, 30);
     assert_eq!(
         repository
-            .publish_snapshot(&workflow_b.id, snapshot_b.clone())
+            .publish_snapshot(
+                &workflow_b.id,
+                snapshot_b.id.clone(),
+                snapshot_b.version.clone(),
+                snapshot_b.created_at,
+            )
             .unwrap(),
-        Some(snapshot_b.clone())
+        PublishSnapshotResult::Published(snapshot_b.clone())
     );
     assert_eq!(
         repository
             .activate_version(&workflow_b.id, &snapshot_b.id, 40)
             .unwrap(),
-        Some(WorkflowSnapshot::new(
+        ActivateVersionResult::Activated(WorkflowSnapshot::new(
             draft_b.id.clone(),
             workflow_b.id.clone(),
             "draft",
@@ -200,13 +210,13 @@ fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
         repository
             .rollback_draft(&workflow_a.id, &snapshot_b.id, 40)
             .unwrap(),
-        None
+        RollbackDraftResult::SnapshotNotFound
     );
     assert_eq!(
         repository
             .activate_version(&workflow_a.id, &snapshot_b.id, 40)
             .unwrap(),
-        None
+        ActivateVersionResult::SnapshotNotFound
     );
     assert_eq!(
         repository
@@ -229,14 +239,21 @@ fn workflow_repository_reuses_soft_deleted_version_names() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let repository = SqliteWorkflowRepository::new(pool);
     let (workflow, draft) = workflow_with_draft("workflow-a", "{}", 10);
-    repository.create_workflow(workflow.clone(), draft).unwrap();
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
 
-    let first = published_snapshot("snapshot-1", &workflow.id, "v1", "{\"nodes\":[1]}", 20);
+    let first = published_snapshot("snapshot-1", &workflow.id, "v1", &draft.graph, 20);
     assert_eq!(
         repository
-            .publish_snapshot(&workflow.id, first.clone())
+            .publish_snapshot(
+                &workflow.id,
+                first.id.clone(),
+                first.version.clone(),
+                first.created_at,
+            )
             .unwrap(),
-        Some(first.clone())
+        PublishSnapshotResult::Published(first.clone())
     );
     assert_eq!(
         repository
@@ -245,9 +262,14 @@ fn workflow_repository_reuses_soft_deleted_version_names() {
         DeleteSnapshotResult::ActiveSnapshot
     );
 
-    let second = published_snapshot("snapshot-2", &workflow.id, "v2", "{\"nodes\":[2]}", 40);
+    let second = published_snapshot("snapshot-2", &workflow.id, "v2", &draft.graph, 40);
     repository
-        .publish_snapshot(&workflow.id, second.clone())
+        .publish_snapshot(
+            &workflow.id,
+            second.id.clone(),
+            second.version.clone(),
+            second.created_at,
+        )
         .unwrap();
     assert_eq!(
         repository
@@ -256,12 +278,115 @@ fn workflow_repository_reuses_soft_deleted_version_names() {
         DeleteSnapshotResult::Deleted(first)
     );
 
-    let replacement = published_snapshot("snapshot-3", &workflow.id, "v1", "{\"nodes\":[3]}", 60);
+    let replacement = published_snapshot("snapshot-3", &workflow.id, "v1", &draft.graph, 60);
     assert_eq!(
         repository
-            .publish_snapshot(&workflow.id, replacement.clone())
+            .publish_snapshot(
+                &workflow.id,
+                replacement.id.clone(),
+                replacement.version.clone(),
+                replacement.created_at,
+            )
             .unwrap(),
-        Some(replacement)
+        PublishSnapshotResult::Published(replacement)
+    );
+}
+
+/// Verifies publishing an active version name reports a business conflict instead of a database error.
+#[test]
+fn workflow_repository_reports_active_version_conflicts() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{}", 10);
+    repository.create_workflow(workflow.clone(), draft).unwrap();
+
+    let first = published_snapshot("snapshot-1", &workflow.id, "v1", "{\"nodes\":[1]}", 20);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            first.id.clone(),
+            first.version.clone(),
+            first.created_at,
+        )
+        .unwrap();
+    let duplicate = published_snapshot("snapshot-2", &workflow.id, "v1", "{\"nodes\":[2]}", 30);
+
+    assert_eq!(
+        repository
+            .publish_snapshot(
+                &workflow.id,
+                duplicate.id,
+                duplicate.version,
+                duplicate.created_at,
+            )
+            .unwrap(),
+        PublishSnapshotResult::VersionAlreadyExists
+    );
+}
+
+/// Verifies concurrent publishers serialize through SQLite and expose one deterministic conflict.
+#[test]
+fn workflow_repository_serializes_concurrent_version_conflicts() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{}", 10);
+    repository.create_workflow(workflow.clone(), draft).unwrap();
+
+    let barrier = Arc::new(Barrier::new(2));
+    let first_repository = repository.clone();
+    let second_repository = repository.clone();
+    let first_workflow_id = workflow.id.clone();
+    let second_workflow_id = workflow.id.clone();
+    let first_barrier = barrier.clone();
+    let second_barrier = barrier.clone();
+
+    let (first, second) = thread::scope(|scope| {
+        let first = scope.spawn(move || {
+            first_barrier.wait();
+            first_repository.publish_snapshot(
+                &first_workflow_id,
+                WorkflowSnapshotId::new("snapshot-1"),
+                "v1".to_string(),
+                20,
+            )
+        });
+        let second = scope.spawn(move || {
+            second_barrier.wait();
+            second_repository.publish_snapshot(
+                &second_workflow_id,
+                WorkflowSnapshotId::new("snapshot-2"),
+                "v1".to_string(),
+                20,
+            )
+        });
+
+        (
+            first.join().unwrap().unwrap(),
+            second.join().unwrap().unwrap(),
+        )
+    });
+
+    let published_count = usize::from(matches!(&first, PublishSnapshotResult::Published(_)))
+        + usize::from(matches!(&second, PublishSnapshotResult::Published(_)));
+    let conflict_count = usize::from(matches!(
+        &first,
+        PublishSnapshotResult::VersionAlreadyExists
+    )) + usize::from(matches!(
+        &second,
+        PublishSnapshotResult::VersionAlreadyExists
+    ));
+    assert_eq!((published_count, conflict_count), (1, 1));
+    assert_eq!(
+        repository.list_versions(&workflow.id).unwrap(),
+        vec![ora_domain::WorkflowVersion {
+            id: match (first, second) {
+                (PublishSnapshotResult::Published(snapshot), _)
+                | (_, PublishSnapshotResult::Published(snapshot)) => snapshot.id.to_string(),
+                _ => unreachable!("one concurrent publisher must succeed"),
+            },
+            version: "v1".to_string(),
+            created_at: 20,
+        }]
     );
 }
 

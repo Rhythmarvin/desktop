@@ -46,7 +46,7 @@ pub struct WorkflowSnapshot {
 }
 
 impl WorkflowSnapshot {
-    /// Creates a snapshot with normalized version and graph fields.
+    /// Creates a snapshot from already-validated version and graph fields.
     pub fn new(
         id: WorkflowSnapshotId,
         workflow_id: WorkflowId,
