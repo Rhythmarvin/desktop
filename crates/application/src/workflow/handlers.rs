@@ -23,6 +23,7 @@ use crate::{ApplicationError, Clock};
 
 const DRAFT_VERSION: &str = "draft";
 const DEFAULT_GRAPH: &str = "{}";
+const MAX_AUTOMATIC_VERSION_COLLISION_RETRIES: u16 = 100;
 
 /// Handles creation of a new workflow with its initial draft snapshot.
 pub struct CreateWorkflowHandler<Repository, IdGenerator, ClockSource> {
@@ -377,52 +378,65 @@ where
         let snapshot_id = self.id_generator.generate_snapshot_id();
 
         // User-defined versions must remain safe to address through a single URL path segment.
-        let version = match request.version {
+        let (mut version, is_automatic_version) = match request.version {
             Some(ref v) if v == DRAFT_VERSION => {
                 return Err(ApplicationError::WorkflowVersionReserved);
             }
             Some(v) => {
                 if v.trim().is_empty()
                     || v.len() > 128
+                    || matches!(v.as_str(), "." | "..")
                     || v.chars()
                         .any(|character| character.is_control() || matches!(character, '/' | '\\'))
                 {
                     return Err(ApplicationError::WorkflowVersionInvalid);
                 }
-                v
+                (v, false)
             }
-            None => format!("v{now}"),
+            None => (format!("v{now}"), true),
         };
 
-        let created = self
-            .repository
-            .publish_snapshot(&workflow_id, snapshot_id, version.clone(), now)
-            .map_err(ApplicationError::from_workflow_repository_error)?;
+        for collision_retry in 0..=MAX_AUTOMATIC_VERSION_COLLISION_RETRIES {
+            let created = self
+                .repository
+                .publish_snapshot(&workflow_id, snapshot_id.clone(), version.clone(), now)
+                .map_err(ApplicationError::from_workflow_repository_error)?;
 
-        let created = match created {
-            PublishSnapshotResult::Published(snapshot) => snapshot,
-            PublishSnapshotResult::WorkflowNotFound => {
-                return Err(ApplicationError::WorkflowNotFound {
-                    workflow_id: workflow_id.to_string(),
-                });
+            match created {
+                PublishSnapshotResult::Published(snapshot) => {
+                    return Ok(PublishWorkflowResponse {
+                        snapshot: map_snapshot(snapshot),
+                    });
+                }
+                PublishSnapshotResult::WorkflowNotFound => {
+                    return Err(ApplicationError::WorkflowNotFound {
+                        workflow_id: workflow_id.to_string(),
+                    });
+                }
+                PublishSnapshotResult::DraftNotFound => {
+                    return Err(ApplicationError::WorkflowSnapshotNotFound {
+                        workflow_id: workflow_id.to_string(),
+                        version: DRAFT_VERSION.to_string(),
+                    });
+                }
+                PublishSnapshotResult::VersionAlreadyExists
+                    if is_automatic_version
+                        && collision_retry < MAX_AUTOMATIC_VERSION_COLLISION_RETRIES =>
+                {
+                    // Keep the version tied to the injected clock while making same-millisecond
+                    // automatic publishes distinct without changing user-provided version names.
+                    version = format!("v{now}-{}", collision_retry + 1);
+                }
+                PublishSnapshotResult::VersionAlreadyExists => {
+                    return Err(ApplicationError::WorkflowVersionAlreadyExists {
+                        workflow_id: workflow_id.to_string(),
+                        version,
+                    });
+                }
             }
-            PublishSnapshotResult::DraftNotFound => {
-                return Err(ApplicationError::WorkflowSnapshotNotFound {
-                    workflow_id: workflow_id.to_string(),
-                    version: DRAFT_VERSION.to_string(),
-                });
-            }
-            PublishSnapshotResult::VersionAlreadyExists => {
-                return Err(ApplicationError::WorkflowVersionAlreadyExists {
-                    workflow_id: workflow_id.to_string(),
-                    version,
-                });
-            }
-        };
+        }
 
-        Ok(PublishWorkflowResponse {
-            snapshot: map_snapshot(created),
-        })
+        unreachable!("automatic version collision retries always return from the loop")
     }
 }
 

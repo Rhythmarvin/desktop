@@ -292,6 +292,81 @@ fn workflow_repository_reuses_soft_deleted_version_names() {
     );
 }
 
+/// Verifies soft deletion never changes the edit timestamp of an immutable published snapshot.
+#[test]
+fn workflow_repository_preserves_published_snapshot_timestamps_when_soft_deleted() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{}", 10);
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+
+    let first = published_snapshot("snapshot-1", &workflow.id, "v1", &draft.graph, 20);
+    let second = published_snapshot("snapshot-2", &workflow.id, "v2", &draft.graph, 30);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            first.id.clone(),
+            first.version.clone(),
+            first.created_at,
+        )
+        .unwrap();
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            second.id.clone(),
+            second.version.clone(),
+            second.created_at,
+        )
+        .unwrap();
+    repository
+        .soft_delete_snapshot(&workflow.id, &first.id, /*deleted_at*/ 40)
+        .unwrap();
+
+    let (cascade_workflow, cascade_draft) = workflow_with_draft("workflow-b", "{}", 50);
+    repository
+        .create_workflow(cascade_workflow.clone(), cascade_draft.clone())
+        .unwrap();
+    let cascade_snapshot = published_snapshot(
+        "snapshot-3",
+        &cascade_workflow.id,
+        "v1",
+        &cascade_draft.graph,
+        60,
+    );
+    repository
+        .publish_snapshot(
+            &cascade_workflow.id,
+            cascade_snapshot.id.clone(),
+            cascade_snapshot.version.clone(),
+            cascade_snapshot.created_at,
+        )
+        .unwrap();
+    repository
+        .soft_delete_workflow(&cascade_workflow.id, /*deleted_at*/ 70)
+        .unwrap();
+
+    let timestamps = pool
+        .with_connection(|connection| {
+            let direct = connection.query_row(
+                "SELECT updated_at FROM workflow_snapshots WHERE id = ?1",
+                rusqlite::params![first.id.as_ref()],
+                |row| row.get::<_, Option<i64>>(0),
+            )?;
+            let cascade = connection.query_row(
+                "SELECT updated_at FROM workflow_snapshots WHERE id = ?1",
+                rusqlite::params![cascade_snapshot.id.as_ref()],
+                |row| row.get::<_, Option<i64>>(0),
+            )?;
+
+            Ok((direct, cascade))
+        })
+        .unwrap();
+
+    assert_eq!(timestamps, (None, None));
+}
+
 /// Verifies publishing an active version name reports a business conflict instead of a database error.
 #[test]
 fn workflow_repository_reports_active_version_conflicts() {

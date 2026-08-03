@@ -200,8 +200,8 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                 }
 
                 transaction.execute(
-                    "UPDATE workflow_snapshots SET updated_at = ?2, is_deleted = 1 WHERE workflow_id = ?1 AND is_deleted = 0",
-                    params![workflow_id.as_ref(), deleted_at],
+                    "UPDATE workflow_snapshots SET is_deleted = 1 WHERE workflow_id = ?1 AND is_deleted = 0",
+                    params![workflow_id.as_ref()],
                 )?;
                 transaction.execute(
                     "UPDATE workflows SET updated_at = ?2, is_deleted = 1 WHERE id = ?1 AND is_deleted = 0",
@@ -514,7 +514,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
-        deleted_at: i64,
+        _deleted_at: i64,
     ) -> Result<DeleteSnapshotResult, RepositoryError> {
         self.pool
             .with_connection(|connection| {
@@ -549,8 +549,8 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                 }
 
                 transaction.execute(
-                    "UPDATE workflow_snapshots SET updated_at = ?2, is_deleted = 1 WHERE id = ?1 AND workflow_id = ?3 AND is_deleted = 0",
-                    params![snapshot.id.as_ref(), deleted_at, workflow_id.as_ref()],
+                    "UPDATE workflow_snapshots SET is_deleted = 1 WHERE id = ?1 AND workflow_id = ?2 AND is_deleted = 0",
+                    params![snapshot.id.as_ref(), workflow_id.as_ref()],
                 )?;
                 transaction.commit()?;
                 Ok(DeleteSnapshotResult::Deleted(snapshot))

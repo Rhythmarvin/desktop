@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ora_domain::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
@@ -17,7 +17,7 @@ use crate::{ApplicationError, Clock, RepositoryError};
 #[test]
 fn publish_uses_the_injected_clock_for_automatic_versions() {
     let handler = PublishWorkflowHandler::new(
-        Arc::new(PublishRepository::new(draft_snapshot())),
+        Arc::new(PublishRepository::new(draft_snapshot(), Vec::new())),
         FixedWorkflowIdGenerator,
         FixedClock(42),
     );
@@ -42,36 +42,74 @@ fn publish_uses_the_injected_clock_for_automatic_versions() {
     );
 }
 
-/// Verifies versions that cannot be represented as a single URL path segment are rejected.
+/// Verifies automatic versions retry with a stable suffix when the injected clock collides.
 #[test]
-fn publish_rejects_an_invalid_version_before_writing() {
+fn publish_retries_automatic_versions_that_collide_at_the_same_clock_value() {
     let handler = PublishWorkflowHandler::new(
-        Arc::new(PublishRepository::new(draft_snapshot())),
+        Arc::new(PublishRepository::new(
+            draft_snapshot(),
+            vec!["v42".to_string()],
+        )),
         FixedWorkflowIdGenerator,
         FixedClock(42),
     );
 
+    let response = handler
+        .handle(ora_contracts::PublishWorkflowRequest {
+            workflow_id: "workflow-1".to_string(),
+            version: None,
+        })
+        .unwrap();
+
     assert_eq!(
-        handler
-            .handle(ora_contracts::PublishWorkflowRequest {
-                workflow_id: "workflow-1".to_string(),
-                version: Some("release/1".to_string()),
-            })
-            .unwrap_err(),
-        ApplicationError::WorkflowVersionInvalid
+        response.snapshot,
+        ora_contracts::WorkflowSnapshot {
+            id: "snapshot-1".to_string(),
+            workflow_id: "workflow-1".to_string(),
+            version: "v42-1".to_string(),
+            graph: "{\"nodes\":[]}".to_string(),
+            created_at: 42,
+            updated_at: None,
+        }
     );
+}
+
+/// Verifies versions that cannot be represented as a single URL path segment are rejected.
+#[test]
+fn publish_rejects_an_invalid_version_before_writing() {
+    let handler = PublishWorkflowHandler::new(
+        Arc::new(PublishRepository::new(draft_snapshot(), Vec::new())),
+        FixedWorkflowIdGenerator,
+        FixedClock(42),
+    );
+
+    for version in ["release/1", ".", ".."] {
+        assert_eq!(
+            handler
+                .handle(ora_contracts::PublishWorkflowRequest {
+                    workflow_id: "workflow-1".to_string(),
+                    version: Some(version.to_string()),
+                })
+                .unwrap_err(),
+            ApplicationError::WorkflowVersionInvalid
+        );
+    }
 }
 
 /// Supplies the fixed draft needed by publish-handler tests.
 #[derive(Debug)]
 struct PublishRepository {
     draft: WorkflowSnapshot,
+    occupied_versions: Mutex<Vec<String>>,
 }
 
 impl PublishRepository {
     /// Builds the publish-specific repository fake around one visible draft.
-    fn new(draft: WorkflowSnapshot) -> Self {
-        Self { draft }
+    fn new(draft: WorkflowSnapshot, occupied_versions: Vec<String>) -> Self {
+        Self {
+            draft,
+            occupied_versions: Mutex::new(occupied_versions),
+        }
     }
 }
 
@@ -151,6 +189,12 @@ impl WorkflowRepository for PublishRepository {
         version: String,
         created_at: i64,
     ) -> Result<PublishSnapshotResult, RepositoryError> {
+        let mut occupied_versions = self.occupied_versions.lock().unwrap();
+        if occupied_versions.contains(&version) {
+            return Ok(PublishSnapshotResult::VersionAlreadyExists);
+        }
+        occupied_versions.push(version.clone());
+
         Ok(PublishSnapshotResult::Published(WorkflowSnapshot::new(
             snapshot_id,
             self.draft.workflow_id.clone(),
