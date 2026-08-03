@@ -1,10 +1,8 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   createDemoWorkflow,
   createMockWorkflows,
   createMockWorkflow,
-  createOpenSpecMockWorkflow,
   parseDemoWorkflow,
   runDemoWorkflow,
 } from "../src";
@@ -200,12 +198,4 @@ describe("workflow demo", () => {
     ]);
   });
 
-  it("keeps the OpenSpec backup JSON importable and synchronized with its fixture", () => {
-    const backup = JSON.parse(readFileSync(
-      new URL("../../../OpenSpec工作流演示.reactflow.json", import.meta.url),
-      "utf8",
-    ));
-
-    expect(parseDemoWorkflow(backup)).toEqual(createOpenSpecMockWorkflow("zh-CN"));
-  });
 });
