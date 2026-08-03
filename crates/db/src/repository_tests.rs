@@ -1,14 +1,16 @@
 use std::path::PathBuf;
 
 use ora_application::{
-    AgentDefinitionRepository, ProjectRepository, ProjectWorkContextRepository, RepositoryError,
-    SessionRepository, SkillRepository, TaskRepository, WorktreeRepository,
+    AgentDefinitionRepository, DeleteSnapshotResult, ProjectRepository,
+    ProjectWorkContextRepository, RepositoryError, SessionRepository, SkillImportCommitError,
+    SkillImportUnitOfWork, SkillRepository, TaskRepository, WorkflowRepository,
+    WorktreeRepository,
 };
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
     ProjectWorkContext, ProjectWorkContextId, ProjectWorkContextSurface, Session, SessionId,
-    SessionStatus, Skill, SkillId, Task, TaskId, TaskStatus, Worktree, WorktreeActivity,
-    WorktreeId,
+    SessionStatus, Skill, SkillId, Task, TaskId, TaskStatus, Workflow, WorkflowId,
+    WorkflowSnapshot, WorkflowSnapshotId, Worktree, WorktreeActivity, WorktreeId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
@@ -17,8 +19,10 @@ use tempfile::TempDir;
 use crate::{
     CascadeDeleteOutcome, DatabaseBootstrapper, DatabaseLocation, RepositoryPool,
     SqliteAgentDefinitionRepository, SqliteCascadeRepository, SqliteProjectRepository,
-    SqliteProjectWorkContextRepository, SqliteSessionRepository, SqliteSkillRepository,
-    SqliteTaskRepository, SqliteWorktreeRepository, TimestampSource, default_migration_catalog,
+    SqliteProjectWorkContextRepository, SqliteSessionRepository, SqliteSkillImportUnitOfWork,
+    SqliteSkillRepository, SqliteTaskRepository, SqliteWorkflowRepository,
+    SqliteWorktreeRepository, TimestampSource,
+    default_migration_catalog,
 };
 
 /// Verifies catalog repositories use stable identifiers and hide soft-deleted rows.
@@ -108,6 +112,199 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
             .unwrap(),
         false
     );
+}
+
+/// Verifies the import unit of work commits the row only when the promote callback succeeds.
+#[test]
+fn skill_import_unit_of_work_commits_on_success_and_rolls_back_on_promote_failure() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let unit_of_work = SqliteSkillImportUnitOfWork::new(pool.clone());
+    let repository = SqliteSkillRepository::new(pool);
+    let committed = skill("skill-commit", "grilling", "Grill", 1, 1, false);
+    let rolled_back = skill("skill-rollback", "probe", "Probe", 2, 2, false);
+
+    unit_of_work
+        .insert_then(committed.clone(), || Ok(()))
+        .unwrap();
+    let rollback = unit_of_work
+        .insert_then(rolled_back, || {
+            Err(ora_application::SkillPackageStoreError::new(
+                std::io::Error::other("promote failed"),
+            ))
+        })
+        .unwrap_err();
+
+    assert!(matches!(rollback, SkillImportCommitError::Promote { .. }));
+    assert_eq!(
+        repository
+            .find_skill(&SkillId::new("skill-commit"))
+            .unwrap(),
+        Some(committed)
+    );
+    assert_eq!(
+        repository
+            .find_skill(&SkillId::new("skill-rollback"))
+            .unwrap(),
+        None
+    );
+/// Verifies lifecycle commands cannot use another workflow's snapshot as their source.
+#[test]
+fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (workflow_a, draft_a) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    let (workflow_b, draft_b) = workflow_with_draft("workflow-b", "{\"nodes\":[1]}", 20);
+    repository
+        .create_workflow(workflow_a.clone(), draft_a.clone())
+        .unwrap();
+    repository
+        .create_workflow(workflow_b.clone(), draft_b.clone())
+        .unwrap();
+
+    let snapshot_b = published_snapshot("snapshot-b", &workflow_b.id, "v1", "{\"nodes\":[2]}", 30);
+    assert_eq!(
+        repository
+            .publish_snapshot(&workflow_b.id, snapshot_b.clone())
+            .unwrap(),
+        Some(snapshot_b.clone())
+    );
+    assert_eq!(
+        repository
+            .activate_version(&workflow_b.id, &snapshot_b.id, 40)
+            .unwrap(),
+        Some(WorkflowSnapshot::new(
+            draft_b.id.clone(),
+            workflow_b.id.clone(),
+            "draft",
+            snapshot_b.graph.clone(),
+            20,
+            Some(40),
+            /*is_deleted*/ false,
+        ))
+    );
+    assert_eq!(
+        repository
+            .find_workflow(&workflow_b.id)
+            .unwrap()
+            .expect("workflow B remains visible"),
+        Workflow::new(
+            workflow_b.id.clone(),
+            "Workflow workflow-b",
+            Some(snapshot_b.id.clone()),
+            AuditFields::new(20, 40, /*is_deleted*/ false),
+        )
+        .unwrap()
+    );
+
+    assert_eq!(
+        repository
+            .rollback_draft(&workflow_a.id, &snapshot_b.id, 40)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        repository
+            .activate_version(&workflow_a.id, &snapshot_b.id, 40)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        repository
+            .find_snapshot_by_version(&workflow_a.id, "draft")
+            .unwrap(),
+        Some(draft_a)
+    );
+    assert_eq!(
+        repository
+            .find_workflow(&workflow_a.id)
+            .unwrap()
+            .expect("workflow A remains visible"),
+        workflow_a
+    );
+}
+
+/// Verifies a visible version name can be reused after its previous snapshot is soft-deleted.
+#[test]
+fn workflow_repository_reuses_soft_deleted_version_names() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{}", 10);
+    repository.create_workflow(workflow.clone(), draft).unwrap();
+
+    let first = published_snapshot("snapshot-1", &workflow.id, "v1", "{\"nodes\":[1]}", 20);
+    assert_eq!(
+        repository
+            .publish_snapshot(&workflow.id, first.clone())
+            .unwrap(),
+        Some(first.clone())
+    );
+    assert_eq!(
+        repository
+            .soft_delete_snapshot(&workflow.id, &first.id, 30)
+            .unwrap(),
+        DeleteSnapshotResult::ActiveSnapshot
+    );
+
+    let second = published_snapshot("snapshot-2", &workflow.id, "v2", "{\"nodes\":[2]}", 40);
+    repository
+        .publish_snapshot(&workflow.id, second.clone())
+        .unwrap();
+    assert_eq!(
+        repository
+            .soft_delete_snapshot(&workflow.id, &first.id, 50)
+            .unwrap(),
+        DeleteSnapshotResult::Deleted(first)
+    );
+
+    let replacement = published_snapshot("snapshot-3", &workflow.id, "v1", "{\"nodes\":[3]}", 60);
+    assert_eq!(
+        repository
+            .publish_snapshot(&workflow.id, replacement.clone())
+            .unwrap(),
+        Some(replacement)
+    );
+}
+
+/// Builds a workflow and its required draft snapshot for repository integration tests.
+fn workflow_with_draft(id: &str, graph: &str, created_at: i64) -> (Workflow, WorkflowSnapshot) {
+    let workflow_id = WorkflowId::new(id);
+    let workflow = Workflow::new(
+        workflow_id.clone(),
+        format!("Workflow {id}"),
+        /*published_snapshot_id*/ None,
+        AuditFields::new(created_at, created_at, /*is_deleted*/ false),
+    )
+    .unwrap();
+    let draft = WorkflowSnapshot::new(
+        WorkflowSnapshotId::new(format!("{id}-draft")),
+        workflow_id,
+        "draft",
+        graph,
+        created_at,
+        Some(created_at),
+        /*is_deleted*/ false,
+    );
+
+    (workflow, draft)
+}
+
+/// Builds one immutable published snapshot for repository integration tests.
+fn published_snapshot(
+    id: &str,
+    workflow_id: &WorkflowId,
+    version: &str,
+    graph: &str,
+    created_at: i64,
+) -> WorkflowSnapshot {
+    WorkflowSnapshot::new(
+        WorkflowSnapshotId::new(id),
+        workflow_id.clone(),
+        version,
+        graph,
+        created_at,
+        /*updated_at*/ None,
+        /*is_deleted*/ false,
+    )
 }
 
 fn skill(

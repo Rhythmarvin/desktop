@@ -342,6 +342,11 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorkflowVersionAlreadyExists(EmptyErrorParams {}),
                 "workflow version already exists",
             ),
+            ApplicationError::WorkflowVersionInvalid => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowVersionInvalid(EmptyErrorParams {}),
+                "workflow version is invalid",
+            ),
             ApplicationError::WorkflowVersionReserved => (
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowVersionReserved(EmptyErrorParams {}),
@@ -626,6 +631,11 @@ mod tests {
                 },
                 ErrorClassification::Conflict,
                 PublicError::WorkflowVersionAlreadyExists(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowVersionInvalid,
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowVersionInvalid(EmptyErrorParams {}),
             ),
             (
                 ApplicationError::WorkflowVersionReserved,

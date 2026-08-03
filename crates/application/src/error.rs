@@ -172,6 +172,8 @@ pub enum ApplicationError {
         workflow_id: String,
         version: String,
     },
+    #[error("workflow version is invalid")]
+    WorkflowVersionInvalid,
     #[error("workflow version 'draft' is reserved")]
     WorkflowVersionReserved,
     #[error("cannot delete the draft snapshot")]
@@ -360,6 +362,7 @@ impl PartialEq for ApplicationError {
             | (TaskWorktreeRequiresGitRepository, TaskWorktreeRequiresGitRepository)
             | (TaskWorktreeRootUnavailable, TaskWorktreeRootUnavailable)
             | (WorkflowNameBlank, WorkflowNameBlank)
+            | (WorkflowVersionInvalid, WorkflowVersionInvalid)
             | (WorkflowVersionReserved, WorkflowVersionReserved)
             | (WorkflowCannotDeleteDraft, WorkflowCannotDeleteDraft)
             | (WorkflowCannotDeleteActiveVersion, WorkflowCannotDeleteActiveVersion)

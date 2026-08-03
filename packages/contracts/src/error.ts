@@ -103,6 +103,7 @@ export type ContractError =
     | { "code": "workflow_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_snapshot_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_version_already_exists"; "params": EmptyErrorParams }
+    | { "code": "workflow_version_invalid"; "params": EmptyErrorParams }
     | { "code": "workflow_version_reserved"; "params": EmptyErrorParams }
     | { "code": "workflow_cannot_delete_draft"; "params": EmptyErrorParams }
     | {
@@ -223,6 +224,7 @@ export type PublicError =
   | { "code": "workflow_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_snapshot_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_version_already_exists"; "params": EmptyErrorParams }
+  | { "code": "workflow_version_invalid"; "params": EmptyErrorParams }
   | { "code": "workflow_version_reserved"; "params": EmptyErrorParams }
   | { "code": "workflow_cannot_delete_draft"; "params": EmptyErrorParams }
   | {

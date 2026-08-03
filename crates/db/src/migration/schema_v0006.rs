@@ -20,10 +20,13 @@ CREATE TABLE IF NOT EXISTS workflow_snapshots (
     updated_at INTEGER,
     is_deleted INTEGER NOT NULL DEFAULT 0
         CHECK (is_deleted IN (0, 1)),
-    UNIQUE(workflow_id, version),
     FOREIGN KEY(workflow_id)
         REFERENCES workflows(id)
 );
+
+CREATE UNIQUE INDEX workflow_snapshots_active_version_unique
+    ON workflow_snapshots(workflow_id, version)
+    WHERE is_deleted = 0;
 "#];
 
 const DOWN_STATEMENTS: &[&str] = &[r#"

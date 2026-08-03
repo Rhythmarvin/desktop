@@ -1,4 +1,4 @@
-use ora_application::{RepositoryError, WorkflowRepository};
+use ora_application::{DeleteSnapshotResult, RepositoryError, WorkflowRepository};
 use ora_domain::{
     AuditFields, CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot,
     WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
@@ -98,20 +98,15 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                     rows.next()?.map(map_snapshot_row).transpose()?
                 };
 
-                let published = workflow
-                    .published_snapshot_id
-                    .as_ref()
-                    .and_then(|published_id| {
-                        let mut statement = connection
-                            .prepare(
-                                "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE id = ?1 AND is_deleted = 0",
-                            )
-                            .ok()?;
-                        let mut rows = statement
-                            .query(params![published_id.as_ref()])
-                            .ok()?;
-                        rows.next().ok()?.map(map_snapshot_row).transpose().ok().flatten()
-                    });
+                let published = if let Some(published_id) = &workflow.published_snapshot_id {
+                    let mut statement = connection.prepare(
+                        "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE id = ?1 AND workflow_id = ?2 AND is_deleted = 0",
+                    )?;
+                    let mut rows = statement.query(params![published_id.as_ref(), workflow_id.as_ref()])?;
+                    rows.next()?.map(map_snapshot_row).transpose()?
+                } else {
+                    None
+                };
 
                 Ok(Some(WorkflowDetail {
                     workflow,
@@ -154,27 +149,21 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
-    fn update_workflow(&self, workflow: Workflow) -> Result<Workflow, RepositoryError> {
-        let updated = self
+    fn update_workflow(&self, workflow: Workflow) -> Result<Option<Workflow>, RepositoryError> {
+        self
             .pool
             .with_connection(|connection| {
-                connection
-                    .execute(
-                        "UPDATE workflows SET name = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0",
-                        params![workflow.id.as_ref(), &workflow.name, workflow.audit_fields.updated_at],
-                    )
-                    .map(|rows| rows > 0)
-                    .map_err(Into::into)
+                let mut statement = connection.prepare(
+                        "UPDATE workflows SET name = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0 RETURNING id, name, published_snapshot_id, created_at, updated_at, is_deleted",
+                    )?;
+                let mut rows = statement.query(params![
+                    workflow.id.as_ref(),
+                    &workflow.name,
+                    workflow.audit_fields.updated_at
+                ])?;
+                rows.next()?.map(map_workflow_row).transpose()
             })
-            .map_err(workflow_repository_error_from_database)?;
-
-        if updated {
-            Ok(workflow)
-        } else {
-            Err(RepositoryError::from_message(
-                "workflow not found during update".to_string(),
-            ))
-        }
+            .map_err(workflow_repository_error_from_database)
     }
 
     fn soft_delete_workflow(
@@ -257,41 +246,63 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         workflow_id: &WorkflowId,
         graph: String,
         updated_at: i64,
-    ) -> Result<WorkflowSnapshot, RepositoryError> {
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
-                let rows_affected = connection.execute(
+                let transaction =
+                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let workflow_exists = transaction
+                    .query_row(
+                        "SELECT 1 FROM workflows WHERE id = ?1 AND is_deleted = 0",
+                        params![workflow_id.as_ref()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !workflow_exists {
+                    return Ok(None);
+                }
+
+                let rows_affected = transaction.execute(
                     "UPDATE workflow_snapshots SET graph = ?3, updated_at = ?4 WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
                     params![workflow_id.as_ref(), DRAFT_VERSION, &graph, updated_at],
                 )?;
                 if rows_affected == 0 {
-                    return Ok(None);
+                    return Err(crate::DatabaseError::Sqlite(rusqlite::Error::InvalidQuery));
                 }
-                let mut statement = connection.prepare(
-                    "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
-                )?;
-                let mut rows = statement.query(params![workflow_id.as_ref(), DRAFT_VERSION])?;
-                rows.next()?.map(map_snapshot_row).transpose()
+                let draft = {
+                    let mut statement = transaction.prepare(
+                        "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
+                    )?;
+                    let mut rows = statement.query(params![workflow_id.as_ref(), DRAFT_VERSION])?;
+                    rows.next()?.map(map_snapshot_row).transpose()?
+                };
+                transaction.commit()?;
+                Ok(draft)
             })
             .map_err(workflow_repository_error_from_database)
-            .and_then(|opt| {
-                opt.ok_or_else(|| {
-                    RepositoryError::from_message(
-                        "draft not found after update".to_string(),
-                    )
-                })
-            })
     }
 
     fn publish_snapshot(
         &self,
         workflow_id: &WorkflowId,
         snapshot: WorkflowSnapshot,
-    ) -> Result<WorkflowSnapshot, RepositoryError> {
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
                     Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let version_exists = transaction
+                    .query_row(
+                        "SELECT 1 FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
+                        params![workflow_id.as_ref(), &snapshot.version],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if version_exists {
+                    return Ok(None);
+                }
                 transaction.execute(
                     "INSERT INTO workflow_snapshots (id, workflow_id, version, graph, created_at, updated_at, is_deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
@@ -304,12 +315,15 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                         bool_to_sqlite(snapshot.is_deleted),
                     ],
                 )?;
-                transaction.execute(
+                let rows_affected = transaction.execute(
                     "UPDATE workflows SET published_snapshot_id = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0",
                     params![workflow_id.as_ref(), snapshot.id.as_ref(), snapshot.created_at],
                 )?;
+                if rows_affected == 0 {
+                    return Err(crate::DatabaseError::Sqlite(rusqlite::Error::InvalidQuery));
+                }
                 transaction.commit()?;
-                Ok(snapshot)
+                Ok(Some(snapshot))
             })
             .map_err(workflow_repository_error_from_database)
     }
@@ -319,91 +333,142 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
         updated_at: i64,
-    ) -> Result<WorkflowSnapshot, RepositoryError> {
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
-                let rows_affected = connection.execute(
+                let transaction =
+                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let target_graph = transaction
+                    .query_row(
+                        "SELECT graph FROM workflow_snapshots WHERE id = ?1 AND workflow_id = ?2 AND version != ?3 AND is_deleted = 0",
+                        params![snapshot_id.as_ref(), workflow_id.as_ref(), DRAFT_VERSION],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                let Some(target_graph) = target_graph else {
+                    return Ok(None);
+                };
+
+                let rows_affected = transaction.execute(
                     "UPDATE workflow_snapshots
-                     SET graph = (SELECT graph FROM workflow_snapshots WHERE id = ?2 AND is_deleted = 0),
-                         updated_at = ?3
+                     SET graph = ?2, updated_at = ?3
                      WHERE workflow_id = ?1 AND version = ?4 AND is_deleted = 0",
-                    params![workflow_id.as_ref(), snapshot_id.as_ref(), updated_at, DRAFT_VERSION],
+                    params![workflow_id.as_ref(), target_graph, updated_at, DRAFT_VERSION],
                 )?;
 
                 if rows_affected == 0 {
                     return Ok(None);
                 }
 
-                let mut statement = connection.prepare(
-                    "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
-                )?;
-                let mut rows = statement.query(params![workflow_id.as_ref(), DRAFT_VERSION])?;
-                rows.next()?.map(map_snapshot_row).transpose()
+                let draft = {
+                    let mut statement = transaction.prepare(
+                        "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
+                    )?;
+                    let mut rows = statement.query(params![workflow_id.as_ref(), DRAFT_VERSION])?;
+                    rows.next()?.map(map_snapshot_row).transpose()?
+                };
+                transaction.commit()?;
+                Ok(draft)
             })
             .map_err(workflow_repository_error_from_database)
-            .and_then(|opt| {
-                opt.ok_or_else(|| {
-                    RepositoryError::from_message(
-                        "draft or target snapshot not found during rollback".to_string(),
-                    )
-                })
-            })
     }
 
     fn activate_version(
         &self,
         workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
-    ) -> Result<WorkflowSnapshot, RepositoryError> {
+        updated_at: i64,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
                     Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let target_graph = transaction
+                    .query_row(
+                        "SELECT graph FROM workflow_snapshots WHERE id = ?1 AND workflow_id = ?2 AND version != ?3 AND is_deleted = 0",
+                        params![snapshot_id.as_ref(), workflow_id.as_ref(), DRAFT_VERSION],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                let Some(target_graph) = target_graph else {
+                    return Ok(None);
+                };
 
-                transaction.execute(
-                    "UPDATE workflows SET published_snapshot_id = ?2 WHERE id = ?1 AND is_deleted = 0",
-                    params![workflow_id.as_ref(), snapshot_id.as_ref()],
-                )?;
-
-                transaction.execute(
+                let draft_rows = transaction.execute(
                     "UPDATE workflow_snapshots
-                     SET graph = (SELECT graph FROM workflow_snapshots WHERE id = ?2 AND is_deleted = 0)
-                     WHERE workflow_id = ?1 AND version = ?3 AND is_deleted = 0",
-                    params![workflow_id.as_ref(), snapshot_id.as_ref(), DRAFT_VERSION],
+                     SET graph = ?2, updated_at = ?3
+                     WHERE workflow_id = ?1 AND version = ?4 AND is_deleted = 0",
+                    params![workflow_id.as_ref(), target_graph, updated_at, DRAFT_VERSION],
                 )?;
+                if draft_rows == 0 {
+                    return Ok(None);
+                }
 
+                let workflow_rows = transaction.execute(
+                    "UPDATE workflows SET published_snapshot_id = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0",
+                    params![workflow_id.as_ref(), snapshot_id.as_ref(), updated_at],
+                )?;
+                if workflow_rows == 0 {
+                    return Err(crate::DatabaseError::Sqlite(rusqlite::Error::InvalidQuery));
+                }
+
+                let draft = {
+                    let mut statement = transaction.prepare(
+                        "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
+                    )?;
+                    let mut rows = statement.query(params![workflow_id.as_ref(), DRAFT_VERSION])?;
+                    rows.next()?.map(map_snapshot_row).transpose()?
+                };
                 transaction.commit()?;
-
-                let mut statement = connection.prepare(
-                    "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE workflow_id = ?1 AND version = ?2 AND is_deleted = 0",
-                )?;
-                let mut rows = statement.query(params![workflow_id.as_ref(), DRAFT_VERSION])?;
-                rows.next()?.map(map_snapshot_row).transpose()
+                Ok(draft)
             })
             .map_err(workflow_repository_error_from_database)
-            .and_then(|opt| {
-                opt.ok_or_else(|| {
-                    RepositoryError::from_message(
-                        "draft not found after activation".to_string(),
-                    )
-                })
-            })
     }
 
     fn soft_delete_snapshot(
         &self,
+        workflow_id: &WorkflowId,
         snapshot_id: &WorkflowSnapshotId,
         deleted_at: i64,
-    ) -> Result<bool, RepositoryError> {
+    ) -> Result<DeleteSnapshotResult, RepositoryError> {
         self.pool
             .with_connection(|connection| {
-                connection
-                    .execute(
-                        "UPDATE workflow_snapshots SET updated_at = ?2, is_deleted = 1 WHERE id = ?1 AND is_deleted = 0",
-                        params![snapshot_id.as_ref(), deleted_at],
-                    )
-                    .map(|rows| rows > 0)
-                    .map_err(Into::into)
+                let transaction =
+                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let workflow = {
+                    let mut statement = transaction.prepare(
+                        "SELECT id, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
+                    )?;
+                    let mut rows = statement.query(params![workflow_id.as_ref()])?;
+                    rows.next()?.map(map_workflow_row).transpose()?
+                };
+                let Some(workflow) = workflow else {
+                    return Ok(DeleteSnapshotResult::WorkflowNotFound);
+                };
+
+                let snapshot = {
+                    let mut statement = transaction.prepare(
+                        "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE id = ?1 AND workflow_id = ?2 AND is_deleted = 0",
+                    )?;
+                    let mut rows = statement.query(params![snapshot_id.as_ref(), workflow_id.as_ref()])?;
+                    rows.next()?.map(map_snapshot_row).transpose()?
+                };
+                let Some(snapshot) = snapshot else {
+                    return Ok(DeleteSnapshotResult::SnapshotNotFound);
+                };
+                if snapshot.version == DRAFT_VERSION {
+                    return Ok(DeleteSnapshotResult::DraftSnapshot);
+                }
+                if workflow.published_snapshot_id.as_ref() == Some(&snapshot.id) {
+                    return Ok(DeleteSnapshotResult::ActiveSnapshot);
+                }
+
+                transaction.execute(
+                    "UPDATE workflow_snapshots SET updated_at = ?2, is_deleted = 1 WHERE id = ?1 AND workflow_id = ?3 AND is_deleted = 0",
+                    params![snapshot.id.as_ref(), deleted_at, workflow_id.as_ref()],
+                )?;
+                transaction.commit()?;
+                Ok(DeleteSnapshotResult::Deleted(snapshot))
             })
             .map_err(workflow_repository_error_from_database)
     }

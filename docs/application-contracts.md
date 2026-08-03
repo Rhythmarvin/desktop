@@ -31,7 +31,7 @@ Contracts are the app-facing protocol, not a projection of the domain. Each enti
 - `WorkflowSummary`: `id`, `name`, `publishedVersion`, `createdAt`, `updatedAt`
 - `WorkflowVersion`: `id`, `version`, `createdAt`
 
-Public payloads expose documented business fields only. `createdAt`, `updatedAt`, `isDeleted`, and other internal audit fields never appear. Two exclusions are deliberate:
+Public payloads expose documented business fields only. `isDeleted` and other internal audit fields never appear. Workflow creation and update timestamps are an explicit exception because version history and editor freshness are user-visible lifecycle facts. Two exclusions are deliberate:
 
 - Task worktrees are backend-owned, so no contract carries a `worktreeId`, and there are no standalone worktree DTOs or SDK operations. `CreateTaskRequest` takes `projectId`, `title`, `status`, and optional `workspaceMode` and `baseBranch` fields; worktree mode requires a base branch. `UpdateTaskRequest` takes `taskId`, `title`, and `status`. See [Task Worktrees](task-worktrees.md).
 - A session's private provider session id is never exposed. It is persisted and used internally for `session/load`, but the public `Session` payload omits it.

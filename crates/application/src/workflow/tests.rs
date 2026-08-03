@@ -1,3 +1,211 @@
-// Handler unit tests for workflow CRUD operations.
-// Tests are placed here for completeness; full test coverage will be added
-// as a follow-up once the basic compilation is verified.
+use std::sync::Arc;
+
+use ora_domain::{
+    CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
+    WorkflowSummary, WorkflowVersion,
+};
+use pretty_assertions::assert_eq;
+
+use super::{
+    DeleteSnapshotResult, PublishWorkflowHandler, WorkflowIdGenerator, WorkflowRepository,
+};
+use crate::{ApplicationError, Clock, RepositoryError};
+
+/// Verifies automatic versions derive from the injected clock and remain collision-resistant.
+#[test]
+fn publish_uses_the_injected_clock_and_snapshot_id_for_automatic_versions() {
+    let handler = PublishWorkflowHandler::new(
+        Arc::new(PublishRepository::new(draft_snapshot())),
+        FixedWorkflowIdGenerator,
+        FixedClock(42),
+    );
+
+    let response = handler
+        .handle(ora_contracts::PublishWorkflowRequest {
+            workflow_id: "workflow-1".to_string(),
+            version: None,
+        })
+        .unwrap();
+
+    assert_eq!(
+        response.snapshot,
+        ora_contracts::WorkflowSnapshot {
+            id: "snapshot-1".to_string(),
+            workflow_id: "workflow-1".to_string(),
+            version: "v42-snapshot-1".to_string(),
+            graph: "{\"nodes\":[]}".to_string(),
+            created_at: 42,
+            updated_at: None,
+        }
+    );
+}
+
+/// Verifies versions that cannot be represented as a single URL path segment are rejected.
+#[test]
+fn publish_rejects_an_invalid_version_before_writing() {
+    let handler = PublishWorkflowHandler::new(
+        Arc::new(PublishRepository::new(draft_snapshot())),
+        FixedWorkflowIdGenerator,
+        FixedClock(42),
+    );
+
+    assert_eq!(
+        handler
+            .handle(ora_contracts::PublishWorkflowRequest {
+                workflow_id: "workflow-1".to_string(),
+                version: Some("release/1".to_string()),
+            })
+            .unwrap_err(),
+        ApplicationError::WorkflowVersionInvalid
+    );
+}
+
+/// Supplies the fixed draft needed by publish-handler tests.
+#[derive(Debug)]
+struct PublishRepository {
+    draft: WorkflowSnapshot,
+}
+
+impl PublishRepository {
+    /// Builds the publish-specific repository fake around one visible draft.
+    fn new(draft: WorkflowSnapshot) -> Self {
+        Self { draft }
+    }
+}
+
+impl WorkflowRepository for PublishRepository {
+    fn create_workflow(
+        &self,
+        _workflow: Workflow,
+        _draft: WorkflowSnapshot,
+    ) -> Result<CreatedWorkflow, RepositoryError> {
+        unreachable!("publish tests never create workflows")
+    }
+
+    fn find_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
+    ) -> Result<Option<Workflow>, RepositoryError> {
+        unreachable!("publish tests never load workflows")
+    }
+
+    fn get_workflow_detail(
+        &self,
+        _workflow_id: &WorkflowId,
+    ) -> Result<Option<WorkflowDetail>, RepositoryError> {
+        unreachable!("publish tests never load workflow details")
+    }
+
+    fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, RepositoryError> {
+        unreachable!("publish tests never list workflows")
+    }
+
+    fn update_workflow(&self, _workflow: Workflow) -> Result<Option<Workflow>, RepositoryError> {
+        unreachable!("publish tests never update workflows")
+    }
+
+    fn soft_delete_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
+        _deleted_at: i64,
+    ) -> Result<bool, RepositoryError> {
+        unreachable!("publish tests never delete workflows")
+    }
+
+    fn find_snapshot_by_version(
+        &self,
+        _workflow_id: &WorkflowId,
+        version: &str,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        assert_eq!(version, "draft");
+        Ok(Some(self.draft.clone()))
+    }
+
+    fn list_versions(
+        &self,
+        _workflow_id: &WorkflowId,
+    ) -> Result<Vec<WorkflowVersion>, RepositoryError> {
+        unreachable!("publish tests never list versions")
+    }
+
+    fn update_draft(
+        &self,
+        _workflow_id: &WorkflowId,
+        _graph: String,
+        _updated_at: i64,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("publish tests never update drafts")
+    }
+
+    fn publish_snapshot(
+        &self,
+        _workflow_id: &WorkflowId,
+        snapshot: WorkflowSnapshot,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        Ok(Some(snapshot))
+    }
+
+    fn rollback_draft(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+        _updated_at: i64,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("publish tests never roll back drafts")
+    }
+
+    fn activate_version(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+        _updated_at: i64,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("publish tests never activate versions")
+    }
+
+    fn soft_delete_snapshot(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+        _deleted_at: i64,
+    ) -> Result<DeleteSnapshotResult, RepositoryError> {
+        unreachable!("publish tests never delete snapshots")
+    }
+}
+
+/// Returns the draft copied by publish-handler tests.
+fn draft_snapshot() -> WorkflowSnapshot {
+    WorkflowSnapshot::new(
+        WorkflowSnapshotId::new("draft-1"),
+        WorkflowId::new("workflow-1"),
+        "draft",
+        "{\"nodes\":[]}",
+        1,
+        Some(1),
+        /*is_deleted*/ false,
+    )
+}
+
+/// Produces deterministic identifiers for publish-handler tests.
+#[derive(Clone, Copy, Debug)]
+struct FixedWorkflowIdGenerator;
+
+impl WorkflowIdGenerator for FixedWorkflowIdGenerator {
+    fn generate_workflow_id(&self) -> WorkflowId {
+        WorkflowId::new("workflow-1")
+    }
+
+    fn generate_snapshot_id(&self) -> WorkflowSnapshotId {
+        WorkflowSnapshotId::new("snapshot-1")
+    }
+}
+
+/// Supplies deterministic timestamps to workflow handlers.
+#[derive(Clone, Copy, Debug)]
+struct FixedClock(i64);
+
+impl Clock for FixedClock {
+    fn now_timestamp_millis(&self) -> i64 {
+        self.0
+    }
+}
