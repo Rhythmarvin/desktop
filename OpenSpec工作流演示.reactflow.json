@@ -1,0 +1,266 @@
+{
+  "id": "spec-change-lifecycle",
+  "name": "OpenSpec工作流演示",
+  "description": "依次探索、提案、实施和归档变更；四步均使用可配置的 Agent 执行契约。",
+  "updatedAt": "2026-08-03T10:00:00+08:00",
+  "viewport": {
+    "x": 28,
+    "y": 110,
+    "zoom": 0.82
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "workflow",
+      "deletable": false,
+      "position": {
+        "x": 40,
+        "y": 280
+      },
+      "data": {
+        "kind": "start",
+        "title": "开始",
+        "description": "接收变更目标和项目上下文",
+        "instruction": "提取要解决的问题、约束和验收目标。"
+      },
+      "initialWidth": 230,
+      "initialHeight": 98,
+      "handles": [
+        {
+          "type": "target",
+          "position": "left",
+          "x": -5,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "type": "source",
+          "position": "right",
+          "x": 225,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    {
+      "id": "explore",
+      "type": "workflow",
+      "position": {
+        "x": 320,
+        "y": 280
+      },
+      "data": {
+        "kind": "agent",
+        "title": "探索",
+        "description": "只读探索项目现状和影响范围",
+        "agentConfig": {
+          "schemaVersion": 3,
+          "executor": {
+            "agentCli": "code_agent_cli",
+            "modelId": "gpt-5"
+          },
+          "roleId": "Researcher",
+          "skills": [
+            {
+              "skillId": "openspec-explore",
+              "enabled": true
+            }
+          ],
+          "prompt": "阅读相关代码、文档和现有规范，归纳现状、约束、风险与可选路径。不要修改项目文件。"
+        }
+      },
+      "initialWidth": 230,
+      "initialHeight": 98,
+      "handles": [
+        {
+          "type": "target",
+          "position": "left",
+          "x": -5,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "type": "source",
+          "position": "right",
+          "x": 225,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    {
+      "id": "propose",
+      "type": "workflow",
+      "position": {
+        "x": 600,
+        "y": 280
+      },
+      "data": {
+        "kind": "agent",
+        "title": "提案",
+        "description": "将探索结论组织为可评审方案",
+        "agentConfig": {
+          "schemaVersion": 3,
+          "executor": {
+            "agentCli": "code_agent_cli",
+            "modelId": "gpt-5"
+          },
+          "roleId": "Planner",
+          "skills": [
+            {
+              "skillId": "openspec-propose",
+              "enabled": true
+            }
+          ],
+          "prompt": "基于上游探索结论，提出范围明确的变更方案、任务拆分、风险和验收标准。不要修改项目文件。"
+        }
+      },
+      "initialWidth": 230,
+      "initialHeight": 98,
+      "handles": [
+        {
+          "type": "target",
+          "position": "left",
+          "x": -5,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "type": "source",
+          "position": "right",
+          "x": 225,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    {
+      "id": "apply",
+      "type": "workflow",
+      "position": {
+        "x": 880,
+        "y": 280
+      },
+      "data": {
+        "kind": "agent",
+        "title": "实施",
+        "description": "按批准方案实现并验证变更",
+        "agentConfig": {
+          "schemaVersion": 3,
+          "executor": {
+            "agentCli": "code_agent_cli",
+            "modelId": "gpt-5"
+          },
+          "roleId": "Implementer",
+          "skills": [
+            {
+              "skillId": "openspec-apply-change",
+              "enabled": true
+            }
+          ],
+          "prompt": "按照上游方案修改项目文件，运行与改动匹配的验证，并记录实际偏差。"
+        }
+      },
+      "initialWidth": 230,
+      "initialHeight": 98,
+      "handles": [
+        {
+          "type": "target",
+          "position": "left",
+          "x": -5,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "type": "source",
+          "position": "right",
+          "x": 225,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    },
+    {
+      "id": "archive",
+      "type": "workflow",
+      "position": {
+        "x": 1160,
+        "y": 280
+      },
+      "data": {
+        "kind": "agent",
+        "title": "归档",
+        "description": "沉淀变更决策、验证结果和后续事项",
+        "agentConfig": {
+          "schemaVersion": 3,
+          "executor": {
+            "agentCli": "code_agent_cli",
+            "modelId": "gpt-5"
+          },
+          "roleId": "Documentation Agent",
+          "skills": [
+            {
+              "skillId": "openspec-archive-change",
+              "enabled": true
+            }
+          ],
+          "prompt": "更新规范和变更记录，归档验证结果，并明确未完成的后续事项。"
+        }
+      },
+      "initialWidth": 230,
+      "initialHeight": 98,
+      "handles": [
+        {
+          "type": "target",
+          "position": "left",
+          "x": -5,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        },
+        {
+          "type": "source",
+          "position": "right",
+          "x": 225,
+          "y": 56,
+          "width": 10,
+          "height": 10
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-explore",
+      "source": "start",
+      "target": "explore",
+      "type": "workflow"
+    },
+    {
+      "id": "e-explore-propose",
+      "source": "explore",
+      "target": "propose",
+      "type": "workflow"
+    },
+    {
+      "id": "e-propose-apply",
+      "source": "propose",
+      "target": "apply",
+      "type": "workflow"
+    },
+    {
+      "id": "e-apply-archive",
+      "source": "apply",
+      "target": "archive",
+      "type": "workflow"
+    }
+  ]
+}

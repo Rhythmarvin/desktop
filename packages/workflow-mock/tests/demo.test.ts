@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   createDemoWorkflow,
+  createMockWorkflows,
   createMockWorkflow,
+  createOpenSpecMockWorkflow,
   parseDemoWorkflow,
   runDemoWorkflow,
 } from "../src";
@@ -94,6 +97,16 @@ describe("workflow demo", () => {
     expect(() => parseDemoWorkflow(missingHandle)).toThrow(
       "Invalid workflow definition",
     );
+
+    const missingAgentContract = createMockWorkflow("en-US");
+    const agent = missingAgentContract.nodes.find((node) => node.data.kind === "agent");
+    if (agent === undefined) {
+      throw new Error("The code review fixture requires an Agent node");
+    }
+    delete agent.data.agentConfig;
+    expect(() => parseDemoWorkflow(missingAgentContract)).toThrow(
+      "Invalid workflow definition",
+    );
   });
 
   it("runs the current draft rather than a stored copy", async () => {
@@ -112,5 +125,87 @@ describe("workflow demo", () => {
         summary: `${node.data.title} completed`,
       })),
     });
+  });
+
+  it("includes a four-stage Agent lifecycle demo with explicit execution contracts", () => {
+    const workflow = createMockWorkflows("en-US").find(
+      (candidate) => candidate.id === "spec-change-lifecycle",
+    );
+
+    expect(workflow).toMatchObject({
+      id: "spec-change-lifecycle",
+      name: "OpenSpec workflow demo",
+      nodes: [
+        expect.objectContaining({ id: "start", data: expect.objectContaining({ kind: "start" }) }),
+        expect.objectContaining({
+          id: "explore",
+          data: expect.objectContaining({
+            kind: "agent",
+            title: "Explore",
+            agentConfig: expect.objectContaining({
+              roleId: "Researcher",
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          id: "propose",
+          data: expect.objectContaining({
+            kind: "agent",
+            title: "Propose",
+            agentConfig: expect.objectContaining({ roleId: "Planner" }),
+          }),
+        }),
+        expect.objectContaining({
+          id: "apply",
+          data: expect.objectContaining({
+            kind: "agent",
+            title: "Apply",
+            agentConfig: expect.objectContaining({
+              roleId: "Implementer",
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          id: "archive",
+          data: expect.objectContaining({
+            kind: "agent",
+            title: "Archive",
+            agentConfig: expect.objectContaining({
+              roleId: "Documentation Agent",
+            }),
+          }),
+        }),
+      ],
+      edges: [
+        expect.objectContaining({ source: "start", target: "explore" }),
+        expect.objectContaining({ source: "explore", target: "propose" }),
+        expect.objectContaining({ source: "propose", target: "apply" }),
+        expect.objectContaining({ source: "apply", target: "archive" }),
+      ],
+    });
+    expect(parseDemoWorkflow(workflow)).toEqual(workflow);
+  });
+
+  it("localizes the OpenSpec Agent node titles in Chinese", () => {
+    const workflow = createMockWorkflows("zh-CN").find(
+      (candidate) => candidate.id === "spec-change-lifecycle",
+    );
+
+    expect(workflow?.nodes.map((node) => node.data.title)).toEqual([
+      "开始",
+      "探索",
+      "提案",
+      "实施",
+      "归档",
+    ]);
+  });
+
+  it("keeps the OpenSpec backup JSON importable and synchronized with its fixture", () => {
+    const backup = JSON.parse(readFileSync(
+      new URL("../../../OpenSpec工作流演示.reactflow.json", import.meta.url),
+      "utf8",
+    ));
+
+    expect(parseDemoWorkflow(backup)).toEqual(createOpenSpecMockWorkflow("zh-CN"));
   });
 });
