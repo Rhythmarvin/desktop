@@ -38,8 +38,7 @@ pub use task_diff_comment::{
 };
 pub use virtual_entry::{VirtualEntry, VirtualEntryKind};
 pub use virtual_folder::VirtualFolder;
-pub use worktree::{Worktree, WorktreeActivity, WorktreeBaseline};
 pub use workflow::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
 };
-pub use worktree::{Worktree, WorktreeActivity};
+pub use worktree::{Worktree, WorktreeActivity, WorktreeBaseline};

@@ -448,8 +448,6 @@ impl PartialEq for ApplicationError {
                 TaskWorktreeIdExhausted { attempts: left },
                 TaskWorktreeIdExhausted { attempts: right },
             ) => left == right,
-            (TaskWorktreeRootUnavailable, TaskWorktreeRootUnavailable) => true,
-            (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (WorktreeNotFound { worktree_id: left }, WorktreeNotFound { worktree_id: right }) => {
                 left == right
             }

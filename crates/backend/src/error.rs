@@ -600,6 +600,8 @@ mod tests {
                 .map(ToString::to_string),
             Some("git process failed".to_string())
         );
+    }
+
     /// Verifies workflow domain failures preserve their distinct public contract codes.
     #[test]
     fn maps_workflow_failures_to_distinct_public_errors() {

@@ -4,10 +4,10 @@ mod project;
 mod project_work_context;
 mod repository_error;
 mod session;
-mod task_diff;
 mod skill;
 mod skill_import;
 mod task;
+mod task_diff;
 mod workflow;
 mod worktree;
 
