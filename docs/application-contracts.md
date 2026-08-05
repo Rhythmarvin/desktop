@@ -30,6 +30,9 @@ Contracts are the app-facing protocol, not a projection of the domain. Each enti
 - `WorkflowSnapshot` (public): `id`, `workflowId`, `version`, `graph`, `createdAt`, `updatedAt`
 - `WorkflowSummary`: `id`, `name`, `publishedVersion`, `createdAt`, `updatedAt`
 - `WorkflowVersion`: `id`, `version`, `createdAt`
+- `WorkflowRun`: `id`, `workflowId`, `snapshotId`, `status`, `state`, `input`, `output`, `error`, `startedAt`, `finishedAt`, `createdAt`, `updatedAt`
+- `WorkflowNodeRun`: `id`, `runId`, `nodeId`, `nodeType`, `sessionId`, `status`, `input`, `output`, `error`, `startedAt`, `finishedAt`, `createdAt`, `updatedAt`
+- `WorkflowRunSummary`: `id`, `name`, `projectId`, `workflowId`, `status`, `startedAt`, `finishedAt`, `createdAt`
 
 Public payloads expose documented business fields only. `isDeleted` and other internal audit fields never appear. Workflow summary timestamps and WorkflowSnapshot `createdAt`/`updatedAt` are explicit exceptions because version history and editor freshness are user-visible lifecycle facts. `createdAt` records when a snapshot was created; `updatedAt` records draft edits and remains `null` for published snapshots. Two exclusions are deliberate:
 
@@ -65,6 +68,7 @@ The handler set is intentionally narrower than full CRUD per entity, because som
 | `project_work_context` | open, renew |
 | `task_diff` | read diff, create/list/reply/update comments, commit, push |
 | `workflow` | create, get, list, update, delete, getDraft, updateDraft, publish, rollback, activate, listVersions, getVersion, deleteSnapshot |
+| `workflow_run` | create, get, list, listNodeRuns, delete |
 | `worktree` | none — ports only |
 
 Notable consequences:
@@ -75,6 +79,7 @@ Notable consequences:
 - `worktree` has no handlers or transport contracts at all. Worktree records are internal metadata coordinated by the task module.
 - `task_diff` owns review use cases but not workspace selection. Backend composition resolves the task's live cwd and supplies the fixed baseline for isolated worktrees or the current `HEAD` for project-root tasks.
 - `workflow` offers a complete CRUD surface including deletion, unlike project and task. Workflow deletion follows the standard handler pattern because it has no running-session constraint; cascade soft-deletion of snapshots is managed entirely within the repository.
+- `workflow_run` deletion carries an active-run guard — a running run, a non-terminal node run, or a running session refuses deletion — and cascades a soft-delete across the run, its node runs, and its task's sessions, worktrees, and task row.
 
 `project_id`, `task_id`, and `worktree_id` are treated as pass-through business identifiers. Create and update handlers do not perform extra cross-entity existence checks before delegating to their repositories; `OpenProjectWorkContextHandler` verifying the requested project is the one deliberate exception, because occupancy has to be evaluated against a real project.
 

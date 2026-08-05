@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
 CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run
     ON workflow_node_runs (run_id, created_at);
 
-ALTER TABLE tasks ADD COLUMN type INTEGER NOT NULL DEFAULT 0 CHECK (type IN (0, 1));
+ALTER TABLE tasks ADD COLUMN type INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE tasks ADD COLUMN workflow_run_id TEXT REFERENCES workflow_runs(id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_workflow_run_id
     ON tasks (workflow_run_id) WHERE workflow_run_id IS NOT NULL;
