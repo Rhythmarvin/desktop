@@ -1,8 +1,8 @@
-use ora_application::{RepositoryError, WorkflowRunRepository};
+use ora_application::{DeleteWorkflowRunResult, RepositoryError, WorkflowRunRepository};
 use ora_domain::{
-    AuditFields, ProjectId, SessionId, Task, WorkflowId, WorkflowNodeRun, WorkflowNodeRunId,
-    WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail, WorkflowRunId, WorkflowRunStatus,
-    WorkflowRunSummary, WorkflowSnapshotId, Worktree, WorktreeBaseline,
+    AuditFields, ProjectId, SessionId, SessionStatus, Task, WorkflowId, WorkflowNodeRun,
+    WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail, WorkflowRunId,
+    WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshotId, Worktree, WorktreeBaseline,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
@@ -176,6 +176,101 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError> {
         self.pool
             .with_connection(|connection| list_node_runs(connection, run_id))
+            .map_err(workflow_run_repository_error_from_database)
+    }
+
+    fn soft_delete_run(
+        &self,
+        run_id: &WorkflowRunId,
+        deleted_at: i64,
+    ) -> Result<DeleteWorkflowRunResult, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let transaction =
+                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let run_exists = transaction
+                    .query_row(
+                        "SELECT 1 FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
+                        params![run_id.as_ref()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !run_exists {
+                    return Ok(DeleteWorkflowRunResult::NotFound);
+                }
+                // Sessions and worktrees are owned by the run-task, so resolve it for the cascade.
+                let task_id = transaction
+                    .query_row(
+                        "SELECT id FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
+                        params![run_id.as_ref()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+
+                let running_run = transaction.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM workflow_runs
+                        WHERE id = ?1 AND run_status = ?2 AND is_deleted = 0
+                    )",
+                    params![run_id.as_ref(), WorkflowRunStatus::Running.database_value()],
+                    |row| row.get::<_, i64>(0),
+                )? != 0;
+                let pending_node = transaction.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM workflow_node_runs
+                        WHERE run_id = ?1 AND status IN (0, 1) AND is_deleted = 0
+                    )",
+                    params![run_id.as_ref()],
+                    |row| row.get::<_, i64>(0),
+                )? != 0;
+                let running_session = match &task_id {
+                    Some(task_id) => {
+                        transaction.query_row(
+                            "SELECT EXISTS(
+                            SELECT 1 FROM sessions
+                            WHERE task_id = ?1 AND status = ?2 AND is_deleted = 0
+                        )",
+                            params![task_id, SessionStatus::Running.database_value()],
+                            |row| row.get::<_, i64>(0),
+                        )? != 0
+                    }
+                    None => false,
+                };
+                if running_run || pending_node || running_session {
+                    return Ok(DeleteWorkflowRunResult::ActiveRun);
+                }
+
+                transaction.execute(
+                    "UPDATE workflow_node_runs SET updated_at = ?2, is_deleted = 1
+                     WHERE run_id = ?1 AND is_deleted = 0",
+                    params![run_id.as_ref(), deleted_at],
+                )?;
+                transaction.execute(
+                    "UPDATE workflow_runs SET updated_at = ?2, is_deleted = 1
+                     WHERE id = ?1 AND is_deleted = 0",
+                    params![run_id.as_ref(), deleted_at],
+                )?;
+                if let Some(task_id) = &task_id {
+                    transaction.execute(
+                        "UPDATE sessions SET updated_at = ?2, is_deleted = 1
+                         WHERE task_id = ?1 AND is_deleted = 0",
+                        params![task_id, deleted_at],
+                    )?;
+                    transaction.execute(
+                        "UPDATE worktrees SET updated_at = ?2, is_deleted = 1
+                         WHERE task_id = ?1 AND is_deleted = 0",
+                        params![task_id, deleted_at],
+                    )?;
+                    transaction.execute(
+                        "UPDATE tasks SET updated_at = ?2, is_deleted = 1
+                         WHERE id = ?1 AND is_deleted = 0",
+                        params![task_id, deleted_at],
+                    )?;
+                }
+                transaction.commit()?;
+                Ok(DeleteWorkflowRunResult::Deleted)
+            })
             .map_err(workflow_run_repository_error_from_database)
     }
 }

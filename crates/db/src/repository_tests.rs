@@ -5,10 +5,11 @@ use std::{
 };
 
 use ora_application::{
-    ActivateVersionResult, AgentDefinitionRepository, DeleteSnapshotResult, ProjectRepository,
-    ProjectWorkContextRepository, PublishSnapshotResult, RepositoryError, RollbackDraftResult,
-    SessionRepository, SkillImportCommitError, SkillImportUnitOfWork, SkillRepository,
-    TaskRepository, WorkflowRepository, WorkflowRunRepository, WorktreeRepository,
+    ActivateVersionResult, AgentDefinitionRepository, DeleteSnapshotResult,
+    DeleteWorkflowRunResult, ProjectRepository, ProjectWorkContextRepository,
+    PublishSnapshotResult, RepositoryError, RollbackDraftResult, SessionRepository,
+    SkillImportCommitError, SkillImportUnitOfWork, SkillRepository, TaskRepository,
+    WorkflowRepository, WorkflowRunRepository, WorktreeRepository,
 };
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
@@ -717,6 +718,162 @@ fn workflow_run_repository_requires_run_row_before_task_row() {
     assert!(
         result.is_err(),
         "a task referencing a run that does not exist yet must violate the foreign key"
+    );
+}
+
+/// Creates one pending run with its task and worktree, returning their identifiers.
+fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, WorktreeId) {
+    let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
+    let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    workflow_repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    workflow_repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+
+    let run_id = WorkflowRunId::new("run-1");
+    let task_id = TaskId::new("task-1");
+    let worktree_id = WorktreeId::new("worktree-1");
+    let run = WorkflowRun::new(
+        run_id.clone(),
+        workflow.id.clone(),
+        snapshot.id.clone(),
+        WorkflowRunStatus::Pending,
+        Some("{\"current_nodes\":[]}".to_string()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    let task = Task::workflow_run(
+        task_id.clone(),
+        ProjectId::new("project-1"),
+        "Workflow workflow-a 30",
+        TaskStatus::Todo,
+        run_id.clone(),
+        worktree_id.clone(),
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    let worktree = Worktree::new(
+        worktree_id.clone(),
+        task_id.clone(),
+        Some("ora/task-1".to_string()),
+        WorktreeBaseline::recorded("base-commit").unwrap(),
+        WorktreeActivity::Active,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    run_repository.create_run(run, task, worktree).unwrap();
+    (run_id, task_id, worktree_id)
+}
+
+/// Verifies a running run cannot be soft-deleted.
+#[test]
+fn workflow_run_repository_rejects_deleting_running_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunRepository::new(pool.clone());
+    pool.with_connection(|connection| {
+        connection.execute(
+            "UPDATE workflow_runs SET run_status = 1 WHERE id = ?1",
+            rusqlite::params![run_id.as_ref()],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        repository.soft_delete_run(&run_id, 40).unwrap(),
+        DeleteWorkflowRunResult::ActiveRun
+    );
+}
+
+/// Verifies a run with a non-terminal node run cannot be soft-deleted.
+#[test]
+fn workflow_run_repository_rejects_deleting_run_with_pending_node() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunRepository::new(pool.clone());
+    pool.with_connection(|connection| {
+        connection.execute(
+            "INSERT INTO workflow_node_runs (id, run_id, node_id, node_type, status, created_at, updated_at, is_deleted)
+             VALUES ('node-1', ?1, 'start', 'start', 0, 30, 30, 0)",
+            rusqlite::params![run_id.as_ref()],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        repository.soft_delete_run(&run_id, 40).unwrap(),
+        DeleteWorkflowRunResult::ActiveRun
+    );
+}
+
+/// Verifies a run whose task has a running session cannot be soft-deleted.
+#[test]
+fn workflow_run_repository_rejects_deleting_run_with_running_session() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, task_id, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunRepository::new(pool.clone());
+    pool.with_connection(|connection| {
+        connection.execute(
+            "INSERT INTO sessions (id, task_id, agent_cli, agent_session_id, status, created_at, updated_at, is_deleted)
+             VALUES ('session-1', ?1, 'ora-space.opencode', 'provider-1', 0, 30, 30, 0)",
+            rusqlite::params![task_id.as_ref()],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        repository.soft_delete_run(&run_id, 40).unwrap(),
+        DeleteWorkflowRunResult::ActiveRun
+    );
+}
+
+/// Verifies a non-active run soft-deletes with its task, worktree, and stopped sessions.
+#[test]
+fn workflow_run_repository_soft_deletes_run_and_cascades() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, task_id, worktree_id) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunRepository::new(pool.clone());
+    pool.with_connection(|connection| {
+        connection.execute(
+            "INSERT INTO sessions (id, task_id, agent_cli, agent_session_id, status, created_at, updated_at, is_deleted)
+             VALUES ('session-1', ?1, 'ora-space.opencode', 'provider-1', 1, 30, 30, 0)",
+            rusqlite::params![task_id.as_ref()],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        repository.soft_delete_run(&run_id, 40).unwrap(),
+        DeleteWorkflowRunResult::Deleted
+    );
+    assert_eq!(repository.find_run(&run_id).unwrap(), None);
+    let task_repository = SqliteTaskRepository::new(pool.clone());
+    assert_eq!(task_repository.find_task(&task_id).unwrap(), None);
+    let worktree_repository = SqliteWorktreeRepository::new(pool.clone());
+    assert_eq!(
+        worktree_repository.find_worktree(&worktree_id).unwrap(),
+        None
+    );
+    // A second delete reports not-found because the run is no longer visible.
+    assert_eq!(
+        repository.soft_delete_run(&run_id, 50).unwrap(),
+        DeleteWorkflowRunResult::NotFound
     );
 }
 

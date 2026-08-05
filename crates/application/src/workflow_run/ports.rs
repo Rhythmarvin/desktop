@@ -4,6 +4,14 @@ use ora_domain::{
     WorkflowRunSummary, Worktree,
 };
 
+/// Describes the outcome of soft-deleting a workflow run while preserving aggregate invariants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteWorkflowRunResult {
+    Deleted,
+    NotFound,
+    ActiveRun,
+}
+
 /// Defines graph-agnostic persistence operations for the workflow-run aggregate.
 ///
 /// The execution engine computes graph-derived inputs and calls these methods; this layer never
@@ -40,6 +48,17 @@ pub trait WorkflowRunRepository {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError>;
+
+    /// Soft-deletes one run and its cascade in a single transaction after refusing active runs.
+    ///
+    /// A run is active when it is `Running`, has a non-terminal node run, or its task has a
+    /// `Running` session; the cascade covers the run, its node runs, and its task's
+    /// sessions, worktrees, and task row.
+    fn soft_delete_run(
+        &self,
+        run_id: &WorkflowRunId,
+        deleted_at: i64,
+    ) -> Result<DeleteWorkflowRunResult, RepositoryError>;
 }
 
 /// Supplies new workflow run identifiers for create use cases.
