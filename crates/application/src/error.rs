@@ -186,8 +186,23 @@ pub enum ApplicationError {
     WorkflowCannotActivateDraft,
     #[error("cannot delete a snapshot referenced by a workflow run")]
     WorkflowSnapshotInUse,
+    #[error("workflow snapshot not found by id: {snapshot_id}")]
+    WorkflowSnapshotNotFoundById { snapshot_id: String },
+    #[error("workflow has no published snapshot")]
+    WorkflowNoPublishedSnapshot,
+    #[error("cannot use the draft snapshot for a workflow run")]
+    WorkflowRunCannotUseDraftSnapshot,
+    #[error("workflow run not found: {run_id}")]
+    WorkflowRunNotFound { run_id: String },
+    #[error("workflow run is active and cannot be deleted")]
+    WorkflowRunActive,
     #[error("workflow repository operation failed")]
     WorkflowRepository {
+        #[source]
+        source: RepositoryError,
+    },
+    #[error("workflow run repository operation failed")]
+    WorkflowRunRepository {
         #[source]
         source: RepositoryError,
     },
@@ -341,6 +356,11 @@ impl ApplicationError {
     pub(crate) fn from_workflow_repository_error(error: RepositoryError) -> Self {
         Self::WorkflowRepository { source: error }
     }
+
+    /// Maps workflow run repository failures into stable application errors.
+    pub(crate) fn from_workflow_run_repository_error(error: RepositoryError) -> Self {
+        Self::WorkflowRunRepository { source: error }
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +391,10 @@ impl PartialEq for ApplicationError {
             | (WorkflowCannotRollbackToDraft, WorkflowCannotRollbackToDraft)
             | (WorkflowCannotActivateDraft, WorkflowCannotActivateDraft)
             | (WorkflowSnapshotInUse, WorkflowSnapshotInUse)
+            | (WorkflowNoPublishedSnapshot, WorkflowNoPublishedSnapshot)
+            | (WorkflowRunCannotUseDraftSnapshot, WorkflowRunCannotUseDraftSnapshot)
+            | (WorkflowRunActive, WorkflowRunActive)
+            | (WorkflowRunRepository { .. }, WorkflowRunRepository { .. })
             | (SkillRepository { .. }, SkillRepository { .. })
             | (AgentDefinitionRepository { .. }, AgentDefinitionRepository { .. })
             | (ProjectRepository { .. }, ProjectRepository { .. })
@@ -470,6 +494,13 @@ impl PartialEq for ApplicationError {
                     version: right_v,
                 },
             ) => left_wf == right_wf && left_v == right_v,
+            (
+                WorkflowSnapshotNotFoundById { snapshot_id: left },
+                WorkflowSnapshotNotFoundById { snapshot_id: right },
+            ) => left == right,
+            (WorkflowRunNotFound { run_id: left }, WorkflowRunNotFound { run_id: right }) => {
+                left == right
+            }
             (
                 WorkflowVersionAlreadyExists {
                     workflow_id: left_wf,

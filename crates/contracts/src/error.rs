@@ -183,6 +183,10 @@ pub enum PublicError {
     WorkflowCannotRollbackToDraft(EmptyErrorParams),
     WorkflowCannotActivateDraft(EmptyErrorParams),
     WorkflowSnapshotInUse(EmptyErrorParams),
+    WorkflowNoPublishedSnapshot(EmptyErrorParams),
+    WorkflowRunCannotUseDraftSnapshot(EmptyErrorParams),
+    WorkflowRunNotFound(EmptyErrorParams),
+    WorkflowRunActive(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -278,6 +282,10 @@ impl PublicError {
             Self::WorkflowCannotRollbackToDraft(_) => "workflow_cannot_rollback_to_draft",
             Self::WorkflowCannotActivateDraft(_) => "workflow_cannot_activate_draft",
             Self::WorkflowSnapshotInUse(_) => "workflow_snapshot_in_use",
+            Self::WorkflowNoPublishedSnapshot(_) => "workflow_no_published_snapshot",
+            Self::WorkflowRunCannotUseDraftSnapshot(_) => "workflow_run_cannot_use_draft_snapshot",
+            Self::WorkflowRunNotFound(_) => "workflow_run_not_found",
+            Self::WorkflowRunActive(_) => "workflow_run_active",
         }
     }
 }

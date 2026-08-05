@@ -84,10 +84,14 @@ pub struct WorkflowRunSummary {
 // ── Create ──
 
 /// Carries the fields required to create a workflow run against a published snapshot.
+///
+/// The project is required because the run-task owns a `tasks.project_id`; workflows themselves
+/// are not project-scoped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "workflowRun.ts")]
 pub struct CreateWorkflowRunRequest {
+    pub project_id: String,
     pub workflow_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -271,12 +275,13 @@ mod tests {
         );
         assert_serialized_json(
             &CreateWorkflowRunRequest {
+                project_id: "project-1".to_string(),
                 workflow_id: "workflow-1".to_string(),
                 snapshot_id: None,
                 kickoff_input: None,
                 name: None,
             },
-            json!({ "workflowId": "workflow-1" }),
+            json!({ "projectId": "project-1", "workflowId": "workflow-1" }),
         );
         assert_serialized_json(
             &CreateWorkflowRunResponse {

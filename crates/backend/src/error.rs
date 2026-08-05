@@ -317,7 +317,8 @@ impl From<ApplicationError> for BackendError {
             | ApplicationError::TaskDiffCommentRepository { .. }
             | ApplicationError::WorktreeRepository { .. }
             | ApplicationError::SessionRepository { .. }
-            | ApplicationError::WorkflowRepository { .. } => (
+            | ApplicationError::WorkflowRepository { .. }
+            | ApplicationError::WorkflowRunRepository { .. } => (
                 ErrorClassification::Internal,
                 PublicError::InternalError(EmptyErrorParams {}),
                 "application operation failed",
@@ -376,6 +377,31 @@ impl From<ApplicationError> for BackendError {
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowSnapshotInUse(EmptyErrorParams {}),
                 "cannot delete a snapshot referenced by a workflow run",
+            ),
+            ApplicationError::WorkflowSnapshotNotFoundById { .. } => (
+                ErrorClassification::NotFound,
+                PublicError::WorkflowSnapshotNotFound(EmptyErrorParams {}),
+                "workflow snapshot not found by id",
+            ),
+            ApplicationError::WorkflowNoPublishedSnapshot => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowNoPublishedSnapshot(EmptyErrorParams {}),
+                "workflow has no published snapshot",
+            ),
+            ApplicationError::WorkflowRunCannotUseDraftSnapshot => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunCannotUseDraftSnapshot(EmptyErrorParams {}),
+                "cannot use the draft snapshot for a workflow run",
+            ),
+            ApplicationError::WorkflowRunNotFound { .. } => (
+                ErrorClassification::NotFound,
+                PublicError::WorkflowRunNotFound(EmptyErrorParams {}),
+                "workflow run not found",
+            ),
+            ApplicationError::WorkflowRunActive => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunActive(EmptyErrorParams {}),
+                "workflow run is active and cannot be deleted",
             ),
         };
 
@@ -673,6 +699,28 @@ mod tests {
                 ApplicationError::WorkflowSnapshotInUse,
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowSnapshotInUse(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowNoPublishedSnapshot,
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowNoPublishedSnapshot(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowRunCannotUseDraftSnapshot,
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunCannotUseDraftSnapshot(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowRunNotFound {
+                    run_id: "run-1".to_string(),
+                },
+                ErrorClassification::NotFound,
+                PublicError::WorkflowRunNotFound(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowRunActive,
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunActive(EmptyErrorParams {}),
             ),
         ];
 
