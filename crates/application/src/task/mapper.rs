@@ -38,3 +38,28 @@ fn map_task_type(task_type: DomainTaskType) -> ContractTaskType {
         DomainTaskType::WorkflowRun => ContractTaskType::WorkflowRun,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::map_task;
+    use ora_contracts::TaskType as ContractTaskType;
+    use ora_domain::{AuditFields, ProjectId, Task, TaskId, TaskStatus, WorkflowRunId, WorktreeId};
+    use pretty_assertions::assert_eq;
+
+    /// Verifies a workflow-run task maps to the run task type with its run reference intact.
+    #[test]
+    fn maps_run_task_to_contract_type() {
+        let mapped = map_task(Task::workflow_run(
+            TaskId::new("task-1"),
+            ProjectId::new("project-1"),
+            "Workflow run",
+            TaskStatus::Todo,
+            WorkflowRunId::new("run-1"),
+            WorktreeId::new("worktree-1"),
+            AuditFields::new(10, 10, /*is_deleted*/ false),
+        ));
+
+        assert_eq!(mapped.task_type, ContractTaskType::WorkflowRun);
+        assert_eq!(mapped.workflow_run_id, Some("run-1".to_string()));
+    }
+}
