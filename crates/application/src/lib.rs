@@ -67,7 +67,8 @@ pub use workflow::{
     WorkflowIdGenerator, WorkflowRepository,
 };
 pub use workflow_run::{
-    CreateWorkflowRunHandler, DeleteWorkflowRunResult, UuidWorkflowRunIdGenerator,
-    WorkflowRunIdGenerator, WorkflowRunRepository,
+    CreateWorkflowRunHandler, DeleteWorkflowRunHandler, DeleteWorkflowRunResult,
+    GetWorkflowRunHandler, ListWorkflowNodeRunsHandler, ListWorkflowRunsHandler,
+    UuidWorkflowRunIdGenerator, WorkflowRunIdGenerator, WorkflowRunRepository,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

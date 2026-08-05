@@ -1,6 +1,6 @@
 use crate::RepositoryError;
 use ora_domain::{
-    ProjectId, Task, WorkflowNodeRun, WorkflowRun, WorkflowRunDetail, WorkflowRunId,
+    ProjectId, Task, TaskId, WorkflowNodeRun, WorkflowRun, WorkflowRunDetail, WorkflowRunId,
     WorkflowRunSummary, Worktree,
 };
 
@@ -36,6 +36,10 @@ pub trait WorkflowRunRepository {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Option<WorkflowRunDetail>, RepositoryError>;
+
+    /// Loads the run-task identifier so callers can resolve its branch for worktree cleanup
+    /// before the cascade hides the task row.
+    fn find_run_task_id(&self, run_id: &WorkflowRunId) -> Result<Option<TaskId>, RepositoryError>;
 
     /// Lists visible run summaries for a project, ordered by creation time.
     fn list_runs_by_project(

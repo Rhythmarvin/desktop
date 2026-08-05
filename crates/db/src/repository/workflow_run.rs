@@ -1,6 +1,6 @@
 use ora_application::{DeleteWorkflowRunResult, RepositoryError, WorkflowRunRepository};
 use ora_domain::{
-    AuditFields, ProjectId, SessionId, SessionStatus, Task, WorkflowId, WorkflowNodeRun,
+    AuditFields, ProjectId, SessionId, SessionStatus, Task, TaskId, WorkflowId, WorkflowNodeRun,
     WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail, WorkflowRunId,
     WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshotId, Worktree, WorktreeBaseline,
 };
@@ -176,6 +176,21 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError> {
         self.pool
             .with_connection(|connection| list_node_runs(connection, run_id))
+            .map_err(workflow_run_repository_error_from_database)
+    }
+
+    fn find_run_task_id(&self, run_id: &WorkflowRunId) -> Result<Option<TaskId>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let task_id = connection
+                    .query_row(
+                        "SELECT id FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
+                        params![run_id.as_ref()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                Ok(task_id.map(TaskId::new))
+            })
             .map_err(workflow_run_repository_error_from_database)
     }
 

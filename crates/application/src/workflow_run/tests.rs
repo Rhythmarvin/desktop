@@ -8,17 +8,25 @@ use crate::task::{
     TaskWorktreeProvisionerError,
 };
 use crate::workflow::WorkflowRepository;
-use crate::workflow_run::handlers::CreateWorkflowRunHandler;
-use crate::workflow_run::mapper::map_run;
-use crate::workflow_run::{WorkflowRunIdGenerator, WorkflowRunRepository};
+use crate::workflow_run::handlers::{
+    CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
+    ListWorkflowNodeRunsHandler, ListWorkflowRunsHandler,
+};
+use crate::workflow_run::mapper::{map_node_run, map_run, map_run_summary};
+use crate::workflow_run::{DeleteWorkflowRunResult, WorkflowRunIdGenerator, WorkflowRunRepository};
 use crate::worktree::WorktreeIdGenerator;
 use crate::{ApplicationError, Clock, RepositoryError};
-use ora_contracts::{CreateWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
+use ora_contracts::{
+    CreateWorkflowRunRequest, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse,
+    GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest,
+    ListWorkflowNodeRunsResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
+    WorkflowRunStatus as ContractRunStatus,
+};
 use ora_domain::{
     AuditFields, CreatedWorkflow, ProjectId, Task, TaskId, Workflow, WorkflowDetail, WorkflowId,
-    WorkflowNodeRun, WorkflowRun, WorkflowRunDetail, WorkflowRunId, WorkflowRunStatus,
-    WorkflowRunSummary, WorkflowSnapshot, WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
-    Worktree, WorktreeId,
+    WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail,
+    WorkflowRunId, WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshot, WorkflowSnapshotId,
+    WorkflowSummary, WorkflowVersion, Worktree, WorktreeId,
 };
 use pretty_assertions::assert_eq;
 
@@ -254,6 +262,207 @@ fn compensates_worktree_when_persistence_fails() {
     );
 }
 
+/// Verifies a run detail is returned with its display name and node runs.
+#[test]
+fn gets_run_detail() {
+    let run = run_fixture("run-1");
+    let node = node_fixture("node-1", "run-1");
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_detail(WorkflowRunDetail {
+        run: run.clone(),
+        name: "Manual name".to_string(),
+        nodes: vec![node.clone()],
+    });
+    let handler = GetWorkflowRunHandler::new(Arc::new(repository));
+
+    let response = handler
+        .handle(GetWorkflowRunRequest {
+            run_id: "run-1".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        response,
+        GetWorkflowRunResponse {
+            run: map_run(run),
+            name: "Manual name".to_string(),
+            nodes: vec![map_node_run(node)],
+        }
+    );
+}
+
+/// Verifies run summaries are listed for a project in repository order.
+#[test]
+fn lists_runs_by_project() {
+    let summary = WorkflowRunSummary {
+        id: WorkflowRunId::new("run-1"),
+        name: "Manual name".to_string(),
+        project_id: ProjectId::new("project-1"),
+        workflow_id: WorkflowId::new("workflow-a"),
+        status: WorkflowRunStatus::Pending,
+        started_at: None,
+        finished_at: None,
+        created_at: 30,
+    };
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_summaries(vec![summary.clone()]);
+    let handler = ListWorkflowRunsHandler::new(Arc::new(repository));
+
+    let response = handler
+        .handle(ListWorkflowRunsRequest {
+            project_id: "project-1".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        response,
+        ListWorkflowRunsResponse {
+            runs: vec![map_run_summary(summary)],
+        }
+    );
+}
+
+/// Verifies node-run history is returned for one run.
+#[test]
+fn lists_node_runs() {
+    let node = node_fixture("node-1", "run-1");
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_nodes(vec![node.clone()]);
+    let handler = ListWorkflowNodeRunsHandler::new(Arc::new(repository));
+
+    let response = handler
+        .handle(ListWorkflowNodeRunsRequest {
+            run_id: "run-1".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        response,
+        ListWorkflowNodeRunsResponse {
+            nodes: vec![map_node_run(node)],
+        }
+    );
+}
+
+/// Verifies a deleted run's physical worktree is cleaned up through the provisioner.
+#[test]
+fn deletes_run_and_cleans_worktree() {
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_task_id(TaskId::new(TASK_ID));
+    let provisioner = Arc::new(FakeTaskWorktreeProvisioner::default());
+    let handler = DeleteWorkflowRunHandler::new(
+        Arc::new(repository),
+        provisioner.clone(),
+        FixedClock::new(30),
+    );
+
+    let response = handler
+        .handle(DeleteWorkflowRunRequest {
+            run_id: "run-1".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        response,
+        DeleteWorkflowRunResponse {
+            run_id: "run-1".to_string(),
+        }
+    );
+    assert_eq!(
+        provisioner.deleted_requests(),
+        vec![DeleteTaskWorktreeRequest {
+            branch_name: format!("ora/{}", &TASK_ID[..8]),
+            mode: TaskWorktreeDeletionMode::Force,
+        }]
+    );
+}
+
+/// Verifies an active run is rejected without deleting its rows or worktree.
+#[test]
+fn reports_active_run_on_delete() {
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_delete_result(DeleteWorkflowRunResult::ActiveRun);
+    let provisioner = Arc::new(FakeTaskWorktreeProvisioner::default());
+    let handler = DeleteWorkflowRunHandler::new(
+        Arc::new(repository),
+        provisioner.clone(),
+        FixedClock::new(30),
+    );
+
+    let error = handler
+        .handle(DeleteWorkflowRunRequest {
+            run_id: "run-1".to_string(),
+        })
+        .unwrap_err();
+
+    assert_eq!(error, ApplicationError::WorkflowRunActive);
+    assert!(provisioner.deleted_requests().is_empty());
+}
+
+/// Verifies a missing run is reported as not found without any worktree cleanup.
+#[test]
+fn reports_not_found_on_delete() {
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_delete_result(DeleteWorkflowRunResult::NotFound);
+    let provisioner = Arc::new(FakeTaskWorktreeProvisioner::default());
+    let handler = DeleteWorkflowRunHandler::new(
+        Arc::new(repository),
+        provisioner.clone(),
+        FixedClock::new(30),
+    );
+
+    let error = handler
+        .handle(DeleteWorkflowRunRequest {
+            run_id: "run-1".to_string(),
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ApplicationError::WorkflowRunNotFound {
+            run_id: "run-1".to_string(),
+        }
+    );
+    assert!(provisioner.deleted_requests().is_empty());
+}
+
+/// Builds a pending run fixture for handler assertions.
+fn run_fixture(id: &str) -> WorkflowRun {
+    WorkflowRun::new(
+        WorkflowRunId::new(id),
+        WorkflowId::new("workflow-a"),
+        WorkflowSnapshotId::new("snapshot-a"),
+        WorkflowRunStatus::Pending,
+        Some("{\"current_nodes\":[]}".to_string()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    )
+}
+
+/// Builds a succeeded node-run fixture for handler assertions.
+fn node_fixture(id: &str, run_id: &str) -> WorkflowNodeRun {
+    WorkflowNodeRun::new(
+        WorkflowNodeRunId::new(id),
+        WorkflowRunId::new(run_id),
+        "start",
+        "start",
+        None,
+        WorkflowNodeStatus::Succeeded,
+        None,
+        None,
+        None,
+        None,
+        Some(30),
+        Some(31),
+        AuditFields::new(30, 31, /*is_deleted*/ false),
+    )
+}
+
 /// Builds a workflow fixture with an optional published snapshot pointer.
 fn workflow_fixture(published_snapshot_id: Option<&str>) -> Workflow {
     Workflow::new(
@@ -416,11 +625,36 @@ impl WorkflowRepository for MockWorkflowRepository {
 struct MockWorkflowRunRepository {
     fail_next_create: Mutex<Option<RepositoryError>>,
     created: Mutex<Vec<WorkflowRun>>,
+    detail: Mutex<Option<WorkflowRunDetail>>,
+    summaries: Mutex<Vec<WorkflowRunSummary>>,
+    nodes: Mutex<Vec<WorkflowNodeRun>>,
+    run_task_id: Mutex<Option<TaskId>>,
+    delete_result: Mutex<Option<DeleteWorkflowRunResult>>,
 }
 
 impl MockWorkflowRunRepository {
     fn fail_next_create(&self, error: RepositoryError) {
         *self.fail_next_create.lock().unwrap() = Some(error);
+    }
+
+    fn with_detail(&self, detail: WorkflowRunDetail) {
+        *self.detail.lock().unwrap() = Some(detail);
+    }
+
+    fn with_summaries(&self, summaries: Vec<WorkflowRunSummary>) {
+        *self.summaries.lock().unwrap() = summaries;
+    }
+
+    fn with_nodes(&self, nodes: Vec<WorkflowNodeRun>) {
+        *self.nodes.lock().unwrap() = nodes;
+    }
+
+    fn with_task_id(&self, task_id: TaskId) {
+        *self.run_task_id.lock().unwrap() = Some(task_id);
+    }
+
+    fn with_delete_result(&self, result: DeleteWorkflowRunResult) {
+        *self.delete_result.lock().unwrap() = Some(result);
     }
 }
 
@@ -446,21 +680,25 @@ impl WorkflowRunRepository for MockWorkflowRunRepository {
         &self,
         _run_id: &WorkflowRunId,
     ) -> Result<Option<WorkflowRunDetail>, RepositoryError> {
-        unreachable!("create tests never read run detail")
+        Ok(self.detail.lock().unwrap().clone())
     }
 
     fn list_runs_by_project(
         &self,
         _project_id: &ProjectId,
     ) -> Result<Vec<WorkflowRunSummary>, RepositoryError> {
-        unreachable!("create tests never list runs")
+        Ok(self.summaries.lock().unwrap().clone())
     }
 
     fn list_node_runs(
         &self,
         _run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError> {
-        unreachable!("create tests never list node runs")
+        Ok(self.nodes.lock().unwrap().clone())
+    }
+
+    fn find_run_task_id(&self, _run_id: &WorkflowRunId) -> Result<Option<TaskId>, RepositoryError> {
+        Ok(self.run_task_id.lock().unwrap().clone())
     }
 
     fn soft_delete_run(
@@ -468,7 +706,12 @@ impl WorkflowRunRepository for MockWorkflowRunRepository {
         _run_id: &WorkflowRunId,
         _deleted_at: i64,
     ) -> Result<crate::workflow_run::DeleteWorkflowRunResult, RepositoryError> {
-        unreachable!("create tests never delete runs")
+        Ok(self
+            .delete_result
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(DeleteWorkflowRunResult::Deleted))
     }
 }
 

@@ -6,6 +6,9 @@ mod ports;
 #[cfg(test)]
 mod tests;
 
-pub use handlers::CreateWorkflowRunHandler;
+pub use handlers::{
+    CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
+    ListWorkflowNodeRunsHandler, ListWorkflowRunsHandler,
+};
 pub use id_generator::UuidWorkflowRunIdGenerator;
 pub use ports::{DeleteWorkflowRunResult, WorkflowRunIdGenerator, WorkflowRunRepository};
