@@ -8,13 +8,14 @@ use ora_application::{
     ActivateVersionResult, AgentDefinitionRepository, DeleteSnapshotResult, ProjectRepository,
     ProjectWorkContextRepository, PublishSnapshotResult, RepositoryError, RollbackDraftResult,
     SessionRepository, SkillImportCommitError, SkillImportUnitOfWork, SkillRepository,
-    TaskRepository, WorkflowRepository, WorktreeRepository,
+    TaskRepository, WorkflowRepository, WorkflowRunRepository, WorktreeRepository,
 };
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
     ProjectWorkContext, ProjectWorkContextId, ProjectWorkContextSurface, Session, SessionId,
-    SessionStatus, Skill, SkillId, Task, TaskId, TaskStatus, Workflow, WorkflowId,
-    WorkflowSnapshot, WorkflowSnapshotId, Worktree, WorktreeActivity, WorktreeId,
+    SessionStatus, Skill, SkillId, Task, TaskId, TaskStatus, Workflow, WorkflowId, WorkflowRun,
+    WorkflowRunDetail, WorkflowRunId, WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshot,
+    WorkflowSnapshotId, Worktree, WorktreeActivity, WorktreeBaseline, WorktreeId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
@@ -25,7 +26,8 @@ use crate::{
     SqliteAgentDefinitionRepository, SqliteCascadeRepository, SqliteProjectRepository,
     SqliteProjectWorkContextRepository, SqliteSessionRepository, SqliteSkillImportUnitOfWork,
     SqliteSkillRepository, SqliteTaskRepository, SqliteWorkflowRepository,
-    SqliteWorktreeRepository, TimestampSource, default_migration_catalog,
+    SqliteWorkflowRunRepository, SqliteWorktreeRepository, TimestampSource,
+    default_migration_catalog,
 };
 
 /// Verifies catalog repositories use stable identifiers and hide soft-deleted rows.
@@ -603,6 +605,118 @@ fn workflow_repository_snapshot_in_use_guard_yields_to_draft_and_active() {
             .soft_delete_snapshot(&workflow.id, &draft.id, 30)
             .unwrap(),
         DeleteSnapshotResult::DraftSnapshot
+    );
+}
+
+/// Verifies a run is created atomically with its task and worktree and can be read back.
+#[test]
+fn workflow_run_repository_creates_and_reads_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
+    let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    workflow_repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    workflow_repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+
+    let run_id = WorkflowRunId::new("run-1");
+    let task_id = TaskId::new("task-1");
+    let worktree_id = WorktreeId::new("worktree-1");
+    let run = WorkflowRun::new(
+        run_id.clone(),
+        workflow.id.clone(),
+        snapshot.id.clone(),
+        WorkflowRunStatus::Pending,
+        Some("{\"current_nodes\":[]}".to_string()),
+        Some("kickoff".to_string()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    let task = Task::workflow_run(
+        task_id.clone(),
+        ProjectId::new("project-1"),
+        "Workflow workflow-a 30",
+        TaskStatus::Todo,
+        run_id.clone(),
+        worktree_id.clone(),
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    let worktree = Worktree::new(
+        worktree_id.clone(),
+        task_id.clone(),
+        Some("ora/task-1".to_string()),
+        WorktreeBaseline::recorded("base-commit").unwrap(),
+        WorktreeActivity::Active,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+
+    assert_eq!(
+        run_repository
+            .create_run(run.clone(), task.clone(), worktree.clone())
+            .unwrap(),
+        run.clone()
+    );
+    assert_eq!(run_repository.find_run(&run_id).unwrap(), Some(run.clone()));
+    assert_eq!(
+        run_repository.get_run_detail(&run_id).unwrap(),
+        Some(WorkflowRunDetail {
+            run: run.clone(),
+            name: "Workflow workflow-a 30".to_string(),
+            nodes: Vec::new(),
+        })
+    );
+    assert_eq!(
+        run_repository
+            .list_runs_by_project(&ProjectId::new("project-1"))
+            .unwrap(),
+        vec![WorkflowRunSummary {
+            id: run_id.clone(),
+            name: "Workflow workflow-a 30".to_string(),
+            project_id: ProjectId::new("project-1"),
+            workflow_id: workflow.id.clone(),
+            status: WorkflowRunStatus::Pending,
+            started_at: None,
+            finished_at: None,
+            created_at: 30,
+        }]
+    );
+    assert_eq!(run_repository.list_node_runs(&run_id).unwrap(), Vec::new());
+}
+
+/// Verifies the run row must exist before a task can reference it under enforced foreign keys.
+///
+/// This pins the create_run insert order (`workflow_runs → tasks → worktrees`): inserting a task
+/// that references a missing run row must fail, so a correct create_run cannot interleave them.
+#[test]
+fn workflow_run_repository_requires_run_row_before_task_row() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+
+    let result = pool.with_connection(|connection| {
+        connection.execute(
+            "INSERT INTO tasks (id, project_id, title, status, type, workflow_run_id, created_at, updated_at, is_deleted)
+             VALUES ('task-orphan', 'project-1', 'orphan', 0, 1, 'run-missing', 1, 1, 0)",
+            [],
+        )?;
+        Ok(())
+    });
+
+    assert!(
+        result.is_err(),
+        "a task referencing a run that does not exist yet must violate the foreign key"
     );
 }
 

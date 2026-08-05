@@ -9,6 +9,7 @@ mod skill_import;
 mod task;
 mod task_diff;
 mod workflow;
+mod workflow_run;
 mod worktree;
 
 pub use agent_definition::{
@@ -65,4 +66,5 @@ pub use workflow::{
     UpdateDraftResult, UpdateWorkflowHandler, UpdateWorkflowResult, UuidWorkflowIdGenerator,
     WorkflowIdGenerator, WorkflowRepository,
 };
+pub use workflow_run::{UuidWorkflowRunIdGenerator, WorkflowRunIdGenerator, WorkflowRunRepository};
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

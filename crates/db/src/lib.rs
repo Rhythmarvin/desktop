@@ -18,6 +18,7 @@ pub use repository::{
     CascadeDeleteOutcome, RepositoryPool, SqliteAgentDefinitionRepository, SqliteCascadeRepository,
     SqliteProjectRepository, SqliteProjectWorkContextRepository, SqliteSessionRepository,
     SqliteSkillImportUnitOfWork, SqliteSkillRepository, SqliteTaskDiffCommentRepository,
-    SqliteTaskRepository, SqliteWorkflowRepository, SqliteWorktreeRepository,
+    SqliteTaskRepository, SqliteWorkflowRepository, SqliteWorkflowRunRepository,
+    SqliteWorktreeRepository,
 };
 pub use time::{SystemTimestampSource, TimestampSource};
