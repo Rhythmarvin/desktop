@@ -84,8 +84,8 @@ use std::path::Path;
 pub use task::{
     CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest,
     GetTaskResponse, GetTaskWorkspaceRequest, GetTaskWorkspaceResponse, ListTasksRequest,
-    ListTasksResponse, Task, TaskStatus, TaskWorkspace, TaskWorkspaceMode, UpdateTaskRequest,
-    UpdateTaskResponse,
+    ListTasksResponse, Task, TaskStatus, TaskType, TaskWorkspace, TaskWorkspaceMode,
+    UpdateTaskRequest, UpdateTaskResponse,
 };
 pub use task_diff::{
     CommitTaskChangesRequest, CommitTaskChangesResponse, CreateTaskDiffCommentRequest,
