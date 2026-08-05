@@ -46,7 +46,7 @@ pub enum TaskType {
     #[default]
     Default,
     /// A task that backs one workflow run and shares its lifecycle.
-    WorkflowRun,
+    Workflow,
 }
 
 impl TaskType {
@@ -54,7 +54,7 @@ impl TaskType {
     pub fn database_value(self) -> i64 {
         match self {
             Self::Default => 0,
-            Self::WorkflowRun => 1,
+            Self::Workflow => 1,
         }
     }
 
@@ -62,7 +62,7 @@ impl TaskType {
     pub fn from_database_value(value: i64) -> Result<Self, DomainModelError> {
         match value {
             0 => Ok(Self::Default),
-            1 => Ok(Self::WorkflowRun),
+            1 => Ok(Self::Workflow),
             _ => Err(DomainModelError::InvalidTaskType(value)),
         }
     }
@@ -127,7 +127,7 @@ impl Task {
             project_id,
             title: title.into(),
             status,
-            task_type: TaskType::WorkflowRun,
+            task_type: TaskType::Workflow,
             workflow_run_id: Some(workflow_run_id),
             worktree_id: Some(worktree_id),
             audit_fields,

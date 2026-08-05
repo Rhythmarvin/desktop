@@ -20,7 +20,7 @@ pub enum TaskType {
     #[default]
     Default,
     /// A task that backs one workflow run.
-    WorkflowRun,
+    Workflow,
 }
 
 /// Selects the filesystem context used when a task starts an agent session.
@@ -326,6 +326,13 @@ mod tests {
             },
             json!({ "taskId": "task-1" }),
         );
+    }
+
+    /// Verifies the task `type` values are stable and frontend-friendly.
+    #[test]
+    fn serializes_task_type_values() {
+        assert_serialized_json(&TaskType::Default, json!("default"));
+        assert_serialized_json(&TaskType::Workflow, json!("workflow"));
     }
 
     /// Confirms the shared task view remains the single reusable payload across responses.

@@ -35,7 +35,7 @@ fn map_task_status(status: DomainTaskStatus) -> ContractTaskStatus {
 fn map_task_type(task_type: DomainTaskType) -> ContractTaskType {
     match task_type {
         DomainTaskType::Default => ContractTaskType::Default,
-        DomainTaskType::WorkflowRun => ContractTaskType::WorkflowRun,
+        DomainTaskType::Workflow => ContractTaskType::Workflow,
     }
 }
 
@@ -59,7 +59,7 @@ mod tests {
             AuditFields::new(10, 10, /*is_deleted*/ false),
         ));
 
-        assert_eq!(mapped.task_type, ContractTaskType::WorkflowRun);
+        assert_eq!(mapped.task_type, ContractTaskType::Workflow);
         assert_eq!(mapped.workflow_run_id, Some("run-1".to_string()));
     }
 }
