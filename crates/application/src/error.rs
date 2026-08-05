@@ -180,6 +180,8 @@ pub enum ApplicationError {
     WorkflowCannotDeleteDraft,
     #[error("cannot delete the currently active version")]
     WorkflowCannotDeleteActiveVersion,
+    #[error("cannot delete a workflow with live runs")]
+    WorkflowActiveRuns,
     #[error("cannot rollback to the draft snapshot")]
     WorkflowCannotRollbackToDraft,
     #[error("cannot activate the draft snapshot")]
@@ -388,6 +390,7 @@ impl PartialEq for ApplicationError {
             | (WorkflowVersionReserved, WorkflowVersionReserved)
             | (WorkflowCannotDeleteDraft, WorkflowCannotDeleteDraft)
             | (WorkflowCannotDeleteActiveVersion, WorkflowCannotDeleteActiveVersion)
+            | (WorkflowActiveRuns, WorkflowActiveRuns)
             | (WorkflowCannotRollbackToDraft, WorkflowCannotRollbackToDraft)
             | (WorkflowCannotActivateDraft, WorkflowCannotActivateDraft)
             | (WorkflowSnapshotInUse, WorkflowSnapshotInUse)

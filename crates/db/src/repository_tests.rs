@@ -5,7 +5,7 @@ use std::{
 };
 
 use ora_application::{
-    ActivateVersionResult, AgentDefinitionRepository, DeleteSnapshotResult,
+    ActivateVersionResult, AgentDefinitionRepository, DeleteSnapshotResult, DeleteWorkflowResult,
     DeleteWorkflowRunResult, ProjectRepository, ProjectWorkContextRepository,
     PublishSnapshotResult, RepositoryError, RollbackDraftResult, SessionRepository,
     SkillRepository, TaskRepository, WorkflowRepository, WorkflowRunRepository, WorktreeRepository,
@@ -309,9 +309,12 @@ fn workflow_repository_preserves_published_snapshot_timestamps_when_soft_deleted
             cascade_snapshot.created_at,
         )
         .unwrap();
-    repository
-        .soft_delete_workflow(&cascade_workflow.id, /*deleted_at*/ 70)
-        .unwrap();
+    assert_eq!(
+        repository
+            .soft_delete_workflow(&cascade_workflow.id, /*deleted_at*/ 70)
+            .unwrap(),
+        DeleteWorkflowResult::Deleted
+    );
 
     let timestamps = pool
         .with_connection(|connection| {
@@ -844,6 +847,48 @@ fn workflow_run_repository_soft_deletes_run_and_cascades() {
         repository.soft_delete_run(&run_id, 50).unwrap(),
         DeleteWorkflowRunResult::NotFound
     );
+}
+
+/// Verifies a workflow with live runs cannot be deleted, protecting the runs' frozen snapshots.
+#[test]
+fn workflow_repository_rejects_deleting_workflow_with_live_runs() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+    insert_run_referencing_snapshot(&pool, "run-1", &workflow.id, &snapshot.id, false);
+
+    assert_eq!(
+        repository.soft_delete_workflow(&workflow.id, 30).unwrap(),
+        DeleteWorkflowResult::ActiveRuns
+    );
+    assert!(repository.find_workflow(&workflow.id).unwrap().is_some());
+
+    // Once the run is soft-deleted, the workflow can be deleted.
+    pool.with_connection(|connection| {
+        connection.execute(
+            "UPDATE workflow_runs SET is_deleted = 1 WHERE id = 'run-1'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        repository.soft_delete_workflow(&workflow.id, 40).unwrap(),
+        DeleteWorkflowResult::Deleted
+    );
+    assert!(repository.find_workflow(&workflow.id).unwrap().is_none());
 }
 
 /// Inserts one workflow run row referencing a snapshot for delete-guard fixtures.

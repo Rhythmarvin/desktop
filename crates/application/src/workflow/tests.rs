@@ -153,7 +153,7 @@ impl WorkflowRepository for PublishRepository {
         &self,
         _workflow_id: &WorkflowId,
         _deleted_at: i64,
-    ) -> Result<bool, RepositoryError> {
+    ) -> Result<crate::DeleteWorkflowResult, RepositoryError> {
         unreachable!("publish tests never delete workflows")
     }
 

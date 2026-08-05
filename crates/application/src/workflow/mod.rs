@@ -14,6 +14,7 @@ pub use handlers::{
 };
 pub use id_generator::UuidWorkflowIdGenerator;
 pub use ports::{
-    ActivateVersionResult, DeleteSnapshotResult, PublishSnapshotResult, RollbackDraftResult,
-    UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator, WorkflowRepository,
+    ActivateVersionResult, DeleteSnapshotResult, DeleteWorkflowResult, PublishSnapshotResult,
+    RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator,
+    WorkflowRepository,
 };

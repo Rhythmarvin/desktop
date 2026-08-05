@@ -1,6 +1,7 @@
 use ora_application::{
-    ActivateVersionResult, DeleteSnapshotResult, PublishSnapshotResult, RepositoryError,
-    RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult, WorkflowRepository,
+    ActivateVersionResult, DeleteSnapshotResult, DeleteWorkflowResult, PublishSnapshotResult,
+    RepositoryError, RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult,
+    WorkflowRepository,
 };
 use ora_domain::{
     AuditFields, CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot,
@@ -181,7 +182,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         deleted_at: i64,
-    ) -> Result<bool, RepositoryError> {
+    ) -> Result<DeleteWorkflowResult, RepositoryError> {
         self.pool
             .with_connection(|connection| {
                 let transaction =
@@ -196,7 +197,26 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                     .is_some();
 
                 if !exists {
-                    return Ok(false);
+                    return Ok(DeleteWorkflowResult::NotFound);
+                }
+
+                // Runs freeze a snapshot as their graph; deleting a workflow that still has live
+                // runs would orphan those runs' graphs, so it is refused just like the
+                // single-snapshot delete guard.
+                let active_runs = transaction.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM workflow_runs wr
+                        WHERE wr.is_deleted = 0
+                          AND wr.snapshot_id IN (
+                              SELECT id FROM workflow_snapshots
+                              WHERE workflow_id = ?1 AND is_deleted = 0
+                          )
+                    )",
+                    params![workflow_id.as_ref()],
+                    |row| row.get::<_, i64>(0),
+                )? != 0;
+                if active_runs {
+                    return Ok(DeleteWorkflowResult::ActiveRuns);
                 }
 
                 transaction.execute(
@@ -208,7 +228,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                     params![workflow_id.as_ref(), deleted_at],
                 )?;
                 transaction.commit()?;
-                Ok(true)
+                Ok(DeleteWorkflowResult::Deleted)
             })
             .map_err(workflow_repository_error_from_database)
     }

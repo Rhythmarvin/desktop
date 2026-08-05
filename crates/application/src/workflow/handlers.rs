@@ -16,8 +16,9 @@ use crate::workflow::mapper::{
     map_workflow_version,
 };
 use crate::workflow::ports::{
-    ActivateVersionResult, DeleteSnapshotResult, PublishSnapshotResult, RollbackDraftResult,
-    UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator, WorkflowRepository,
+    ActivateVersionResult, DeleteSnapshotResult, DeleteWorkflowResult, PublishSnapshotResult,
+    RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator,
+    WorkflowRepository,
 };
 use crate::{ApplicationError, Clock};
 
@@ -244,10 +245,16 @@ where
             .soft_delete_workflow(&workflow_id, self.clock.now_timestamp_millis())
             .map_err(ApplicationError::from_workflow_repository_error)?;
 
-        if !deleted {
-            return Err(ApplicationError::WorkflowNotFound {
-                workflow_id: workflow_id.to_string(),
-            });
+        match deleted {
+            DeleteWorkflowResult::Deleted => {}
+            DeleteWorkflowResult::NotFound => {
+                return Err(ApplicationError::WorkflowNotFound {
+                    workflow_id: workflow_id.to_string(),
+                });
+            }
+            DeleteWorkflowResult::ActiveRuns => {
+                return Err(ApplicationError::WorkflowActiveRuns);
+            }
         }
 
         Ok(DeleteWorkflowResponse {

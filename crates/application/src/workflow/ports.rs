@@ -15,6 +15,14 @@ pub enum DeleteSnapshotResult {
     SnapshotInUse,
 }
 
+/// Describes the outcome of deleting a workflow while preserving aggregate invariants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteWorkflowResult {
+    Deleted,
+    NotFound,
+    ActiveRuns,
+}
+
 /// Describes the outcome of replacing a workflow's editable fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateWorkflowResult {
@@ -93,12 +101,12 @@ pub trait WorkflowRepository {
     ) -> Result<UpdateWorkflowResult, RepositoryError>;
 
     /// Marks a visible workflow deleted and cascades the soft-delete to all its snapshots
-    /// within a single transaction.
+    /// within a single transaction, after refusing workflows whose snapshots a live run freezes.
     fn soft_delete_workflow(
         &self,
         workflow_id: &WorkflowId,
         deleted_at: i64,
-    ) -> Result<bool, RepositoryError>;
+    ) -> Result<DeleteWorkflowResult, RepositoryError>;
 
     /// Loads one visible snapshot by workflow and version string (works for both `"draft"`
     /// and published version identifiers).

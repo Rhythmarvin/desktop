@@ -363,6 +363,11 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorkflowCannotDeleteActiveVersion(EmptyErrorParams {}),
                 "cannot delete the active workflow version",
             ),
+            ApplicationError::WorkflowActiveRuns => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowActiveRuns(EmptyErrorParams {}),
+                "cannot delete a workflow with live runs",
+            ),
             ApplicationError::WorkflowCannotRollbackToDraft => (
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowCannotRollbackToDraft(EmptyErrorParams {}),
@@ -684,6 +689,11 @@ mod tests {
                 ApplicationError::WorkflowCannotDeleteActiveVersion,
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowCannotDeleteActiveVersion(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowActiveRuns,
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowActiveRuns(EmptyErrorParams {}),
             ),
             (
                 ApplicationError::WorkflowCannotRollbackToDraft,
