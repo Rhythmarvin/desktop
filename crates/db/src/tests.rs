@@ -53,6 +53,8 @@ fn bootstraps_empty_database_with_default_catalog() {
             "tasks".to_string(),
             "virtual_entries".to_string(),
             "virtual_folders".to_string(),
+            "workflow_node_runs".to_string(),
+            "workflow_runs".to_string(),
             "workflow_snapshots".to_string(),
             "workflows".to_string(),
             "worktrees".to_string(),
