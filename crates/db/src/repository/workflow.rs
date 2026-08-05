@@ -229,6 +229,22 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
+    fn find_snapshot_by_id(
+        &self,
+        workflow_id: &WorkflowId,
+        snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE id = ?1 AND workflow_id = ?2 AND is_deleted = 0",
+                )?;
+                let mut rows = statement.query(params![snapshot_id.as_ref(), workflow_id.as_ref()])?;
+                rows.next()?.map(map_snapshot_row).transpose()
+            })
+            .map_err(workflow_repository_error_from_database)
+    }
+
     fn list_versions(
         &self,
         workflow_id: &WorkflowId,
@@ -546,6 +562,20 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                 }
                 if workflow.published_snapshot_id.as_ref() == Some(&snapshot.id) {
                     return Ok(DeleteSnapshotResult::ActiveSnapshot);
+                }
+
+                // A run pins its snapshot as the frozen graph across its viewable and restartable
+                // lifecycle, so a snapshot referenced by any live run must not be soft-deleted.
+                let referenced = transaction.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM workflow_runs
+                        WHERE snapshot_id = ?1 AND is_deleted = 0
+                    )",
+                    params![snapshot.id.as_ref()],
+                    |row| row.get::<_, i64>(0),
+                )? != 0;
+                if referenced {
+                    return Ok(DeleteSnapshotResult::SnapshotInUse);
                 }
 
                 transaction.execute(

@@ -372,6 +372,11 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorkflowCannotActivateDraft(EmptyErrorParams {}),
                 "cannot activate the draft workflow snapshot",
             ),
+            ApplicationError::WorkflowSnapshotInUse => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowSnapshotInUse(EmptyErrorParams {}),
+                "cannot delete a snapshot referenced by a workflow run",
+            ),
         };
 
         Self {
@@ -663,6 +668,11 @@ mod tests {
                 ApplicationError::WorkflowCannotActivateDraft,
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowCannotActivateDraft(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowSnapshotInUse,
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowSnapshotInUse(EmptyErrorParams {}),
             ),
         ];
 

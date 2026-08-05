@@ -232,6 +232,14 @@ impl WorkflowRepository for PublishRepository {
     ) -> Result<DeleteSnapshotResult, RepositoryError> {
         unreachable!("publish tests never delete snapshots")
     }
+
+    fn find_snapshot_by_id(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("publish tests never resolve snapshots by id")
+    }
 }
 
 /// Returns the draft copied by publish-handler tests.

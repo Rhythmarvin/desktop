@@ -184,6 +184,8 @@ pub enum ApplicationError {
     WorkflowCannotRollbackToDraft,
     #[error("cannot activate the draft snapshot")]
     WorkflowCannotActivateDraft,
+    #[error("cannot delete a snapshot referenced by a workflow run")]
+    WorkflowSnapshotInUse,
     #[error("workflow repository operation failed")]
     WorkflowRepository {
         #[source]
@@ -368,6 +370,7 @@ impl PartialEq for ApplicationError {
             | (WorkflowCannotDeleteActiveVersion, WorkflowCannotDeleteActiveVersion)
             | (WorkflowCannotRollbackToDraft, WorkflowCannotRollbackToDraft)
             | (WorkflowCannotActivateDraft, WorkflowCannotActivateDraft)
+            | (WorkflowSnapshotInUse, WorkflowSnapshotInUse)
             | (SkillRepository { .. }, SkillRepository { .. })
             | (AgentDefinitionRepository { .. }, AgentDefinitionRepository { .. })
             | (ProjectRepository { .. }, ProjectRepository { .. })

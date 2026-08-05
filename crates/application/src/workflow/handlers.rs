@@ -700,6 +700,7 @@ where
             DeleteSnapshotResult::ActiveSnapshot => {
                 Err(ApplicationError::WorkflowCannotDeleteActiveVersion)
             }
+            DeleteSnapshotResult::SnapshotInUse => Err(ApplicationError::WorkflowSnapshotInUse),
         }
     }
 }

@@ -465,6 +465,173 @@ fn workflow_repository_serializes_concurrent_version_conflicts() {
     );
 }
 
+/// Verifies a snapshot resolves by identifier only within its owning workflow.
+#[test]
+fn workflow_repository_finds_snapshot_by_id_within_workflow() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+
+    assert_eq!(
+        repository
+            .find_snapshot_by_id(&workflow.id, &snapshot.id)
+            .unwrap(),
+        Some(snapshot.clone())
+    );
+    // A snapshot belonging to another workflow must not resolve under this workflow's scope.
+    assert_eq!(
+        repository
+            .find_snapshot_by_id(&WorkflowId::new("workflow-other"), &snapshot.id)
+            .unwrap(),
+        None
+    );
+}
+
+/// Verifies a published snapshot referenced by a live run cannot be soft-deleted.
+#[test]
+fn workflow_repository_rejects_deleting_snapshot_referenced_by_live_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+    // Publishing a second snapshot moves the active pointer off `snapshot`, so the
+    // run-reference guard (not the active-version guard) decides its deletion.
+    let newer = published_snapshot("snapshot-b", &workflow.id, "v2", &draft.graph, 25);
+    repository
+        .publish_snapshot(&workflow.id, newer.id, newer.version, newer.created_at)
+        .unwrap();
+
+    insert_run_referencing_snapshot(&pool, "run-1", &workflow.id, &snapshot.id, false);
+
+    assert_eq!(
+        repository
+            .soft_delete_snapshot(&workflow.id, &snapshot.id, 30)
+            .unwrap(),
+        DeleteSnapshotResult::SnapshotInUse
+    );
+}
+
+/// Verifies a snapshot referenced only by a soft-deleted run remains deletable.
+#[test]
+fn workflow_repository_deletes_snapshot_referenced_only_by_soft_deleted_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+    let newer = published_snapshot("snapshot-b", &workflow.id, "v2", &draft.graph, 25);
+    repository
+        .publish_snapshot(&workflow.id, newer.id, newer.version, newer.created_at)
+        .unwrap();
+
+    insert_run_referencing_snapshot(&pool, "run-1", &workflow.id, &snapshot.id, true);
+
+    assert_eq!(
+        repository
+            .soft_delete_snapshot(&workflow.id, &snapshot.id, 30)
+            .unwrap(),
+        DeleteSnapshotResult::Deleted(snapshot)
+    );
+}
+
+/// Verifies the draft and active-version guards run before the run-reference guard.
+#[test]
+fn workflow_repository_snapshot_in_use_guard_yields_to_draft_and_active() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
+    repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-a", &workflow.id, "v1", &draft.graph, 20);
+    repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+    repository
+        .activate_version(&workflow.id, &snapshot.id, 25)
+        .unwrap();
+    insert_run_referencing_snapshot(&pool, "run-1", &workflow.id, &snapshot.id, false);
+
+    // The active-version guard takes precedence over the run-reference guard.
+    assert_eq!(
+        repository
+            .soft_delete_snapshot(&workflow.id, &snapshot.id, 30)
+            .unwrap(),
+        DeleteSnapshotResult::ActiveSnapshot
+    );
+    // The draft guard also takes precedence regardless of run references.
+    assert_eq!(
+        repository
+            .soft_delete_snapshot(&workflow.id, &draft.id, 30)
+            .unwrap(),
+        DeleteSnapshotResult::DraftSnapshot
+    );
+}
+
+/// Inserts one workflow run row referencing a snapshot for delete-guard fixtures.
+fn insert_run_referencing_snapshot(
+    pool: &RepositoryPool,
+    run_id: &str,
+    workflow_id: &WorkflowId,
+    snapshot_id: &WorkflowSnapshotId,
+    is_deleted: bool,
+) {
+    pool.with_connection(|connection| {
+        connection
+            .execute(
+                "INSERT INTO workflow_runs (id, workflow_id, snapshot_id, run_status, state, created_at, updated_at, is_deleted)
+                 VALUES (?1, ?2, ?3, 0, ?5, 10, 10, ?4)",
+                rusqlite::params![
+                    run_id,
+                    workflow_id.as_ref(),
+                    snapshot_id.as_ref(),
+                    i64::from(is_deleted),
+                    "{\"current_nodes\":[]}",
+                ],
+            )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
 /// Builds a workflow and its required draft snapshot for repository integration tests.
 fn workflow_with_draft(id: &str, graph: &str, created_at: i64) -> (Workflow, WorkflowSnapshot) {
     let workflow_id = WorkflowId::new(id);

@@ -12,6 +12,7 @@ pub enum DeleteSnapshotResult {
     SnapshotNotFound,
     DraftSnapshot,
     ActiveSnapshot,
+    SnapshotInUse,
 }
 
 /// Describes the outcome of replacing a workflow's editable fields.
@@ -105,6 +106,14 @@ pub trait WorkflowRepository {
         &self,
         workflow_id: &WorkflowId,
         version: &str,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError>;
+
+    /// Loads one visible snapshot by identifier, constrained to the owning workflow so a caller
+    /// can distinguish "missing or not in this workflow" from a snapshot of another workflow.
+    fn find_snapshot_by_id(
+        &self,
+        workflow_id: &WorkflowId,
+        snapshot_id: &WorkflowSnapshotId,
     ) -> Result<Option<WorkflowSnapshot>, RepositoryError>;
 
     /// Lists published (non-draft, non-deleted) version summaries for a workflow,

@@ -182,6 +182,7 @@ pub enum PublicError {
     WorkflowCannotDeleteActiveVersion(EmptyErrorParams),
     WorkflowCannotRollbackToDraft(EmptyErrorParams),
     WorkflowCannotActivateDraft(EmptyErrorParams),
+    WorkflowSnapshotInUse(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -276,6 +277,7 @@ impl PublicError {
             Self::WorkflowCannotDeleteActiveVersion(_) => "workflow_cannot_delete_active_version",
             Self::WorkflowCannotRollbackToDraft(_) => "workflow_cannot_rollback_to_draft",
             Self::WorkflowCannotActivateDraft(_) => "workflow_cannot_activate_draft",
+            Self::WorkflowSnapshotInUse(_) => "workflow_snapshot_in_use",
         }
     }
 }
