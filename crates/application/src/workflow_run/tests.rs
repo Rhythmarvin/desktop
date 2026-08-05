@@ -262,6 +262,66 @@ fn compensates_worktree_when_persistence_fails() {
     );
 }
 
+/// Verifies a worktree provisioning failure aborts creation before any persistence.
+#[test]
+fn reports_provisioning_failure() {
+    let workflow = workflow_fixture(Some("snapshot-a"));
+    let snapshot = snapshot_fixture("snapshot-a", "v1");
+    let workflow_repository = MockWorkflowRepository::with(workflow, vec![snapshot]);
+    let run_repository = Arc::new(MockWorkflowRunRepository::default());
+    let provisioner = Arc::new(FakeTaskWorktreeProvisioner::default());
+    provisioner.fail_next_create(TaskWorktreeProvisionerError::operation_failed(
+        std::io::Error::other("failed to create linked worktree"),
+    ));
+    let handler = CreateWorkflowRunHandler::new(
+        Arc::new(workflow_repository),
+        run_repository.clone(),
+        FixedRunIdGenerator::new("run-1"),
+        FixedTaskIdGenerator::new(TASK_ID),
+        FixedWorktreeIdGenerator::new("worktree-1"),
+        provisioner.clone(),
+        PathBuf::from(WORK_DIR),
+        FixedClock::new(30),
+    );
+
+    let error = handler
+        .handle(CreateWorkflowRunRequest {
+            project_id: "project-1".to_string(),
+            workflow_id: "workflow-a".to_string(),
+            snapshot_id: Some("snapshot-a".to_string()),
+            kickoff_input: None,
+            name: None,
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ApplicationError::TaskWorktreeProvisioner { .. }
+    ));
+    // No run rows were persisted and no compensation delete ran for a never-created worktree.
+    assert!(run_repository.created_runs().is_empty());
+    assert!(provisioner.deleted_requests().is_empty());
+}
+
+/// Verifies a missing run detail reports not found.
+#[test]
+fn reports_not_found_on_get() {
+    let handler = GetWorkflowRunHandler::new(Arc::new(MockWorkflowRunRepository::default()));
+
+    let error = handler
+        .handle(GetWorkflowRunRequest {
+            run_id: "run-missing".to_string(),
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ApplicationError::WorkflowRunNotFound {
+            run_id: "run-missing".to_string(),
+        }
+    );
+}
+
 /// Verifies a run detail is returned with its display name and node runs.
 #[test]
 fn gets_run_detail() {
@@ -637,6 +697,10 @@ impl MockWorkflowRunRepository {
         *self.fail_next_create.lock().unwrap() = Some(error);
     }
 
+    fn created_runs(&self) -> Vec<WorkflowRun> {
+        self.created.lock().unwrap().clone()
+    }
+
     fn with_detail(&self, detail: WorkflowRunDetail) {
         *self.detail.lock().unwrap() = Some(detail);
     }
@@ -730,6 +794,10 @@ impl FakeTaskWorktreeProvisioner {
 
     fn deleted_requests(&self) -> Vec<DeleteTaskWorktreeRequest> {
         self.deleted_requests.borrow().clone()
+    }
+
+    fn fail_next_create(&self, error: TaskWorktreeProvisionerError) {
+        *self.next_create_error.borrow_mut() = Some(error);
     }
 }
 

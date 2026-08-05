@@ -863,6 +863,12 @@ fn workflow_run_repository_soft_deletes_run_and_cascades() {
         DeleteWorkflowRunResult::Deleted
     );
     assert_eq!(repository.find_run(&run_id).unwrap(), None);
+    assert_eq!(
+        repository
+            .list_runs_by_project(&ProjectId::new("project-1"))
+            .unwrap(),
+        Vec::new()
+    );
     let task_repository = SqliteTaskRepository::new(pool.clone());
     assert_eq!(task_repository.find_task(&task_id).unwrap(), None);
     let worktree_repository = SqliteWorktreeRepository::new(pool.clone());
