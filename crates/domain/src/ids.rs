@@ -52,3 +52,8 @@ define_id!(
     WorkflowSnapshotId,
     "Identifies a persisted workflow snapshot."
 );
+define_id!(WorkflowRunId, "Identifies a persisted workflow run.");
+define_id!(
+    WorkflowNodeRunId,
+    "Identifies a persisted workflow node run."
+);
