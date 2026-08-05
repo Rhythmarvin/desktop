@@ -58,6 +58,7 @@ impl FrontendEndpoint {
         match self.operation_name {
             "listDirectory" => FILE_SYSTEM_DIRECTORY_QUERY_PARAMS,
             "getTaskDiff" => TASK_DIFF_QUERY_PARAMS,
+            "listWorkflowRuns" => WORKFLOW_RUN_PROJECT_QUERY_PARAMS,
             _ => NO_QUERY_PARAMS,
         }
     }
@@ -119,6 +120,9 @@ pub const WORKFLOW_ROLLBACK_PATH: &str = "/api/workflows/{workflowId}/rollback";
 pub const WORKFLOW_ACTIVATE_PATH: &str = "/api/workflows/{workflowId}/activate";
 pub const WORKFLOW_VERSIONS_PATH: &str = "/api/workflows/{workflowId}/versions";
 pub const WORKFLOW_VERSION_PATH: &str = "/api/workflows/{workflowId}/versions/{version}";
+pub const WORKFLOW_RUNS_PATH: &str = "/api/workflow-runs";
+pub const WORKFLOW_RUN_PATH: &str = "/api/workflow-runs/{runId}";
+pub const WORKFLOW_RUN_NODES_PATH: &str = "/api/workflow-runs/{runId}/nodes";
 
 const PROJECT_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
     rust_field_name: "project_id",
@@ -156,6 +160,14 @@ const WORKFLOW_VERSION_PATH_PARAM: FrontendPathParam = FrontendPathParam {
     rust_field_name: "version",
     wire_name: "version",
 };
+const WORKFLOW_RUN_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
+    rust_field_name: "run_id",
+    wire_name: "runId",
+};
+const WORKFLOW_RUN_PROJECT_QUERY_PARAM: FrontendQueryParam = FrontendQueryParam {
+    rust_field_name: "project_id",
+    wire_name: "projectId",
+};
 const FILE_SYSTEM_DIRECTORY_PATH_QUERY_PARAM: FrontendQueryParam = FrontendQueryParam {
     rust_field_name: "path",
     wire_name: "path",
@@ -175,6 +187,7 @@ const AGENT_NAMESPACE: &str = "agent";
 const FILE_SYSTEM_NAMESPACE: &str = "fileSystem";
 const GIT_NAMESPACE: &str = "gitIdentity";
 const WORKFLOW_NAMESPACE: &str = "workflow";
+const WORKFLOW_RUN_NAMESPACE: &str = "workflowRun";
 
 const PROJECT_PATH_PARAMS: &[FrontendPathParam] = &[PROJECT_ID_PATH_PARAM];
 const TASK_PATH_PARAMS: &[FrontendPathParam] = &[TASK_ID_PATH_PARAM];
@@ -187,6 +200,9 @@ const NO_PATH_PARAMS: &[FrontendPathParam] = &[];
 const WORKFLOW_PATH_PARAMS: &[FrontendPathParam] = &[WORKFLOW_ID_PATH_PARAM];
 const WORKFLOW_VERSION_PATH_PARAMS: &[FrontendPathParam] =
     &[WORKFLOW_ID_PATH_PARAM, WORKFLOW_VERSION_PATH_PARAM];
+const WORKFLOW_RUN_PATH_PARAMS: &[FrontendPathParam] = &[WORKFLOW_RUN_ID_PATH_PARAM];
+const WORKFLOW_RUN_PROJECT_QUERY_PARAMS: &[FrontendQueryParam] =
+    &[WORKFLOW_RUN_PROJECT_QUERY_PARAM];
 const FILE_SYSTEM_DIRECTORY_QUERY_PARAMS: &[FrontendQueryParam] =
     &[FILE_SYSTEM_DIRECTORY_PATH_QUERY_PARAM];
 const TASK_DIFF_QUERY_PARAMS: &[FrontendQueryParam] = &[TASK_DIFF_SCOPE_QUERY_PARAM];
@@ -941,6 +957,61 @@ const FRONTEND_ENDPOINTS: &[FrontendEndpoint] = &[
         request_type: "DeleteSnapshotRequest",
         response_type: "DeleteSnapshotResponse",
         path_params: WORKFLOW_VERSION_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "createWorkflowRun",
+        namespace: WORKFLOW_RUN_NAMESPACE,
+        member_name: "create",
+        method: FrontendHttpMethod::Post,
+        path_template: WORKFLOW_RUNS_PATH,
+        request_type: "CreateWorkflowRunRequest",
+        response_type: "CreateWorkflowRunResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: true,
+    },
+    FrontendEndpoint {
+        operation_name: "getWorkflowRun",
+        namespace: WORKFLOW_RUN_NAMESPACE,
+        member_name: "get",
+        method: FrontendHttpMethod::Get,
+        path_template: WORKFLOW_RUN_PATH,
+        request_type: "GetWorkflowRunRequest",
+        response_type: "GetWorkflowRunResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "listWorkflowRuns",
+        namespace: WORKFLOW_RUN_NAMESPACE,
+        member_name: "list",
+        method: FrontendHttpMethod::Get,
+        path_template: WORKFLOW_RUNS_PATH,
+        request_type: "ListWorkflowRunsRequest",
+        response_type: "ListWorkflowRunsResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "listWorkflowNodeRuns",
+        namespace: WORKFLOW_RUN_NAMESPACE,
+        member_name: "listNodeRuns",
+        method: FrontendHttpMethod::Get,
+        path_template: WORKFLOW_RUN_NODES_PATH,
+        request_type: "ListWorkflowNodeRunsRequest",
+        response_type: "ListWorkflowNodeRunsResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "deleteWorkflowRun",
+        namespace: WORKFLOW_RUN_NAMESPACE,
+        member_name: "delete",
+        method: FrontendHttpMethod::Delete,
+        path_template: WORKFLOW_RUN_PATH,
+        request_type: "DeleteWorkflowRunRequest",
+        response_type: "DeleteWorkflowRunResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
         has_json_body: false,
     },
 ];

@@ -412,6 +412,22 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "GetVersionResponse"
         | "DeleteSnapshotRequest"
         | "DeleteSnapshotResponse" => "workflow",
+        // workflowRun
+        "WorkflowRunStatus"
+        | "WorkflowNodeStatus"
+        | "WorkflowRun"
+        | "WorkflowNodeRun"
+        | "WorkflowRunSummary"
+        | "CreateWorkflowRunRequest"
+        | "CreateWorkflowRunResponse"
+        | "GetWorkflowRunRequest"
+        | "GetWorkflowRunResponse"
+        | "ListWorkflowRunsRequest"
+        | "ListWorkflowRunsResponse"
+        | "ListWorkflowNodeRunsRequest"
+        | "ListWorkflowNodeRunsResponse"
+        | "DeleteWorkflowRunRequest"
+        | "DeleteWorkflowRunResponse" => "workflowRun",
         // fileSystem
         "ListDirectoryRequest"
         | "ListDirectoryResponse"

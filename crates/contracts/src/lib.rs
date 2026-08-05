@@ -13,6 +13,7 @@ mod skill_import;
 mod task;
 mod task_diff;
 mod workflow;
+mod workflow_run;
 
 pub use agent::{
     Agent, CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse,
@@ -106,6 +107,13 @@ pub use workflow::{
     UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse, Workflow, WorkflowSnapshot,
     WorkflowSummary, WorkflowVersion,
 };
+pub use workflow_run::{
+    CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest,
+    DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse,
+    ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsRequest,
+    ListWorkflowRunsResponse, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun, WorkflowRunStatus,
+    WorkflowRunSummary,
+};
 
 /// Exports every contract DTO family into the shared TypeScript package for frontend consumers.
 ///
@@ -129,6 +137,7 @@ pub fn export_typescript_bindings_to(
     task::export(&config)?;
     task_diff::export(&config)?;
     workflow::export(&config)?;
+    workflow_run::export(&config)?;
 
     Ok(())
 }
