@@ -73,9 +73,10 @@ pub use workflow::{
     UpdateWorkflowResult, UuidWorkflowIdGenerator, WorkflowIdGenerator, WorkflowRepository,
 };
 pub use workflow_run::{
-    CreateWorkflowRunHandler, DeleteWorkflowRunHandler, DeleteWorkflowRunResult,
-    GetWorkflowRunHandler, ListWorkflowNodeRunsHandler, ListWorkflowRunsByWorkflowHandler,
-    ListWorkflowRunsHandler, UuidWorkflowRunIdGenerator, WorkflowRunIdGenerator,
+    AgentConfig, AgentExecutor, AgentSkill, CreateWorkflowRunHandler, DeleteWorkflowRunHandler,
+    DeleteWorkflowRunResult, GetWorkflowRunHandler, GraphError, ListWorkflowNodeRunsHandler,
+    ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler, NodeType, UnknownNodeType,
+    UuidWorkflowRunIdGenerator, WorkflowGraph, WorkflowGraphNode, WorkflowRunIdGenerator,
     WorkflowRunRepository,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};
