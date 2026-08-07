@@ -1,8 +1,8 @@
 use crate::workflow_run::engine::node_type::{NodeType, UnknownNodeType};
+use petgraph::Direction;
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -175,7 +175,11 @@ impl WireAgentConfig {
                     .unwrap_or_default(),
             },
             role_id: self.role_id,
-            skills: self.skills.into_iter().map(WireAgentSkill::into_model).collect(),
+            skills: self
+                .skills
+                .into_iter()
+                .map(WireAgentSkill::into_model)
+                .collect(),
             prompt: self.prompt.unwrap_or_default(),
         }
     }
@@ -202,19 +206,21 @@ impl WorkflowGraph {
         let mut graph = DiGraph::<WorkflowGraphNode, ()>::new();
         let mut index_by_id = HashMap::new();
         for wire_node in wire_nodes {
-            let id = wire_node
-                .id
-                .ok_or_else(|| GraphError::InvalidNode { reason: "missing id".into() })?;
+            let id = wire_node.id.ok_or_else(|| GraphError::InvalidNode {
+                reason: "missing id".into(),
+            })?;
             if index_by_id.contains_key(&id) {
                 return Err(GraphError::DuplicateNodeId { node_id: id });
             }
-            let data = wire_node
-                .data
-                .ok_or_else(|| GraphError::InvalidNode { reason: format!("node {id} has no data") })?;
+            let data = wire_node.data.ok_or_else(|| GraphError::InvalidNode {
+                reason: format!("node {id} has no data"),
+            })?;
             let node_type = data
                 .node_type
                 .as_deref()
-                .ok_or_else(|| GraphError::InvalidNode { reason: format!("node {id} has no node type") })?
+                .ok_or_else(|| GraphError::InvalidNode {
+                    reason: format!("node {id} has no node type"),
+                })?
                 .parse::<NodeType>()
                 .map_err(|UnknownNodeType(value)| GraphError::UnknownNodeType {
                     node_id: id.clone(),
@@ -240,12 +246,20 @@ impl WorkflowGraph {
             let target = target.as_deref().ok_or_else(|| GraphError::DanglingEdge {
                 node_id: source.to_string(),
             })?;
-            let source_index = index_by_id.get(source).copied().ok_or_else(|| GraphError::DanglingEdge {
-                node_id: source.to_string(),
-            })?;
-            let target_index = index_by_id.get(target).copied().ok_or_else(|| GraphError::DanglingEdge {
-                node_id: target.to_string(),
-            })?;
+            let source_index =
+                index_by_id
+                    .get(source)
+                    .copied()
+                    .ok_or_else(|| GraphError::DanglingEdge {
+                        node_id: source.to_string(),
+                    })?;
+            let target_index =
+                index_by_id
+                    .get(target)
+                    .copied()
+                    .ok_or_else(|| GraphError::DanglingEdge {
+                        node_id: target.to_string(),
+                    })?;
             graph.add_edge(source_index, target_index, ());
         }
 
@@ -263,7 +277,11 @@ impl WorkflowGraph {
             .enumerate()
             .map(|(rank, index)| (index, rank))
             .collect();
-        Ok(Self { graph, index_by_id, topo_rank })
+        Ok(Self {
+            graph,
+            index_by_id,
+            topo_rank,
+        })
     }
 
     /// Returns the unique start node, if the graph has one (parse guarantees at most one).
@@ -386,6 +404,9 @@ impl WorkflowGraph {
     fn order_by_topology(&self, indices: HashSet<NodeIndex>) -> Vec<&WorkflowGraphNode> {
         let mut indices: Vec<_> = indices.into_iter().collect();
         indices.sort_by_key(|index| self.topo_rank.get(index).copied().unwrap_or(usize::MAX));
-        indices.into_iter().map(|index| &self.graph[index]).collect()
+        indices
+            .into_iter()
+            .map(|index| &self.graph[index])
+            .collect()
     }
 }

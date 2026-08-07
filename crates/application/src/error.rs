@@ -583,9 +583,10 @@ impl PartialEq for ApplicationError {
             (WorkflowRunGraphParse(_), WorkflowRunGraphParse(_))
             | (WorkflowRunValidation(_), WorkflowRunValidation(_))
             | (WorkflowRunNotRestartable, WorkflowRunNotRestartable) => true,
-            (WorkflowSkillNotFound { skill_id: left }, WorkflowSkillNotFound { skill_id: right }) => {
-                left == right
-            }
+            (
+                WorkflowSkillNotFound { skill_id: left },
+                WorkflowSkillNotFound { skill_id: right },
+            ) => left == right,
             (WorkflowRoleNotFound { role_id: left }, WorkflowRoleNotFound { role_id: right }) => {
                 left == right
             }

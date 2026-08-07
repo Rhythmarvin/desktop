@@ -125,9 +125,18 @@ fn parses_empty_graph_as_legal() {
 
 #[test]
 fn rejects_invalid_json() {
-    assert_eq!(WorkflowGraph::parse("not json").unwrap_err(), GraphError::InvalidJson);
-    assert_eq!(WorkflowGraph::parse("[]").unwrap_err(), GraphError::InvalidJson);
-    assert_eq!(WorkflowGraph::parse("\"text\"").unwrap_err(), GraphError::InvalidJson);
+    assert_eq!(
+        WorkflowGraph::parse("not json").unwrap_err(),
+        GraphError::InvalidJson
+    );
+    assert_eq!(
+        WorkflowGraph::parse("[]").unwrap_err(),
+        GraphError::InvalidJson
+    );
+    assert_eq!(
+        WorkflowGraph::parse("\"text\"").unwrap_err(),
+        GraphError::InvalidJson
+    );
 }
 
 #[test]
@@ -150,23 +159,32 @@ fn rejects_missing_edges() {
 fn rejects_node_missing_id() {
     assert_eq!(
         parse(json!({ "nodes": [{ "data": { "kind": "start" } }], "edges": [] })).unwrap_err(),
-        GraphError::InvalidNode { reason: "missing id".to_string() }
+        GraphError::InvalidNode {
+            reason: "missing id".to_string()
+        }
     );
 }
 
 #[test]
 fn rejects_node_missing_node_type() {
     assert_eq!(
-        parse(json!({ "nodes": [{ "id": "a", "data": { "title": "x" } }], "edges": [] })).unwrap_err(),
-        GraphError::InvalidNode { reason: "node a has no node type".to_string() }
+        parse(json!({ "nodes": [{ "id": "a", "data": { "title": "x" } }], "edges": [] }))
+            .unwrap_err(),
+        GraphError::InvalidNode {
+            reason: "node a has no node type".to_string()
+        }
     );
 }
 
 #[test]
 fn rejects_unknown_node_type() {
     assert_eq!(
-        parse(json!({ "nodes": [{ "id": "a", "data": { "kind": "bogus" } }], "edges": [] })).unwrap_err(),
-        GraphError::UnknownNodeType { node_id: "a".to_string(), value: "bogus".to_string() }
+        parse(json!({ "nodes": [{ "id": "a", "data": { "kind": "bogus" } }], "edges": [] }))
+            .unwrap_err(),
+        GraphError::UnknownNodeType {
+            node_id: "a".to_string(),
+            value: "bogus".to_string()
+        }
     );
 }
 
@@ -178,7 +196,9 @@ fn rejects_dangling_edge() {
             "edges": [{ "source": "start", "target": "missing" }]
         }))
         .unwrap_err(),
-        GraphError::DanglingEdge { node_id: "missing".to_string() }
+        GraphError::DanglingEdge {
+            node_id: "missing".to_string()
+        }
     );
 }
 
@@ -240,7 +260,9 @@ fn rejects_duplicate_node_id() {
             "edges": []
         }))
         .unwrap_err(),
-        GraphError::DuplicateNodeId { node_id: "a".to_string() }
+        GraphError::DuplicateNodeId {
+            node_id: "a".to_string()
+        }
     );
 }
 

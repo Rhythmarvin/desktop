@@ -3,8 +3,8 @@
 
 use crate::task::resolve_task_cwd;
 use ora_application::{
-    AgentDefinitionRepository, ExecutionContext, FilesystemSkillStorage, NodeType,
-    SkillStorage, StartPrerequisitesError, WorkflowGraph, WorkflowRunStartPrerequisites,
+    AgentDefinitionRepository, ExecutionContext, FilesystemSkillStorage, NodeType, SkillStorage,
+    StartPrerequisitesError, WorkflowGraph, WorkflowRunStartPrerequisites,
 };
 use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository};
 use ora_skill_package::{parse_manifest, rewrite_manifest};
@@ -41,7 +41,10 @@ impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
 
         let agent_repository = SqliteAgentDefinitionRepository::new(self.pool.clone());
         for role_id in &roles {
-            if agent_repository.find_agent_definition_by_name(role_id)?.is_none() {
+            if agent_repository
+                .find_agent_definition_by_name(role_id)?
+                .is_none()
+            {
                 return Err(StartPrerequisitesError::WorkflowRoleNotFound {
                     role_id: role_id.clone(),
                 });
@@ -49,11 +52,12 @@ impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
         }
 
         if !skills.is_empty() {
-            let worktree_root = resolve_task_cwd(&self.pool, &context.task.id).map_err(|error| {
-                StartPrerequisitesError::SkillMaterializationError {
-                    message: format!("failed to resolve run worktree: {error}"),
-                }
-            })?;
+            let worktree_root =
+                resolve_task_cwd(&self.pool, &context.task.id).map_err(|error| {
+                    StartPrerequisitesError::SkillMaterializationError {
+                        message: format!("failed to resolve run worktree: {error}"),
+                    }
+                })?;
             let storage = FilesystemSkillStorage::new(self.skills_root.clone());
             for skill_id in &skills {
                 materialize_skill(&storage, &worktree_root, skill_id)?;
@@ -102,18 +106,14 @@ fn materialize_skill(
         });
     }
     let dir_name = normalize_skill_name(catalog_name);
-    let target = worktree_root
-        .join(".claude")
-        .join("skills")
-        .join(&dir_name);
+    let target = worktree_root.join(".claude").join("skills").join(&dir_name);
     storage
         .copy_package_to(catalog_name, &target)
         .map_err(|error| StartPrerequisitesError::SkillMaterializationError {
             message: error.to_string(),
         })?;
-    rewrite_manifest_name(&target, &dir_name).map_err(|message| {
-        StartPrerequisitesError::SkillMaterializationError { message }
-    })?;
+    rewrite_manifest_name(&target, &dir_name)
+        .map_err(|message| StartPrerequisitesError::SkillMaterializationError { message })?;
     Ok(())
 }
 
@@ -168,9 +168,11 @@ mod tests {
 
         let target = worktree.join(".claude").join("skills").join("sfmea-review");
         assert!(target.join("notes.txt").exists());
-        let manifest =
-            parse_manifest(&std::fs::read(target.join("SKILL.md")).unwrap(), MAX_SKILL_MANIFEST_BYTES)
-                .unwrap();
+        let manifest = parse_manifest(
+            &std::fs::read(target.join("SKILL.md")).unwrap(),
+            MAX_SKILL_MANIFEST_BYTES,
+        )
+        .unwrap();
         assert_eq!(manifest.name, "sfmea-review");
         assert_eq!(manifest.description, "review");
     }
@@ -207,11 +209,13 @@ mod tests {
 
         materialize_skill(&storage, &worktree, "explore").unwrap();
         materialize_skill(&storage, &worktree, "explore").unwrap();
-        assert!(worktree
-            .join(".claude")
-            .join("skills")
-            .join("explore")
-            .join("SKILL.md")
-            .exists());
+        assert!(
+            worktree
+                .join(".claude")
+                .join("skills")
+                .join("explore")
+                .join("SKILL.md")
+                .exists()
+        );
     }
 }

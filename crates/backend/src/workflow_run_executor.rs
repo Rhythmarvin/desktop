@@ -9,19 +9,21 @@ use ora_application::{
     AgentDefinitionRepository, Clock, ExecutionContext, NodeExecutor, RepositoryError,
     WorkflowGraph, WorkflowGraphNode, WorkflowRunCallback, WorkflowRunEngineRepository,
 };
-use ora_contracts::{
-    AgentCli as ContractAgentCli, AttachSessionRequest, PromptSessionEvent, PromptSessionRequest,
-    SetSessionConfigRequest, StopSessionRequest, WarmSessionRequest, WarmSessionTarget,
-};
 use ora_contracts::acp::content::{ContentBlock, TextContent};
 use ora_contracts::acp::prompt::StopReason;
 use ora_contracts::acp::session::SessionUpdate;
 use ora_contracts::acp::session_config_options::{
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigKind, SessionConfigSelectOption,
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
     SessionConfigSelectOptions,
 };
+use ora_contracts::{
+    AgentCli as ContractAgentCli, AttachSessionRequest, PromptSessionEvent, PromptSessionRequest,
+    SetSessionConfigRequest, StopSessionRequest, WarmSessionRequest, WarmSessionTarget,
+};
 use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository, SqliteWorkflowRunEngineRepository};
-use ora_domain::{WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId, SessionId};
+use ora_domain::{
+    SessionId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -89,7 +91,9 @@ impl NodeExecutor for WorkflowRunNodeExecutor {
             .await
             {
                 Ok(outcome) => report_outcome(&callback, &context.run.id, &node_run_id, outcome),
-                Err(error) => callback.fail_node(&context.run.id, &node_run_id, error.message(), None),
+                Err(error) => {
+                    callback.fail_node(&context.run.id, &node_run_id, error.message(), None)
+                }
             }
         });
     }
@@ -135,12 +139,12 @@ async fn drive_agent_node(
     node: &WorkflowGraphNode,
     context: &ExecutionContext,
 ) -> Result<AgentNodeOutcome, NodeExecutionError> {
-    let config = node
-        .agent_config
-        .as_ref()
-        .ok_or_else(|| NodeExecutionError::MissingAgentConfig {
-            node_id: node.id.clone(),
-        })?;
+    let config =
+        node.agent_config
+            .as_ref()
+            .ok_or_else(|| NodeExecutionError::MissingAgentConfig {
+                node_id: node.id.clone(),
+            })?;
     let agent_cli = resolve_agent_cli(&config.executor.agent_cli)?;
 
     // Warm a reusable provider session for this run's task.
@@ -167,8 +171,11 @@ async fn drive_agent_node(
     repository.set_node_run_session_id(node_run_id, &SessionId::new(attach.session.id), now)?;
 
     // Select the graph-declared model from the warm-advertised options; no silent fallback.
-    let (config_id, model_value) =
-        match_model_value(&warm.config_options, &config.executor.agent_cli, &config.executor.model_id)?;
+    let (config_id, model_value) = match_model_value(
+        &warm.config_options,
+        &config.executor.agent_cli,
+        &config.executor.model_id,
+    )?;
     agent_runtime
         .set_session_config(SetSessionConfigRequest {
             session_id: warm.session_id.clone(),
@@ -206,7 +213,9 @@ async fn drive_agent_node(
         match event? {
             PromptSessionEvent::SessionUpdate { update } => accumulator.consume(&update),
             PromptSessionEvent::PermissionRequest(_) => {}
-            PromptSessionEvent::Completed { stop_reason: reason } => {
+            PromptSessionEvent::Completed {
+                stop_reason: reason,
+            } => {
                 stop_reason = Some(reason);
                 break;
             }
@@ -235,11 +244,18 @@ fn report_outcome(
     outcome: AgentNodeOutcome,
 ) {
     match outcome.stop_reason {
-        StopReason::EndTurn => {
-            callback.complete_node(run_id, node_run_id, outcome.output, Some("end_turn".to_string()))
-        }
-        StopReason::MaxTokens => callback
-            .complete_node(run_id, node_run_id, outcome.output, Some("max_tokens".to_string())),
+        StopReason::EndTurn => callback.complete_node(
+            run_id,
+            node_run_id,
+            outcome.output,
+            Some("end_turn".to_string()),
+        ),
+        StopReason::MaxTokens => callback.complete_node(
+            run_id,
+            node_run_id,
+            outcome.output,
+            Some("max_tokens".to_string()),
+        ),
         StopReason::MaxTurnRequests => callback.complete_node(
             run_id,
             node_run_id,
@@ -304,13 +320,14 @@ fn match_model_value(
     };
     let options: Vec<&SessionConfigSelectOption> = match &select.options {
         SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect(),
-        SessionConfigSelectOptions::Grouped(groups) => {
-            groups.iter().flat_map(|group| group.options.iter()).collect()
-        }
+        SessionConfigSelectOptions::Grouped(groups) => groups
+            .iter()
+            .flat_map(|group| group.options.iter())
+            .collect(),
     };
-    let matched = options.iter().find(|option| {
-        option.value.0.as_ref() == model_id || option.name.contains(model_id)
-    });
+    let matched = options
+        .iter()
+        .find(|option| option.value.0.as_ref() == model_id || option.name.contains(model_id));
     match matched {
         Some(option) => Ok((model_option.id.0.to_string(), option.value.0.to_string())),
         None => Err(NodeExecutionError::WorkflowModelNotFound {
@@ -332,7 +349,10 @@ fn assemble_prompt(
             "<system_instructions>\n{role}\n</system_instructions>"
         ))));
     }
-    if let Some(prompt) = node.agent_config.as_ref().map(|config| config.prompt.as_str())
+    if let Some(prompt) = node
+        .agent_config
+        .as_ref()
+        .map(|config| config.prompt.as_str())
         && !prompt.is_empty()
     {
         blocks.push(ContentBlock::Text(TextContent::new(prompt)));
@@ -606,8 +626,7 @@ mod tests {
 
     #[test]
     fn last_assistant_message_returns_the_final_assistant() {
-        let output =
-            r#"[{"role":"user","text":"p"},{"role":"assistant","text":"one"},{"role":"user","text":"p2"},{"role":"assistant","text":"two"}]"#;
+        let output = r#"[{"role":"user","text":"p"},{"role":"assistant","text":"one"},{"role":"user","text":"p2"},{"role":"assistant","text":"two"}]"#;
         assert_eq!(last_assistant_message(Some(output)), "two");
         assert_eq!(last_assistant_message(None), "");
     }

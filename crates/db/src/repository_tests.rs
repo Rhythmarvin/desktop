@@ -9,13 +9,13 @@ use ora_application::{
     ActivateVersionResult, AdvanceWorkflowRunResult, AgentDefinitionRepository,
     CancelWorkflowRunResult, Clock, DeleteSnapshotResult, DeleteWorkflowResult,
     DeleteWorkflowRunResult, EngineError, ExecutionContext, NodeExecutor, NodeRunToStart, NodeType,
-    ProjectRepository,
-    ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository, PublishSnapshotResult,
-    RepositoryError, RestartWorkflowRunResult, RollbackDraftResult, SessionRepository,
-    SkillRepository, StartPrerequisitesError, StartWorkflowRunResult, TaskRepository, WorkflowGraph,
-    WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler,
-    WorkflowRunEngine, WorkflowRunEngineRepository, WorkflowRunRepository,
-    WorkflowRunStartPrerequisites, WorkflowValidationError, WorktreeRepository,
+    ProjectRepository, ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository,
+    PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult, RollbackDraftResult,
+    SessionRepository, SkillRepository, StartPrerequisitesError, StartWorkflowRunResult,
+    TaskRepository, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
+    WorkflowRepository, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
+    WorkflowRunRepository, WorkflowRunStartPrerequisites, WorkflowValidationError,
+    WorktreeRepository,
 };
 use ora_contracts::{StartWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
 use ora_domain::{
@@ -1013,7 +1013,9 @@ fn engine_repository_starts_a_pending_run() {
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
 
     assert_eq!(
-        repository.start_run(&run_id, &start_node_run(None), 40).unwrap(),
+        repository
+            .start_run(&run_id, &start_node_run(None), 40)
+            .unwrap(),
         StartWorkflowRunResult::Started
     );
     let run = SqliteWorkflowRunRepository::new(pool.clone())
@@ -1022,8 +1024,13 @@ fn engine_repository_starts_a_pending_run() {
         .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Running);
     assert_eq!(run.started_at, Some(40));
-    assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"start\"]}"));
-    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
+    assert_eq!(
+        run.state.as_deref(),
+        Some("{\"current_nodes\":[\"start\"]}")
+    );
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(node_runs.len(), 1);
     assert_eq!(node_runs[0].node_id, "start");
     assert_eq!(node_runs[0].node_type, "start");
@@ -1039,15 +1046,22 @@ fn engine_repository_start_is_idempotent_for_a_started_run() {
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
 
     assert_eq!(
-        repository.start_run(&run_id, &start_node_run(None), 40).unwrap(),
+        repository
+            .start_run(&run_id, &start_node_run(None), 40)
+            .unwrap(),
         StartWorkflowRunResult::Started
     );
     assert_eq!(
-        repository.start_run(&run_id, &start_node_run(None), 41).unwrap(),
+        repository
+            .start_run(&run_id, &start_node_run(None), 41)
+            .unwrap(),
         StartWorkflowRunResult::Current
     );
     assert_eq!(
-        SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap().len(),
+        SqliteWorkflowRunRepository::new(pool)
+            .list_node_runs(&run_id)
+            .unwrap()
+            .len(),
         1
     );
 }
@@ -1068,7 +1082,9 @@ fn engine_repository_start_is_current_for_a_terminal_run() {
     .unwrap();
 
     assert_eq!(
-        repository.start_run(&run_id, &start_node_run(None), 40).unwrap(),
+        repository
+            .start_run(&run_id, &start_node_run(None), 40)
+            .unwrap(),
         StartWorkflowRunResult::Current
     );
 }
@@ -1100,7 +1116,9 @@ fn engine_repository_finds_execution_context() {
     assert_eq!(context.worktree.id, worktree_id);
     assert_eq!(context.graph_json, "{\"nodes\":[]}");
     assert_eq!(
-        repository.find_execution_context(&WorkflowRunId::new("missing")).unwrap(),
+        repository
+            .find_execution_context(&WorkflowRunId::new("missing"))
+            .unwrap(),
         None
     );
 }
@@ -1111,7 +1129,9 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
 
     assert_eq!(
         repository
@@ -1129,7 +1149,9 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
         .unwrap()
         .unwrap();
     assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[]}"));
-    let node_runs = SqliteWorkflowRunRepository::new(pool.clone()).list_node_runs(&run_id).unwrap();
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(node_runs[0].status, WorkflowNodeStatus::Succeeded);
     assert_eq!(node_runs[0].output.as_deref(), Some("out"));
     assert_eq!(
@@ -1153,7 +1175,9 @@ fn engine_repository_starts_ready_nodes_and_tracks_them() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
     repository
         .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, 41)
         .unwrap();
@@ -1166,7 +1190,9 @@ fn engine_repository_starts_ready_nodes_and_tracks_them() {
         .unwrap()
         .unwrap();
     assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"a\"]}"));
-    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(node_runs.len(), 2);
     assert_eq!(node_runs[1].node_id, "a");
     assert_eq!(node_runs[1].status, WorkflowNodeStatus::Running);
@@ -1178,7 +1204,9 @@ fn engine_repository_binds_a_node_run_to_its_session() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
 
     repository
         .set_node_run_session_id(
@@ -1187,7 +1215,9 @@ fn engine_repository_binds_a_node_run_to_its_session() {
             41,
         )
         .unwrap();
-    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(
         node_runs[0].session_id.as_ref().map(ToString::to_string),
         Some("session-1".to_string())
@@ -1200,7 +1230,9 @@ fn engine_repository_fail_node_fails_run_and_anchors_the_node() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
 
     assert_eq!(
         repository
@@ -1220,15 +1252,25 @@ fn engine_repository_fail_node_fails_run_and_anchors_the_node() {
     assert_eq!(run.status, WorkflowRunStatus::Failed);
     assert_eq!(run.error.as_deref(), Some("boom"));
     assert_eq!(run.finished_at, Some(41));
-    assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"start\"]}"));
-    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
+    assert_eq!(
+        run.state.as_deref(),
+        Some("{\"current_nodes\":[\"start\"]}")
+    );
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(node_runs[0].status, WorkflowNodeStatus::Failed);
     assert_eq!(node_runs[0].output.as_deref(), Some("partial"));
 
     // A late fail callback after the run is terminal is a no-op.
     assert_eq!(
         repository
-            .fail_node(&WorkflowNodeRunId::new("node-start"), "late".to_string(), None, 42)
+            .fail_node(
+                &WorkflowNodeRunId::new("node-start"),
+                "late".to_string(),
+                None,
+                42
+            )
             .unwrap(),
         AdvanceWorkflowRunResult::NotRunning
     );
@@ -1240,13 +1282,20 @@ fn engine_repository_finish_run_succeeds() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
     repository
         .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, 41)
         .unwrap();
 
-    repository.finish_run(&run_id, Some("final".to_string()), 45).unwrap();
-    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    repository
+        .finish_run(&run_id, Some("final".to_string()), 45)
+        .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Succeeded);
     assert_eq!(run.output.as_deref(), Some("final"));
     assert_eq!(run.finished_at, Some(45));
@@ -1259,7 +1308,9 @@ fn engine_repository_cancel_cancels_run_and_node_runs() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
     repository
         .start_ready_nodes(&run_id, &[agent_node_run("node-a", "a")], 41)
         .unwrap();
@@ -1274,9 +1325,15 @@ fn engine_repository_cancel_cancels_run_and_node_runs() {
         .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Cancelled);
     assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[]}"));
-    let node_runs = SqliteWorkflowRunRepository::new(pool.clone()).list_node_runs(&run_id).unwrap();
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(node_runs.len(), 2);
-    assert!(node_runs.iter().all(|node_run| node_run.status == WorkflowNodeStatus::Cancelled));
+    assert!(
+        node_runs
+            .iter()
+            .all(|node_run| node_run.status == WorkflowNodeStatus::Cancelled)
+    );
 
     // Cancelling a terminal run is a no-op.
     assert_eq!(
@@ -1291,11 +1348,20 @@ fn engine_repository_restart_resets_run_and_deletes_node_runs() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), Some("out".to_string()), None, 41)
+        .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
-    repository.finish_run(&run_id, Some("final".to_string()), 42).unwrap();
+    repository
+        .complete_node(
+            &WorkflowNodeRunId::new("node-start"),
+            Some("out".to_string()),
+            None,
+            41,
+        )
+        .unwrap();
+    repository
+        .finish_run(&run_id, Some("final".to_string()), 42)
+        .unwrap();
 
     assert_eq!(
         repository.restart_run(&run_id, 50).unwrap(),
@@ -1311,7 +1377,9 @@ fn engine_repository_restart_resets_run_and_deletes_node_runs() {
     assert_eq!(run.started_at, None);
     assert_eq!(run.finished_at, None);
     assert_eq!(
-        SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap(),
+        SqliteWorkflowRunRepository::new(pool)
+            .list_node_runs(&run_id)
+            .unwrap(),
         Vec::new()
     );
 }
@@ -1322,7 +1390,9 @@ fn engine_repository_restart_refuses_a_running_run() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool);
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
 
     assert_eq!(
         repository.restart_run(&run_id, 41).unwrap(),
@@ -1337,11 +1407,24 @@ fn engine_repository_lists_recoverable_runs() {
     let (run_id, _, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
 
-    assert_eq!(repository.list_recoverable_runs().unwrap(), Vec::<WorkflowRunId>::new());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
-    assert_eq!(repository.list_recoverable_runs().unwrap(), vec![run_id.clone()]);
+    assert_eq!(
+        repository.list_recoverable_runs().unwrap(),
+        Vec::<WorkflowRunId>::new()
+    );
     repository
-        .fail_node(&WorkflowNodeRunId::new("node-start"), "boom".to_string(), None, 41)
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+    assert_eq!(
+        repository.list_recoverable_runs().unwrap(),
+        vec![run_id.clone()]
+    );
+    repository
+        .fail_node(
+            &WorkflowNodeRunId::new("node-start"),
+            "boom".to_string(),
+            None,
+            41,
+        )
         .unwrap();
     assert_eq!(repository.list_recoverable_runs().unwrap(), vec![run_id]);
 }
@@ -1353,7 +1436,9 @@ fn engine_repository_fail_orphaned_node_runs_is_idempotent_and_preserves_anchor(
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let (run_id, task_id, _) = create_pending_run_fixture(&pool);
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
-    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
     pool.with_connection(|connection| {
         connection.execute(
             "INSERT INTO sessions (id, task_id, agent_cli, agent_session_id, status, created_at, updated_at, is_deleted)
@@ -1364,16 +1449,26 @@ fn engine_repository_fail_orphaned_node_runs_is_idempotent_and_preserves_anchor(
     })
     .unwrap();
 
-    repository.fail_orphaned_node_runs(&[run_id.clone()], 50).unwrap();
+    repository
+        .fail_orphaned_node_runs(&[run_id.clone()], 50)
+        .unwrap();
     let run = SqliteWorkflowRunRepository::new(pool.clone())
         .find_run(&run_id)
         .unwrap()
         .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Failed);
-    assert_eq!(run.error.as_deref(), Some("{\"reason\":\"interrupted_by_restart\"}"));
+    assert_eq!(
+        run.error.as_deref(),
+        Some("{\"reason\":\"interrupted_by_restart\"}")
+    );
     // The anchor is preserved so the failed node stays visible.
-    assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"start\"]}"));
-    let node_runs = SqliteWorkflowRunRepository::new(pool.clone()).list_node_runs(&run_id).unwrap();
+    assert_eq!(
+        run.state.as_deref(),
+        Some("{\"current_nodes\":[\"start\"]}")
+    );
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
     assert_eq!(node_runs[0].status, WorkflowNodeStatus::Failed);
     assert_eq!(
         node_runs[0].error.as_deref(),
@@ -1391,10 +1486,18 @@ fn engine_repository_fail_orphaned_node_runs_is_idempotent_and_preserves_anchor(
     assert_eq!(session_status, SessionStatus::Stopped.database_value());
 
     // The sweep is idempotent: a second pass changes nothing.
-    repository.fail_orphaned_node_runs(&[run_id.clone()], 51).unwrap();
-    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    repository
+        .fail_orphaned_node_runs(&[run_id.clone()], 51)
+        .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Failed);
-    assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"start\"]}"));
+    assert_eq!(
+        run.state.as_deref(),
+        Some("{\"current_nodes\":[\"start\"]}")
+    );
 }
 
 /// A prerequisites check that always passes, used by engine scheduling tests.
@@ -1583,16 +1686,25 @@ fn engine_runs_a_linear_chain_to_success() {
         FixedClock::new(40),
     );
 
-    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
 
     // The start node completed synchronously; the agent `a` is dispatched and in flight.
     let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
         .list_node_runs(&run_id)
         .unwrap();
-    let start_run = node_runs.iter().find(|node_run| node_run.node_id == "start").unwrap();
+    let start_run = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "start")
+        .unwrap();
     assert_eq!(start_run.status, WorkflowNodeStatus::Succeeded);
     assert_eq!(start_run.input.as_deref(), Some("kickoff"));
-    let agent_run = node_runs.iter().find(|node_run| node_run.node_id == "a").unwrap();
+    let agent_run = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "a")
+        .unwrap();
     assert_eq!(agent_run.status, WorkflowNodeStatus::Running);
     assert_eq!(agent_run.input.as_deref(), Some("do a"));
     assert_eq!(executor.dispatched.lock().unwrap().len(), 1);
@@ -1606,7 +1718,10 @@ fn engine_runs_a_linear_chain_to_success() {
             Some("end_turn".to_string()),
         )
         .unwrap();
-    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Succeeded);
     assert_eq!(run.output.as_deref(), Some("done"));
 }
@@ -1623,7 +1738,10 @@ fn engine_fails_the_run_when_a_node_fails() {
         NoopStartPrerequisites,
         FixedClock::new(40),
     );
-    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
 
     let agent_run = SqliteWorkflowRunRepository::new(pool.clone())
         .list_node_runs(&run_id)
@@ -1632,10 +1750,17 @@ fn engine_fails_the_run_when_a_node_fails() {
         .find(|node_run| node_run.node_id == "a")
         .unwrap();
     engine
-        .fail_node(&agent_run.id, "boom".to_string(), Some("partial".to_string()))
+        .fail_node(
+            &agent_run.id,
+            "boom".to_string(),
+            Some("partial".to_string()),
+        )
         .unwrap();
 
-    let run = SqliteWorkflowRunRepository::new(pool.clone()).find_run(&run_id).unwrap().unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Failed);
     assert_eq!(run.error.as_deref(), Some("boom"));
     assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"a\"]}"));
@@ -1663,7 +1788,10 @@ fn engine_dispatches_parallel_branches_concurrently() {
         FixedClock::new(40),
     );
 
-    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
 
     // Both leaves dispatched in the same wave; the merge node waits.
     let dispatched: Vec<String> = executor
@@ -1680,8 +1808,18 @@ fn engine_dispatches_parallel_branches_concurrently() {
     assert!(!node_runs.iter().any(|node_run| node_run.node_id == "merge"));
 
     // Completing both leaves makes `merge` ready.
-    let left = node_runs.iter().find(|node_run| node_run.node_id == "l").unwrap().id.clone();
-    let right = node_runs.iter().find(|node_run| node_run.node_id == "r").unwrap().id.clone();
+    let left = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "l")
+        .unwrap()
+        .id
+        .clone();
+    let right = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "r")
+        .unwrap()
+        .id
+        .clone();
     engine
         .complete_node(&run_id, &left, Some(assistant_conversation("left")), None)
         .unwrap();
@@ -1705,9 +1843,17 @@ fn engine_dispatches_parallel_branches_concurrently() {
         .find(|node_run| node_run.node_id == "merge")
         .unwrap();
     engine
-        .complete_node(&run_id, &merge.id, Some(assistant_conversation("merged")), None)
+        .complete_node(
+            &run_id,
+            &merge.id,
+            Some(assistant_conversation("merged")),
+            None,
+        )
         .unwrap();
-    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Succeeded);
     assert_eq!(run.output.as_deref(), Some("merged"));
 }
@@ -1724,10 +1870,19 @@ fn engine_cancels_a_running_run() {
         NoopStartPrerequisites,
         FixedClock::new(40),
     );
-    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
 
-    assert_eq!(engine.cancel(&run_id).unwrap(), CancelWorkflowRunResult::Cancelled);
-    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(
+        engine.cancel(&run_id).unwrap(),
+        CancelWorkflowRunResult::Cancelled
+    );
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Cancelled);
 }
 
@@ -1743,7 +1898,10 @@ fn engine_restarts_a_finished_run() {
         NoopStartPrerequisites,
         FixedClock::new(40),
     );
-    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
     let agent_run = SqliteWorkflowRunRepository::new(pool.clone())
         .list_node_runs(&run_id)
         .unwrap()
@@ -1751,21 +1909,44 @@ fn engine_restarts_a_finished_run() {
         .find(|node_run| node_run.node_id == "a")
         .unwrap();
     engine
-        .complete_node(&run_id, &agent_run.id, Some(assistant_conversation("done")), None)
+        .complete_node(
+            &run_id,
+            &agent_run.id,
+            Some(assistant_conversation("done")),
+            None,
+        )
         .unwrap();
     assert_eq!(
-        SqliteWorkflowRunRepository::new(pool.clone()).find_run(&run_id).unwrap().unwrap().status,
+        SqliteWorkflowRunRepository::new(pool.clone())
+            .find_run(&run_id)
+            .unwrap()
+            .unwrap()
+            .status,
         WorkflowRunStatus::Succeeded
     );
 
-    assert_eq!(engine.restart(&run_id).unwrap(), RestartWorkflowRunResult::Restarted);
-    let run = SqliteWorkflowRunRepository::new(pool.clone()).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(
+        engine.restart(&run_id).unwrap(),
+        RestartWorkflowRunResult::Restarted
+    );
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Running);
-    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
-    assert!(node_runs.iter().any(|node_run| node_run.node_id == "start"
-        && node_run.status == WorkflowNodeStatus::Succeeded));
-    assert!(node_runs.iter().any(|node_run| node_run.node_id == "a"
-        && node_run.status == WorkflowNodeStatus::Running));
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
+    assert!(
+        node_runs.iter().any(|node_run| node_run.node_id == "start"
+            && node_run.status == WorkflowNodeStatus::Succeeded)
+    );
+    assert!(
+        node_runs
+            .iter()
+            .any(|node_run| node_run.node_id == "a"
+                && node_run.status == WorkflowNodeStatus::Running)
+    );
 }
 
 /// Verifies the control handler starts a run and returns its running state.
@@ -1780,10 +1961,8 @@ fn workflow_run_control_start_returns_the_running_run() {
         NoopStartPrerequisites,
         FixedClock::new(40),
     );
-    let handler = WorkflowRunControlHandler::new(
-        engine,
-        Arc::new(SqliteWorkflowRunRepository::new(pool)),
-    );
+    let handler =
+        WorkflowRunControlHandler::new(engine, Arc::new(SqliteWorkflowRunRepository::new(pool)));
 
     let response = handler
         .start(StartWorkflowRunRequest {

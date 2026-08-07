@@ -1,6 +1,8 @@
 use crate::RepositoryError;
 use crate::workflow_run::engine::graph::WorkflowGraph;
-use ora_domain::{SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
+use ora_domain::{
+    SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree,
+};
 use thiserror::Error;
 
 /// A node-run the engine wants to start in one scheduling wave.
@@ -189,6 +191,9 @@ pub trait WorkflowRunEngineRepository {
     fn list_recoverable_runs(&self) -> Result<Vec<WorkflowRunId>, RepositoryError>;
 
     /// Fails the non-terminal node runs of the given runs and stops their running sessions.
-    fn fail_orphaned_node_runs(&self, run_ids: &[WorkflowRunId], now: i64)
-        -> Result<(), RepositoryError>;
+    fn fail_orphaned_node_runs(
+        &self,
+        run_ids: &[WorkflowRunId],
+        now: i64,
+    ) -> Result<(), RepositoryError>;
 }

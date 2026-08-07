@@ -444,7 +444,13 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "ListWorkflowRunsByWorkflowRequest"
         | "ListWorkflowRunsByWorkflowResponse"
         | "DeleteWorkflowRunRequest"
-        | "DeleteWorkflowRunResponse" => "workflowRun",
+        | "DeleteWorkflowRunResponse"
+        | "StartWorkflowRunRequest"
+        | "StartWorkflowRunResponse"
+        | "CancelWorkflowRunRequest"
+        | "CancelWorkflowRunResponse"
+        | "RestartWorkflowRunRequest"
+        | "RestartWorkflowRunResponse" => "workflowRun",
         // fileSystem
         "ListDirectoryRequest"
         | "ListDirectoryResponse"

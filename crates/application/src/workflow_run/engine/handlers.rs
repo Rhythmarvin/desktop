@@ -47,9 +47,7 @@ where
             .start(&run_id)
             .map_err(ApplicationError::from_workflow_engine_error)?;
         let run = self.find_run(&run_id)?;
-        Ok(StartWorkflowRunResponse {
-            run: map_run(run),
-        })
+        Ok(StartWorkflowRunResponse { run: map_run(run) })
     }
 
     /// Cancels a running run, returning the cancelled (or already terminal) run.
@@ -67,13 +65,11 @@ where
             CancelWorkflowRunResult::NotFound => {
                 return Err(ApplicationError::WorkflowRunNotFound {
                     run_id: request.run_id,
-                })
+                });
             }
         }
         let run = self.find_run(&run_id)?;
-        Ok(CancelWorkflowRunResponse {
-            run: map_run(run),
-        })
+        Ok(CancelWorkflowRunResponse { run: map_run(run) })
     }
 
     /// Restarts a non-running run, returning the reset and re-running run.
@@ -89,18 +85,16 @@ where
         {
             RestartWorkflowRunResult::Restarted => {}
             RestartWorkflowRunResult::NotRestartable => {
-                return Err(ApplicationError::WorkflowRunNotRestartable)
+                return Err(ApplicationError::WorkflowRunNotRestartable);
             }
             RestartWorkflowRunResult::NotFound => {
                 return Err(ApplicationError::WorkflowRunNotFound {
                     run_id: request.run_id,
-                })
+                });
             }
         }
         let run = self.find_run(&run_id)?;
-        Ok(RestartWorkflowRunResponse {
-            run: map_run(run),
-        })
+        Ok(RestartWorkflowRunResponse { run: map_run(run) })
     }
 
     /// Loads one visible run or reports it missing.

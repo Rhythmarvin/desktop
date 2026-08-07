@@ -3,7 +3,10 @@
 use crate::frontend::{
     FrontendEndpoint, FrontendHttpMethod, NO_PATH_PARAMS, WORKFLOW_RUN_PATH_PARAMS,
 };
-use ora_contracts::{WORKFLOW_RUN_NODES_PATH, WORKFLOW_RUN_PATH, WORKFLOW_RUNS_PATH};
+use ora_contracts::{
+    WORKFLOW_RUN_CANCEL_PATH, WORKFLOW_RUN_NODES_PATH, WORKFLOW_RUN_PATH,
+    WORKFLOW_RUN_RESTART_PATH, WORKFLOW_RUN_START_PATH, WORKFLOW_RUNS_PATH,
+};
 
 const NAMESPACE: &str = "workflowRun";
 
@@ -71,6 +74,39 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         path_template: WORKFLOW_RUN_PATH,
         request_type: "DeleteWorkflowRunRequest",
         response_type: "DeleteWorkflowRunResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "startWorkflowRun",
+        namespace: NAMESPACE,
+        member_name: "start",
+        method: FrontendHttpMethod::Post,
+        path_template: WORKFLOW_RUN_START_PATH,
+        request_type: "StartWorkflowRunRequest",
+        response_type: "StartWorkflowRunResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "cancelWorkflowRun",
+        namespace: NAMESPACE,
+        member_name: "cancel",
+        method: FrontendHttpMethod::Post,
+        path_template: WORKFLOW_RUN_CANCEL_PATH,
+        request_type: "CancelWorkflowRunRequest",
+        response_type: "CancelWorkflowRunResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "restartWorkflowRun",
+        namespace: NAMESPACE,
+        member_name: "restart",
+        method: FrontendHttpMethod::Post,
+        path_template: WORKFLOW_RUN_RESTART_PATH,
+        request_type: "RestartWorkflowRunRequest",
+        response_type: "RestartWorkflowRunResponse",
         path_params: WORKFLOW_RUN_PATH_PARAMS,
         has_json_body: false,
     },

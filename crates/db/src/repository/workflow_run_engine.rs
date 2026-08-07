@@ -3,8 +3,8 @@ use ora_application::{
     RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, WorkflowRunEngineRepository,
 };
 use ora_domain::{
-    SessionId, SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId,
-    WorkflowRunStatus,
+    SessionId, SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
+    WorkflowRunId, WorkflowRunStatus,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
@@ -486,13 +486,19 @@ fn current_nodes_from_state(state: Option<&str>) -> Result<Vec<String>, crate::D
     Ok(value
         .get("current_nodes")
         .and_then(serde_json::Value::as_array)
-        .map(|nodes| nodes.iter().filter_map(|node| node.as_str().map(str::to_string)).collect())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| node.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default())
 }
 
 /// Serializes a `current_nodes` anchor into the run state JSON.
 fn current_nodes_to_state(current_nodes: &[String]) -> Result<String, crate::DatabaseError> {
-    serde_json::to_string(&serde_json::json!({ "current_nodes": current_nodes })).map_err(Into::into)
+    serde_json::to_string(&serde_json::json!({ "current_nodes": current_nodes }))
+        .map_err(Into::into)
 }
 
 /// Rewrites the run's `current_nodes` anchor inside the active transaction.
@@ -514,7 +520,11 @@ fn rewrite_current_nodes(
     mutate(&mut current_nodes);
     transaction.execute(
         "UPDATE workflow_runs SET state = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0",
-        params![run_id.as_ref(), current_nodes_to_state(&current_nodes)?, now],
+        params![
+            run_id.as_ref(),
+            current_nodes_to_state(&current_nodes)?,
+            now
+        ],
     )?;
     Ok(())
 }

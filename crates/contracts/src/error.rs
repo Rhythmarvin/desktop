@@ -614,7 +614,13 @@ mod tests {
                 | PublicError::WorkflowNoPublishedSnapshot(_)
                 | PublicError::WorkflowRunCannotUseDraftSnapshot(_)
                 | PublicError::WorkflowRunNotFound(_)
-                | PublicError::WorkflowRunActive(_) => {}
+                | PublicError::WorkflowRunActive(_)
+                | PublicError::WorkflowRunGraphParse(_)
+                | PublicError::WorkflowRunValidation(_)
+                | PublicError::WorkflowSkillNotFound(_)
+                | PublicError::WorkflowRoleNotFound(_)
+                | PublicError::WorkflowRunStartFailed(_)
+                | PublicError::WorkflowRunNotRestartable(_) => {}
             }
         }
 

@@ -43,8 +43,13 @@ impl FilesystemSkillStorage {
             });
         }
         fs::create_dir_all(destination).map_err(map_storage_error)?;
-        copy_dir_contents(&source, destination).map_err(|source| SkillStorageError::OperationFailed {
-            message: format!("failed to copy skill {name} to {}: {source}", destination.display()),
+        copy_dir_contents(&source, destination).map_err(|source| {
+            SkillStorageError::OperationFailed {
+                message: format!(
+                    "failed to copy skill {name} to {}: {source}",
+                    destination.display()
+                ),
+            }
         })
     }
 

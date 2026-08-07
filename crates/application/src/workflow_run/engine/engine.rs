@@ -1,5 +1,5 @@
-use crate::project::Clock;
 use crate::RepositoryError;
+use crate::project::Clock;
 use crate::workflow_run::engine::graph::{GraphError, WorkflowGraph, WorkflowGraphNode};
 use crate::workflow_run::engine::node_type::NodeType;
 use crate::workflow_run::engine::ports::{
@@ -60,7 +60,10 @@ pub enum WorkflowValidationError {
     #[error("workflow graph has no start node")]
     MissingStartNode,
     #[error("node {node_id} has unsupported node type {node_type}")]
-    UnsupportedNodeType { node_id: String, node_type: NodeType },
+    UnsupportedNodeType {
+        node_id: String,
+        node_type: NodeType,
+    },
     #[error("nodes are unreachable from the start node: {node_ids:?}")]
     UnreachableNodes { node_ids: Vec<String> },
 }
@@ -153,7 +156,8 @@ where
             .into());
         }
         // Skills and roles are launch dependencies; enabled skills are materialized here.
-        self.prerequisites.validate_and_materialize(&context, &graph)?;
+        self.prerequisites
+            .validate_and_materialize(&context, &graph)?;
         let start_node_run = NodeRunToStart {
             id: self.node_run_id_generator.generate_node_run_id(),
             node_id: start_node.id.clone(),
@@ -167,9 +171,9 @@ where
                 Ok(StartWorkflowRunResult::Started)
             }
             StartWorkflowRunResult::Current => Ok(StartWorkflowRunResult::Current),
-            StartWorkflowRunResult::NotFound => {
-                Err(EngineError::WorkflowRunNotFound { run_id: run_id.to_string() })
-            }
+            StartWorkflowRunResult::NotFound => Err(EngineError::WorkflowRunNotFound {
+                run_id: run_id.to_string(),
+            }),
         }
     }
 
@@ -181,10 +185,7 @@ where
     }
 
     /// Restarts a non-running run by resetting it and re-running it immediately.
-    pub fn restart(
-        &self,
-        run_id: &WorkflowRunId,
-    ) -> Result<RestartWorkflowRunResult, EngineError> {
+    pub fn restart(&self, run_id: &WorkflowRunId) -> Result<RestartWorkflowRunResult, EngineError> {
         let now = self.clock.now_timestamp_millis();
         match self.repository.restart_run(run_id, now)? {
             RestartWorkflowRunResult::Restarted => {
@@ -207,7 +208,10 @@ where
         stop_reason: Option<String>,
     ) -> Result<(), EngineError> {
         let now = self.clock.now_timestamp_millis();
-        match self.repository.complete_node(node_run_id, output, stop_reason, now)? {
+        match self
+            .repository
+            .complete_node(node_run_id, output, stop_reason, now)?
+        {
             AdvanceWorkflowRunResult::Advanced => self.run_schedule(run_id),
             AdvanceWorkflowRunResult::NotRunning | AdvanceWorkflowRunResult::NotFound => Ok(()),
         }
@@ -246,7 +250,8 @@ where
                     && matches!(node.node_type, NodeType::Start | NodeType::Output)
                 {
                     let output = control_node_output(&graph, node, &node_runs, &context);
-                    self.repository.complete_node(&node_run.id, Some(output), None, now)?;
+                    self.repository
+                        .complete_node(&node_run.id, Some(output), None, now)?;
                 }
             }
 
@@ -284,7 +289,8 @@ where
                     input: node_input(node, &context),
                 })
                 .collect();
-            self.repository.start_ready_nodes(run_id, &ready_runs, now)?;
+            self.repository
+                .start_ready_nodes(run_id, &ready_runs, now)?;
 
             // Control nodes complete on the next loop iteration; agent nodes dispatch now.
             for (node, node_run) in ready.iter().zip(ready_runs.iter()) {
@@ -297,9 +303,11 @@ where
 
     /// Loads the execution context or reports the run as missing.
     fn execution_context(&self, run_id: &WorkflowRunId) -> Result<ExecutionContext, EngineError> {
-        self.repository.find_execution_context(run_id)?.ok_or_else(|| {
-            EngineError::WorkflowRunNotFound { run_id: run_id.to_string() }
-        })
+        self.repository
+            .find_execution_context(run_id)?
+            .ok_or_else(|| EngineError::WorkflowRunNotFound {
+                run_id: run_id.to_string(),
+            })
     }
 }
 
@@ -358,7 +366,10 @@ fn compute_run_output(node_runs: &[WorkflowNodeRun]) -> Option<String> {
 fn node_input(node: &WorkflowGraphNode, context: &ExecutionContext) -> Option<String> {
     match node.node_type {
         NodeType::Start => context.run.input.clone(),
-        NodeType::Agent => node.agent_config.as_ref().map(|config| config.prompt.clone()),
+        NodeType::Agent => node
+            .agent_config
+            .as_ref()
+            .map(|config| config.prompt.clone()),
         NodeType::Output | NodeType::Prompt | NodeType::Condition | NodeType::Tool => None,
     }
 }
