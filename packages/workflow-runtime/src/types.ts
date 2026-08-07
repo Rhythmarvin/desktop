@@ -191,6 +191,8 @@ export interface GraphWorkflowNodeState {
   durationMs?: number;
   tokenUsage?: GraphWorkflowTokenUsage;
   errorMessage?: string;
+  /** ACP stop reason recorded in `payload.stop_reason` when the node succeeded. */
+  stopReason?: string;
   /** What this step received when it started (kickoff, upstream, schema…). */
   input?: GraphWorkflowNodeIo;
   /** What this step produced when it finished (or HITL answer summary). */

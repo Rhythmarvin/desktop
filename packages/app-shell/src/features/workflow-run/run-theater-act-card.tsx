@@ -230,6 +230,9 @@ export function RunTheaterActCard({
             status={state.status}
             live={emphasized && isNodeWorking(state.status)}
           />
+          {state.stopReason != null && (
+            <span className="text-[10px] text-muted-foreground">{state.stopReason}</span>
+          )}
         </div>
       )}
       body={isConversationOpen

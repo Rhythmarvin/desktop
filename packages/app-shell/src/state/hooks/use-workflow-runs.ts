@@ -8,6 +8,7 @@ import {
   type WorkflowDefinition,
 } from "@ora/workflow-runtime";
 import { useContractsClient } from "../../contracts-client-context";
+import { isTerminalRunStatus } from "../../features/workflow-run/run-status-style";
 
 const runsByWorkflowKey = (workflowId: string) => ["workflowRun", "byWorkflow", workflowId] as const;
 const runsByProjectKey = (projectId: string) => ["workflowRun", "byProject", projectId] as const;
@@ -69,6 +70,42 @@ export function useDeleteWorkflowRun() {
   });
 }
 
+/** Starts one pending workflow run through the execution engine. */
+export function useStartWorkflowRun() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string }) => client.workflowRun.start(input),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+    },
+  });
+}
+
+/** Cancels one running workflow run through the execution engine. */
+export function useCancelWorkflowRun() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string }) => client.workflowRun.cancel(input),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+    },
+  });
+}
+
+/** Restarts one finished workflow run through the execution engine. */
+export function useRestartWorkflowRun() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string }) => client.workflowRun.restart(input),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+    },
+  });
+}
+
 /**
  * Renames one persisted workflow run through its run-task title.
  *
@@ -115,6 +152,9 @@ export function useRealWorkflowRun(runId: string | null | undefined) {
       };
     },
     enabled: runId != null && runId !== "",
+    // Poll while the run is still executing so status, node states, and reasons stay live.
+    refetchInterval: (query) =>
+      isTerminalRunStatus(query.state.data?.status ?? "pending") ? false : 1500,
   });
 }
 
@@ -136,6 +176,7 @@ export function buildDisplayRun(
       finishedAt: bigint | null;
       error: string | null;
       output: string | null;
+      payload: string | null;
       sessionId?: string | null;
     }>;
   },
@@ -156,6 +197,7 @@ export function buildDisplayRun(
   const nodeStates: Record<string, GraphWorkflowNodeState> = {};
   for (const node of definitionSnapshot.nodes) {
     const nodeRun = nodeRunByNodeId.get(node.id) ?? null;
+    const stopReason = nodeRun?.payload != null ? parseStopReason(nodeRun.payload) : undefined;
     nodeStates[node.id] = {
       status: projectNodeStatus(
         nodeRun as { status: "pending" | "running" | "succeeded" | "failed" | "cancelled" } | null,
@@ -166,6 +208,7 @@ export function buildDisplayRun(
       ...(nodeRun?.startedAt != null ? { startedAt: toIso(nodeRun.startedAt) } : {}),
       ...(nodeRun?.finishedAt != null ? { finishedAt: toIso(nodeRun.finishedAt) } : {}),
       ...(nodeRun?.error != null ? { errorMessage: nodeRun.error } : {}),
+      ...(stopReason != null ? { stopReason } : {}),
       ...(nodeRun?.output != null ? { output: { summary: nodeRun.output } } : {}),
     };
   }
@@ -183,6 +226,16 @@ export function buildDisplayRun(
     updatedAt: toIso(detail.run.updatedAt),
     ...(detail.run.finishedAt != null ? { finishedAt: toIso(detail.run.finishedAt) } : {}),
   };
+}
+
+/** Reads the ACP stop reason from a node run's `payload` JSON, tolerating malformed payloads. */
+function parseStopReason(payload: string): string | undefined {
+  try {
+    const value = JSON.parse(payload) as { stop_reason?: unknown };
+    return typeof value.stop_reason === "string" ? value.stop_reason : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Parses the run's `{"current_nodes":[...]}` state blob into a node-id list. */

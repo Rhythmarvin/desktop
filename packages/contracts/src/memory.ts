@@ -620,6 +620,15 @@ export function createMemoryContractsClient(
       delete: async () => {
         throw new Error("workflowRun.delete not implemented in memory client");
       },
+      start: async () => {
+        throw new Error("workflowRun.start not implemented in memory client");
+      },
+      cancel: async () => {
+        throw new Error("workflowRun.cancel not implemented in memory client");
+      },
+      restart: async () => {
+        throw new Error("workflowRun.restart not implemented in memory client");
+      },
     },
   };
 }

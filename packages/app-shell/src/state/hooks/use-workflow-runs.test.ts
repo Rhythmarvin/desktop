@@ -71,6 +71,7 @@ describe("buildDisplayRun", () => {
         finishedAt: null,
         error: null,
         output: null,
+        payload: null,
       },
     ],
   };
@@ -109,7 +110,7 @@ describe("buildDisplayRun", () => {
   it("derives awaiting_input node state from a pending node-run", () => {
     const pendingDetail = {
       ...detail,
-      nodes: [{ nodeId: "explore", status: "pending", startedAt: null, finishedAt: null, error: null, output: null }],
+      nodes: [{ nodeId: "explore", status: "pending", startedAt: null, finishedAt: null, error: null, output: null, payload: null }],
     };
     const display = buildDisplayRun(pendingDetail, GRAPH);
     expect(display.nodeStates.explore.status).toBe("awaiting_input");
