@@ -3,10 +3,11 @@
 
 use crate::task::resolve_task_cwd;
 use ora_application::{
-    AgentDefinitionRepository, ExecutionContext, FilesystemSkillStorage, NodeType, SkillStorage,
-    StartPrerequisitesError, WorkflowGraph, WorkflowRunStartPrerequisites,
+    AgentDefinitionRepository, ExecutionContext, FilesystemSkillStorage, NodeType, RepositoryError,
+    SkillStorage, StartPrerequisitesError, WorkflowGraph, WorkflowRunStartPrerequisites,
 };
 use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository};
+use ora_domain::AgentDefinitionId;
 use ora_skill_package::{parse_manifest, rewrite_manifest};
 use std::path::{Path, PathBuf};
 
@@ -41,10 +42,7 @@ impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
 
         let agent_repository = SqliteAgentDefinitionRepository::new(self.pool.clone());
         for role_id in &roles {
-            if agent_repository
-                .find_agent_definition_by_name(role_id)?
-                .is_none()
-            {
+            if resolve_role(&agent_repository, role_id)?.is_none() {
                 return Err(StartPrerequisitesError::WorkflowRoleNotFound {
                     role_id: role_id.clone(),
                 });
@@ -65,6 +63,19 @@ impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
         }
         Ok(())
     }
+}
+
+/// Resolves a role by name first, falling back to the agent definition id for graphs that stored
+/// the id as `roleId` (the pre-empty-role editor did).
+fn resolve_role(
+    agent_repository: &SqliteAgentDefinitionRepository,
+    role_id: &str,
+) -> Result<Option<ora_domain::AgentDefinition>, RepositoryError> {
+    let by_name = agent_repository.find_agent_definition_by_name(role_id)?;
+    if by_name.is_some() {
+        return Ok(by_name);
+    }
+    agent_repository.find_agent_definition(&AgentDefinitionId::new(role_id))
 }
 
 /// Collects the distinct enabled skill ids and role ids declared across all agent nodes.

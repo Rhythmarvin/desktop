@@ -22,7 +22,8 @@ use ora_contracts::{
 };
 use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository, SqliteWorkflowRunEngineRepository};
 use ora_domain::{
-    SessionId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId,
+    AgentDefinitionId, SessionId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
+    WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -185,11 +186,17 @@ async fn drive_agent_node(
         .await?;
 
     // Resolve the role's system instructions from the agents catalog; an empty role means no
-    // system-instructions block is sent.
+    // system-instructions block is sent. Name is preferred; the id is a legacy fallback.
     let role_content = match &config.role_id {
-        Some(role_id) if !role_id.trim().is_empty() => agent_repository
-            .find_agent_definition_by_name(role_id)?
-            .map(|definition| definition.content),
+        Some(role_id) if !role_id.trim().is_empty() => {
+            let by_name = agent_repository.find_agent_definition_by_name(role_id)?;
+            let definition = if by_name.is_some() {
+                by_name
+            } else {
+                agent_repository.find_agent_definition(&AgentDefinitionId::new(role_id))?
+            };
+            definition.map(|definition| definition.content)
+        }
         _ => None,
     };
 

@@ -178,6 +178,8 @@ function WorkflowSettingsContent({
       return capabilitiesOverride;
     }
     const baseCapabilities = createMockWorkflowCapabilities(locale);
+    // Store the agent id as roleId; the engine resolves it by name first and falls back to id,
+    // so both hand-authored name roleIds and UI-picked id roleIds run.
     const roles = (agentsQuery.data ?? []).map((agent) => ({
       value: agent.id,
       label: agent.name,
