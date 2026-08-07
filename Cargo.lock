@@ -1737,6 +1737,7 @@ name = "ora-db"
 version = "0.0.0"
 dependencies = [
  "ora-application",
+ "ora-contracts",
  "ora-domain",
  "ora-logging",
  "pretty_assertions",

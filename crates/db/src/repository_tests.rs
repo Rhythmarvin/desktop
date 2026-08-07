@@ -13,10 +13,11 @@ use ora_application::{
     ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository, PublishSnapshotResult,
     RepositoryError, RestartWorkflowRunResult, RollbackDraftResult, SessionRepository,
     SkillRepository, StartPrerequisitesError, StartWorkflowRunResult, TaskRepository, WorkflowGraph,
-    WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunEngine,
-    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowRunStartPrerequisites,
-    WorkflowValidationError, WorktreeRepository,
+    WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler,
+    WorkflowRunEngine, WorkflowRunEngineRepository, WorkflowRunRepository,
+    WorkflowRunStartPrerequisites, WorkflowValidationError, WorktreeRepository,
 };
+use ora_contracts::{StartWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
     ProjectSpecSourceOverride, ProjectSpecSourceOverrideId, ProjectWorkContext,
@@ -1765,6 +1766,32 @@ fn engine_restarts_a_finished_run() {
         && node_run.status == WorkflowNodeStatus::Succeeded));
     assert!(node_runs.iter().any(|node_run| node_run.node_id == "a"
         && node_run.status == WorkflowNodeStatus::Running));
+}
+
+/// Verifies the control handler starts a run and returns its running state.
+#[test]
+fn workflow_run_control_start_returns_the_running_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, linear_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
+        FixedClock::new(40),
+    );
+    let handler = WorkflowRunControlHandler::new(
+        engine,
+        Arc::new(SqliteWorkflowRunRepository::new(pool)),
+    );
+
+    let response = handler
+        .start(StartWorkflowRunRequest {
+            run_id: run_id.to_string(),
+        })
+        .unwrap();
+    assert_eq!(response.run.status, ContractRunStatus::Running);
+    assert_eq!(response.run.id, run_id.to_string());
 }
 
 /// Verifies start rejects a graph containing a v1-unsupported node type.

@@ -3,10 +3,12 @@ use crate::error::WebApiError;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use ora_contracts::{
-    CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest,
-    DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse,
-    ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest,
-    ListWorkflowRunsRequest, ListWorkflowRunsResponse,
+    CancelWorkflowRunRequest, CancelWorkflowRunResponse, CreateWorkflowRunRequest,
+    CreateWorkflowRunResponse, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse,
+    GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest,
+    ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsRequest,
+    ListWorkflowRunsResponse, RestartWorkflowRunRequest, RestartWorkflowRunResponse,
+    StartWorkflowRunRequest, StartWorkflowRunResponse,
 };
 use serde::Deserialize;
 
@@ -33,6 +35,48 @@ pub async fn create_workflow_run(
     app_state
         .backend()
         .create_workflow_run(request)
+        .map(Json)
+        .map_err(Into::into)
+}
+
+/// Starts one pending workflow run against its frozen snapshot graph.
+pub async fn start_workflow_run(
+    State(app_state): State<AppState>,
+    Path(path): Path<RunPath>,
+) -> Result<Json<StartWorkflowRunResponse>, WebApiError> {
+    app_state
+        .backend()
+        .start_workflow_run(StartWorkflowRunRequest {
+            run_id: path.run_id,
+        })
+        .map(Json)
+        .map_err(Into::into)
+}
+
+/// Cancels one running workflow run.
+pub async fn cancel_workflow_run(
+    State(app_state): State<AppState>,
+    Path(path): Path<RunPath>,
+) -> Result<Json<CancelWorkflowRunResponse>, WebApiError> {
+    app_state
+        .backend()
+        .cancel_workflow_run(CancelWorkflowRunRequest {
+            run_id: path.run_id,
+        })
+        .map(Json)
+        .map_err(Into::into)
+}
+
+/// Restarts one finished workflow run.
+pub async fn restart_workflow_run(
+    State(app_state): State<AppState>,
+    Path(path): Path<RunPath>,
+) -> Result<Json<RestartWorkflowRunResponse>, WebApiError> {
+    app_state
+        .backend()
+        .restart_workflow_run(RestartWorkflowRunRequest {
+            run_id: path.run_id,
+        })
         .map(Json)
         .map_err(Into::into)
 }

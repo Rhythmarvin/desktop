@@ -9,12 +9,14 @@
 #[allow(clippy::module_inception)]
 mod engine;
 mod graph;
+mod handlers;
 mod node_type;
 mod ports;
 
 pub use engine::{
     EngineError, NodeExecutor, WorkflowRunCallback, WorkflowRunEngine, WorkflowValidationError,
 };
+pub use handlers::WorkflowRunControlHandler;
 pub use graph::{
     AgentConfig, AgentExecutor, AgentSkill, GraphError, WorkflowGraph, WorkflowGraphNode,
 };

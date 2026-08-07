@@ -16,6 +16,7 @@ mod task;
 mod task_diff;
 mod workflow;
 mod workflow_run;
+mod workflow_run_engine;
 mod workflow_run_executor;
 mod workflow_run_prerequisites;
 

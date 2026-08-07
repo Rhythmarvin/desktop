@@ -92,6 +92,7 @@ struct ConversationEntry {
 /// The engine is synchronous and stateless: every command recomputes the completed, in-flight,
 /// and ready sets from persistence. Agent execution is delegated through `NodeExecutor`; the
 /// backend must route all commands and callbacks for one run through a single serial executor.
+#[derive(Clone)]
 pub struct WorkflowRunEngine<R, E, G, P, C> {
     repository: R,
     node_executor: E,

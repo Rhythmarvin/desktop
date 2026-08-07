@@ -21,7 +21,8 @@ use ora_contracts::{
     TASK_DIFF_COMMENT_REPLIES_PATH, TASK_DIFF_COMMENT_STATUS_PATH, TASK_DIFF_COMMENTS_PATH,
     TASK_DIFF_PATH, TASK_PATH, TASK_PUSH_PATH, TASK_WORKSPACE_PATH, TASKS_PATH,
     WORKFLOW_ACTIVATE_PATH, WORKFLOW_DRAFT_PATH, WORKFLOW_PATH, WORKFLOW_PUBLISH_PATH,
-    WORKFLOW_ROLLBACK_PATH, WORKFLOW_RUN_NODES_PATH, WORKFLOW_RUN_PATH, WORKFLOW_RUNS_PATH,
+    WORKFLOW_ROLLBACK_PATH, WORKFLOW_RUN_CANCEL_PATH, WORKFLOW_RUN_NODES_PATH,
+    WORKFLOW_RUN_PATH, WORKFLOW_RUN_RESTART_PATH, WORKFLOW_RUN_START_PATH, WORKFLOW_RUNS_PATH,
     WORKFLOW_SNAPSHOT_PATH, WORKFLOW_VERSION_PATH, WORKFLOW_VERSIONS_PATH, WORKFLOWS_PATH,
     WORKSPACE_DIRECTORY_PATH, WORKSPACE_FILE_PATH, WORKSPACE_SEARCH_PATH, WORKSPACE_WATCH_PATH,
 };
@@ -231,6 +232,18 @@ pub fn build_router(app_state: AppState) -> Router {
         .route(
             WORKFLOW_RUN_NODES_PATH,
             get(workflow_runs::list_workflow_node_runs),
+        )
+        .route(
+            WORKFLOW_RUN_START_PATH,
+            post(workflow_runs::start_workflow_run),
+        )
+        .route(
+            WORKFLOW_RUN_CANCEL_PATH,
+            post(workflow_runs::cancel_workflow_run),
+        )
+        .route(
+            WORKFLOW_RUN_RESTART_PATH,
+            post(workflow_runs::restart_workflow_run),
         )
         .with_state(app_state)
         .layer(PropagateRequestIdLayer::new(crate::error::X_REQUEST_ID))

@@ -144,6 +144,9 @@ pub fn run() {
             commands::list_workflow_runs_by_workflow,
             commands::list_workflow_node_runs,
             commands::delete_workflow_run,
+            commands::start_workflow_run,
+            commands::cancel_workflow_run,
+            commands::restart_workflow_run,
             // =============================================================================
             // desktop
             // =============================================================================

@@ -33,6 +33,7 @@ const UPSTREAM_PREDECESSOR_SEPARATOR: &str = "\n\n---\n\n";
 ///
 /// `dispatch` spawns a background task that warms, attaches, configures, prompts, and stops one
 /// dedicated session per node, then reports the result through the `WorkflowRunCallback`.
+#[derive(Clone)]
 pub struct WorkflowRunNodeExecutor {
     agent_runtime: Arc<AgentRuntimeManager>,
     pool: RepositoryPool,

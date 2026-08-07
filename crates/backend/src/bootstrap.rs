@@ -11,6 +11,7 @@ use crate::task::TaskApi;
 use crate::task_diff::TaskDiffApi;
 use crate::workflow::WorkflowApi;
 use crate::workflow_run::WorkflowRunApi;
+use crate::workflow_run_engine::{ConcreteWorkflowRunControl, build_workflow_run_engine};
 use ora_application::ApplicationError;
 use ora_contracts::*;
 use ora_contracts::{EmptyErrorParams, PublicError};
@@ -72,6 +73,7 @@ pub struct Backend {
     spec: Arc<SpecApi>,
     workflow: Arc<WorkflowApi>,
     workflow_run: Arc<WorkflowRunApi>,
+    workflow_run_engine: Arc<ConcreteWorkflowRunControl>,
     app_events: Arc<AppEventHub>,
 }
 
@@ -98,15 +100,24 @@ impl Backend {
         let scheduler = Scheduler::new(paths.timezone);
         let worktree_root = Arc::new(RwLock::new(paths.worktree_root));
         let sessions_root = paths.sessions_root;
-        let agent_runtime = AgentRuntimeManager::new(
+        let agent_runtime = Arc::new(
+            AgentRuntimeManager::new(
+                pool.clone(),
+                paths.home_directory,
+                sessions_root.clone(),
+                clock,
+                scheduler,
+                app_events.publisher(),
+            )
+            .map_err(BackendBootstrapError::AgentRuntime)?,
+        );
+        let workflow_run_engine = build_workflow_run_engine(
+            agent_runtime.clone(),
             pool.clone(),
-            paths.home_directory,
-            sessions_root.clone(),
+            paths.skills_root.clone(),
             clock,
-            scheduler,
-            app_events.publisher(),
         )
-        .map_err(BackendBootstrapError::AgentRuntime)?;
+        .control;
 
         Ok(Self {
             project: Arc::new(ProjectApi::new(pool.clone(), sessions_root.clone(), clock)),
@@ -118,7 +129,7 @@ impl Backend {
             )),
             task_diff: Arc::new(TaskDiffApi::new(pool.clone(), clock)),
             session: Arc::new(SessionApi::new(pool.clone())),
-            agent_runtime: Arc::new(agent_runtime),
+            agent_runtime,
             skill: Arc::new(SkillApi::new(pool.clone(), paths.skills_root, clock)),
             agent: Arc::new(AgentApi::new(pool.clone(), clock)),
             spec: Arc::new(SpecApi::new(pool.clone(), paths.ripgrep_path)),
@@ -128,10 +139,41 @@ impl Backend {
                 worktree_root.clone(),
                 clock,
             )),
+            workflow_run_engine,
             app_events,
             pool,
             worktree_root,
         })
+    }
+
+    /// Starts a workflow run against its frozen snapshot graph.
+    pub fn start_workflow_run(
+        &self,
+        request: StartWorkflowRunRequest,
+    ) -> Result<StartWorkflowRunResponse, BackendError> {
+        self.workflow_run_engine
+            .start(request)
+            .map_err(BackendError::from)
+    }
+
+    /// Cancels a running workflow run.
+    pub fn cancel_workflow_run(
+        &self,
+        request: CancelWorkflowRunRequest,
+    ) -> Result<CancelWorkflowRunResponse, BackendError> {
+        self.workflow_run_engine
+            .cancel(request)
+            .map_err(BackendError::from)
+    }
+
+    /// Restarts a finished workflow run.
+    pub fn restart_workflow_run(
+        &self,
+        request: RestartWorkflowRunRequest,
+    ) -> Result<RestartWorkflowRunResponse, BackendError> {
+        self.workflow_run_engine
+            .restart(request)
+            .map_err(BackendError::from)
     }
 
     /// Returns the repository pool needed by server-only services excluded from this extraction.

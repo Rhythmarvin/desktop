@@ -210,6 +210,56 @@ pub struct DeleteWorkflowRunResponse {
     pub run_id: String,
 }
 
+// ── Start / Cancel / Restart (execution engine) ──
+
+/// Identifies the run to start executing against its frozen snapshot graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct StartWorkflowRunRequest {
+    pub run_id: String,
+}
+
+/// Returns the run after starting (or idempotently its current state).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct StartWorkflowRunResponse {
+    pub run: WorkflowRun,
+}
+
+/// Identifies the running run whose node sessions should be stopped and run cancelled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct CancelWorkflowRunRequest {
+    pub run_id: String,
+}
+
+/// Returns the cancelled run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct CancelWorkflowRunResponse {
+    pub run: WorkflowRun,
+}
+
+/// Identifies the non-running run to reset and re-run from its start node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct RestartWorkflowRunRequest {
+    pub run_id: String,
+}
+
+/// Returns the reset and re-running run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct RestartWorkflowRunResponse {
+    pub run: WorkflowRun,
+}
+
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     WorkflowRunStatus::export(config)?;
@@ -229,6 +279,12 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     ListWorkflowNodeRunsResponse::export(config)?;
     DeleteWorkflowRunRequest::export(config)?;
     DeleteWorkflowRunResponse::export(config)?;
+    StartWorkflowRunRequest::export(config)?;
+    StartWorkflowRunResponse::export(config)?;
+    CancelWorkflowRunRequest::export(config)?;
+    CancelWorkflowRunResponse::export(config)?;
+    RestartWorkflowRunRequest::export(config)?;
+    RestartWorkflowRunResponse::export(config)?;
     Ok(())
 }
 

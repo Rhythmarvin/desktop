@@ -18,6 +18,7 @@ const MAX_SKILL_MANIFEST_BYTES: u64 = 1024 * 1024;
 /// Skills and roles are launch hard-dependencies: every enabled skill must exist in the catalog
 /// and every agent's role must resolve in the agents catalog. Enabled skills are copied into
 /// `<worktree>/.claude/skills/<normalized>/`, where CLI tooling auto-discovers them.
+#[derive(Clone)]
 pub struct SkillRoleMaterializer {
     skills_root: PathBuf,
     pool: RepositoryPool,

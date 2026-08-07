@@ -561,6 +561,36 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorkflowRunActive(EmptyErrorParams {}),
                 "workflow run is active and cannot be deleted",
             ),
+            ApplicationError::WorkflowRunGraphParse(_) => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunGraphParse(EmptyErrorParams {}),
+                "workflow graph is invalid",
+            ),
+            ApplicationError::WorkflowRunValidation(_) => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunValidation(EmptyErrorParams {}),
+                "workflow run is not executable",
+            ),
+            ApplicationError::WorkflowSkillNotFound { .. } => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowSkillNotFound(EmptyErrorParams {}),
+                "workflow skill not found",
+            ),
+            ApplicationError::WorkflowRoleNotFound { .. } => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRoleNotFound(EmptyErrorParams {}),
+                "workflow role not found",
+            ),
+            ApplicationError::WorkflowRunStartFailed { .. } => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowRunStartFailed(EmptyErrorParams {}),
+                "workflow run start failed",
+            ),
+            ApplicationError::WorkflowRunNotRestartable => (
+                ErrorClassification::Conflict,
+                PublicError::WorkflowRunNotRestartable(EmptyErrorParams {}),
+                "workflow run cannot be restarted while running",
+            ),
         };
 
         Self {

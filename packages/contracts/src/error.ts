@@ -131,6 +131,12 @@ export type ContractError =
     }
     | { "code": "workflow_run_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_run_active"; "params": EmptyErrorParams }
+    | { "code": "workflow_run_graph_parse"; "params": EmptyErrorParams }
+    | { "code": "workflow_run_validation"; "params": EmptyErrorParams }
+    | { "code": "workflow_skill_not_found"; "params": EmptyErrorParams }
+    | { "code": "workflow_role_not_found"; "params": EmptyErrorParams }
+    | { "code": "workflow_run_start_failed"; "params": EmptyErrorParams }
+    | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams }
   );
 
 /**
@@ -264,7 +270,13 @@ export type PublicError =
     "params": EmptyErrorParams;
   }
   | { "code": "workflow_run_not_found"; "params": EmptyErrorParams }
-  | { "code": "workflow_run_active"; "params": EmptyErrorParams };
+  | { "code": "workflow_run_active"; "params": EmptyErrorParams }
+  | { "code": "workflow_run_graph_parse"; "params": EmptyErrorParams }
+  | { "code": "workflow_run_validation"; "params": EmptyErrorParams }
+  | { "code": "workflow_skill_not_found"; "params": EmptyErrorParams }
+  | { "code": "workflow_role_not_found"; "params": EmptyErrorParams }
+  | { "code": "workflow_run_start_failed"; "params": EmptyErrorParams }
+  | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams };
 
 /**
  * Identifies one Ora request across adapters, spans, responses, and completion events.
