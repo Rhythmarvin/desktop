@@ -84,6 +84,7 @@ fn collect_requirements(graph: &WorkflowGraph) -> (Vec<String>, Vec<String>) {
             }
         }
         if let Some(role_id) = &config.role_id
+            && !role_id.trim().is_empty()
             && !roles.contains(role_id)
         {
             roles.push(role_id.clone());

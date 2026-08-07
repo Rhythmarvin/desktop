@@ -208,7 +208,8 @@ function WorkflowSettingsContent({
               modelId: defaultExecutor.modelId,
             },
           }),
-        roleId: roles[0]?.value ?? baseCapabilities.defaultAgentConfig.roleId,
+        // Roles are optional; a new agent node starts with no role selected.
+        roleId: "",
         mcps: [],
       },
     };

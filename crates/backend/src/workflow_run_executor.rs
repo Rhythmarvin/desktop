@@ -184,12 +184,13 @@ async fn drive_agent_node(
         })
         .await?;
 
-    // Resolve the role's system instructions from the agents catalog.
+    // Resolve the role's system instructions from the agents catalog; an empty role means no
+    // system-instructions block is sent.
     let role_content = match &config.role_id {
-        Some(role_id) => agent_repository
+        Some(role_id) if !role_id.trim().is_empty() => agent_repository
             .find_agent_definition_by_name(role_id)?
             .map(|definition| definition.content),
-        None => None,
+        _ => None,
     };
 
     // Assemble the prompt: role instructions, the node task, then the transitive-predecessor
