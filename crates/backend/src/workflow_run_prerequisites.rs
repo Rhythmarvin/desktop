@@ -4,10 +4,11 @@
 use crate::task::resolve_task_cwd;
 use ora_application::{
     AgentDefinitionRepository, ExecutionContext, FilesystemSkillStorage, NodeType, RepositoryError,
-    SkillStorage, StartPrerequisitesError, WorkflowGraph, WorkflowRunStartPrerequisites,
+    SkillRepository, SkillStorage, StartPrerequisitesError, WorkflowGraph,
+    WorkflowRunStartPrerequisites,
 };
-use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository};
-use ora_domain::AgentDefinitionId;
+use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository, SqliteSkillRepository};
+use ora_domain::{AgentDefinitionId, SkillId};
 use ora_skill_package::{parse_manifest, rewrite_manifest};
 use std::path::{Path, PathBuf};
 
@@ -57,8 +58,9 @@ impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
                     }
                 })?;
             let storage = FilesystemSkillStorage::new(self.skills_root.clone());
+            let skill_repository = SqliteSkillRepository::new(self.pool.clone());
             for skill_id in &skills {
-                materialize_skill(&storage, &worktree_root, skill_id)?;
+                materialize_skill(&storage, Some(&skill_repository), &worktree_root, skill_id)?;
             }
         }
         Ok(())
@@ -105,22 +107,36 @@ fn collect_requirements(graph: &WorkflowGraph) -> (Vec<String>, Vec<String>) {
 }
 
 /// Resolves one enabled skill against the catalog and copies it into the worktree.
+///
+/// A namespaced id like `cdase:sfmea_review` resolves by the suffix after the colon. When that
+/// name is not a catalog directory, `skill_repository` resolves a skill id (the editor stores
+/// skill ids as `skillId`) back to the catalog name.
 fn materialize_skill(
     storage: &FilesystemSkillStorage,
+    skill_repository: Option<&SqliteSkillRepository>,
     worktree_root: &Path,
     skill_id: &str,
 ) -> Result<(), StartPrerequisitesError> {
-    // A namespaced id like `cdase:sfmea_review` resolves by the suffix after the colon.
-    let catalog_name = skill_id.rsplit(':').next().unwrap_or(skill_id);
-    if !storage.formal_exists(catalog_name) {
+    let candidate = skill_id.rsplit(':').next().unwrap_or(skill_id);
+    let catalog_name = if storage.formal_exists(candidate) {
+        candidate.to_string()
+    } else if let Some(repository) = skill_repository {
+        repository
+            .find_skill(&SkillId::new(candidate))
+            .map_err(StartPrerequisitesError::Repository)?
+            .map(|skill| skill.name)
+            .ok_or_else(|| StartPrerequisitesError::WorkflowSkillNotFound {
+                skill_id: skill_id.to_string(),
+            })?
+    } else {
         return Err(StartPrerequisitesError::WorkflowSkillNotFound {
             skill_id: skill_id.to_string(),
         });
-    }
-    let dir_name = normalize_skill_name(catalog_name);
+    };
+    let dir_name = normalize_skill_name(&catalog_name);
     let target = worktree_root.join(".claude").join("skills").join(&dir_name);
     storage
-        .copy_package_to(catalog_name, &target)
+        .copy_package_to(&catalog_name, &target)
         .map_err(|error| StartPrerequisitesError::SkillMaterializationError {
             message: error.to_string(),
         })?;
@@ -176,7 +192,7 @@ mod tests {
         let worktree = temp.path().join("worktree");
         std::fs::create_dir_all(&worktree).unwrap();
 
-        materialize_skill(&storage, &worktree, "cdase:sfmea_review").unwrap();
+        materialize_skill(&storage, None, &worktree, "cdase:sfmea_review").unwrap();
 
         let target = worktree.join(".claude").join("skills").join("sfmea-review");
         assert!(target.join("notes.txt").exists());
@@ -196,7 +212,7 @@ mod tests {
         let worktree = temp.path().join("worktree");
         std::fs::create_dir_all(&worktree).unwrap();
 
-        let error = materialize_skill(&storage, &worktree, "missing_skill").unwrap_err();
+        let error = materialize_skill(&storage, None, &worktree, "missing_skill").unwrap_err();
         assert!(matches!(
             error,
             StartPrerequisitesError::WorkflowSkillNotFound { skill_id }
@@ -219,8 +235,8 @@ mod tests {
         let worktree = temp.path().join("worktree");
         std::fs::create_dir_all(&worktree).unwrap();
 
-        materialize_skill(&storage, &worktree, "explore").unwrap();
-        materialize_skill(&storage, &worktree, "explore").unwrap();
+        materialize_skill(&storage, None, &worktree, "explore").unwrap();
+        materialize_skill(&storage, None, &worktree, "explore").unwrap();
         assert!(
             worktree
                 .join(".claude")
