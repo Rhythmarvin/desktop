@@ -15,6 +15,11 @@ use std::path::{Path, PathBuf};
 /// Upper bound for a SKILL.md manifest read during materialization.
 const MAX_SKILL_MANIFEST_BYTES: u64 = 1024 * 1024;
 
+/// The cross-tool skill root under the worktree: opencode, Claude Code, and .agents all discover
+/// `.agents/skills/<name>/` (the project-shared standard), so materializing there once serves
+/// every agent CLI.
+const SKILL_DISCOVERY_DIRS: [&str; 1] = [".agents"];
+
 /// Validates start-time skill and role prerequisites and materializes skills into the worktree.
 ///
 /// Skills and roles are launch hard-dependencies: every enabled skill must exist in the catalog
@@ -134,14 +139,19 @@ fn materialize_skill(
         });
     };
     let dir_name = normalize_skill_name(&catalog_name);
-    let target = worktree_root.join(".claude").join("skills").join(&dir_name);
-    storage
-        .copy_package_to(&catalog_name, &target)
-        .map_err(|error| StartPrerequisitesError::SkillMaterializationError {
-            message: error.to_string(),
-        })?;
-    rewrite_manifest_name(&target, &dir_name)
-        .map_err(|message| StartPrerequisitesError::SkillMaterializationError { message })?;
+    for discovery_dir in SKILL_DISCOVERY_DIRS {
+        let target = worktree_root
+            .join(discovery_dir)
+            .join("skills")
+            .join(&dir_name);
+        storage
+            .copy_package_to(&catalog_name, &target)
+            .map_err(|error| StartPrerequisitesError::SkillMaterializationError {
+                message: error.to_string(),
+            })?;
+        rewrite_manifest_name(&target, &dir_name)
+            .map_err(|message| StartPrerequisitesError::SkillMaterializationError { message })?;
+    }
     Ok(())
 }
 
@@ -194,15 +204,24 @@ mod tests {
 
         materialize_skill(&storage, None, &worktree, "cdase:sfmea_review").unwrap();
 
-        let target = worktree.join(".claude").join("skills").join("sfmea-review");
-        assert!(target.join("notes.txt").exists());
-        let manifest = parse_manifest(
-            &std::fs::read(target.join("SKILL.md")).unwrap(),
-            MAX_SKILL_MANIFEST_BYTES,
-        )
-        .unwrap();
-        assert_eq!(manifest.name, "sfmea-review");
-        assert_eq!(manifest.description, "review");
+        // The package lands under every CLI discovery root so the agent in use finds it.
+        for discovery_dir in SKILL_DISCOVERY_DIRS {
+            let target = worktree
+                .join(discovery_dir)
+                .join("skills")
+                .join("sfmea-review");
+            assert!(
+                target.join("notes.txt").exists(),
+                "missing under {discovery_dir}"
+            );
+            let manifest = parse_manifest(
+                &std::fs::read(target.join("SKILL.md")).unwrap(),
+                MAX_SKILL_MANIFEST_BYTES,
+            )
+            .unwrap();
+            assert_eq!(manifest.name, "sfmea-review");
+            assert_eq!(manifest.description, "review");
+        }
     }
 
     #[test]
@@ -239,7 +258,7 @@ mod tests {
         materialize_skill(&storage, None, &worktree, "explore").unwrap();
         assert!(
             worktree
-                .join(".claude")
+                .join(".agents")
                 .join("skills")
                 .join("explore")
                 .join("SKILL.md")
