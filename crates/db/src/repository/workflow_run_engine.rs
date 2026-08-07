@@ -3,7 +3,7 @@ use ora_application::{
     RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, WorkflowRunEngineRepository,
 };
 use ora_domain::{
-    SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId,
+    SessionId, SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId,
     WorkflowRunStatus,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
@@ -91,6 +91,24 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError> {
         self.pool
             .with_connection(|connection| super::workflow_run::list_node_runs(connection, run_id))
+            .map_err(engine_repository_error_from_database)
+    }
+
+    fn set_node_run_session_id(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        session_id: &SessionId,
+        now: i64,
+    ) -> Result<(), RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE workflow_node_runs SET session_id = ?2, updated_at = ?3
+                     WHERE id = ?1 AND is_deleted = 0",
+                    params![node_run_id.as_ref(), session_id.as_ref(), now],
+                )?;
+                Ok(())
+            })
             .map_err(engine_repository_error_from_database)
     }
 

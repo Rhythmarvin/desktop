@@ -16,6 +16,7 @@ mod task;
 mod task_diff;
 mod workflow;
 mod workflow_run;
+mod workflow_run_executor;
 
 pub use agent_runtime::{SessionEventStream, SessionLocator};
 pub use app_event::AppEventHub;

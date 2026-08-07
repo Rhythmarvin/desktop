@@ -12,7 +12,9 @@ mod graph;
 mod node_type;
 mod ports;
 
-pub use engine::{EngineError, NodeExecutor, WorkflowRunEngine, WorkflowValidationError};
+pub use engine::{
+    EngineError, NodeExecutor, WorkflowRunCallback, WorkflowRunEngine, WorkflowValidationError,
+};
 pub use graph::{
     AgentConfig, AgentExecutor, AgentSkill, GraphError, WorkflowGraph, WorkflowGraphNode,
 };

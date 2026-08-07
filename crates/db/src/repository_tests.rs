@@ -1170,6 +1170,28 @@ fn engine_repository_starts_ready_nodes_and_tracks_them() {
     assert_eq!(node_runs[1].status, WorkflowNodeStatus::Running);
 }
 
+/// Verifies a running node run is bound to its real Ora session after attach.
+#[test]
+fn engine_repository_binds_a_node_run_to_its_session() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository.start_run(&run_id, &start_node_run(None), 40).unwrap();
+
+    repository
+        .set_node_run_session_id(
+            &WorkflowNodeRunId::new("node-start"),
+            &SessionId::new("session-1"),
+            41,
+        )
+        .unwrap();
+    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
+    assert_eq!(
+        node_runs[0].session_id.as_ref().map(ToString::to_string),
+        Some("session-1".to_string())
+    );
+}
+
 /// Verifies a failed node fails the run and anchors the failed node in `current_nodes`.
 #[test]
 fn engine_repository_fail_node_fails_run_and_anchors_the_node() {

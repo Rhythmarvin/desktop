@@ -30,6 +30,30 @@ pub trait NodeExecutor {
     );
 }
 
+/// Reports node completion from the session driver back to the run engine.
+///
+/// The backend session driver invokes this when an agent node's session finishes; callbacks MUST
+/// be routed through the run's serial executor so state transitions stay serial.
+pub trait WorkflowRunCallback: Send + Sync {
+    /// Reports a successful node completion with its accumulated conversation and stop reason.
+    fn complete_node(
+        &self,
+        run_id: &WorkflowRunId,
+        node_run_id: &WorkflowNodeRunId,
+        output: Option<String>,
+        stop_reason: Option<String>,
+    );
+
+    /// Reports a failed node execution with an actionable error and any accumulated output.
+    fn fail_node(
+        &self,
+        run_id: &WorkflowRunId,
+        node_run_id: &WorkflowNodeRunId,
+        error: String,
+        output: Option<String>,
+    );
+}
+
 /// Structural validation failures raised when starting a workflow run.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WorkflowValidationError {

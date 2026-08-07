@@ -1,5 +1,5 @@
 use crate::RepositoryError;
-use ora_domain::{Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
+use ora_domain::{SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
 
 /// A node-run the engine wants to start in one scheduling wave.
 ///
@@ -84,6 +84,15 @@ pub trait WorkflowRunEngineRepository {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError>;
+
+    /// Binds a node run to its real Ora session right after `attach_session` succeeds, so the
+    /// frontend can subscribe to the session's permission stream before the prompt starts.
+    fn set_node_run_session_id(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        session_id: &SessionId,
+        now: i64,
+    ) -> Result<(), RepositoryError>;
 
     /// Starts a run by creating the start node-run and transitioning the run to `Running`.
     ///
