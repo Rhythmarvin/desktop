@@ -3,7 +3,8 @@ use ora_application::{
     RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, WorkflowRunEngineRepository,
 };
 use ora_domain::{
-    SessionStatus, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId, WorkflowRunStatus,
+    SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId,
+    WorkflowRunStatus,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
@@ -81,6 +82,15 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                     graph_json,
                 }))
             })
+            .map_err(engine_repository_error_from_database)
+    }
+
+    fn list_node_runs(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkflowNodeRun>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| super::workflow_run::list_node_runs(connection, run_id))
             .map_err(engine_repository_error_from_database)
     }
 

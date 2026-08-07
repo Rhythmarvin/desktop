@@ -373,7 +373,7 @@ pub(super) fn map_node_run_row(row: &Row<'_>) -> Result<WorkflowNodeRun, crate::
 }
 
 /// Lists the node-run rows of one run in stable ascending order.
-fn list_node_runs(
+pub(super) fn list_node_runs(
     connection: &rusqlite::Connection,
     run_id: &WorkflowRunId,
 ) -> Result<Vec<WorkflowNodeRun>, crate::DatabaseError> {

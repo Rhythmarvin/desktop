@@ -1,5 +1,5 @@
 use crate::RepositoryError;
-use ora_domain::{Task, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
+use ora_domain::{Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
 
 /// A node-run the engine wants to start in one scheduling wave.
 ///
@@ -22,6 +22,12 @@ pub struct ExecutionContext {
     pub task: Task,
     pub worktree: Worktree,
     pub graph_json: String,
+}
+
+/// Supplies new node-run identifiers for the engine's scheduling waves.
+pub trait WorkflowNodeRunIdGenerator {
+    /// Produces the identifier for a newly created node run.
+    fn generate_node_run_id(&self) -> WorkflowNodeRunId;
 }
 
 /// Outcome of starting a run.
@@ -72,6 +78,12 @@ pub trait WorkflowRunEngineRepository {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Option<ExecutionContext>, RepositoryError>;
+
+    /// Lists the node-run rows of one run so the engine can recompute ready and in-flight sets.
+    fn list_node_runs(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkflowNodeRun>, RepositoryError>;
 
     /// Starts a run by creating the start node-run and transitioning the run to `Running`.
     ///

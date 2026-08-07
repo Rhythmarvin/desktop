@@ -9,13 +9,16 @@ mod tests;
 
 pub use engine::{
     AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentSkill, CancelWorkflowRunResult,
-    ExecutionContext, GraphError, NodeRunToStart, NodeType, RestartWorkflowRunResult,
-    StartWorkflowRunResult, UnknownNodeType, WorkflowGraph, WorkflowGraphNode,
-    WorkflowRunEngineRepository,
+    EngineError, ExecutionContext, GraphError, NodeExecutor, NodeRunToStart, NodeType,
+    RestartWorkflowRunResult, StartWorkflowRunResult, UnknownNodeType, WorkflowGraph,
+    WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRunEngine, WorkflowRunEngineRepository,
+    WorkflowValidationError,
 };
 pub use handlers::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
     ListWorkflowNodeRunsHandler, ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler,
 };
-pub use id_generator::UuidWorkflowRunIdGenerator;
+pub use id_generator::{
+    UuidWorkflowNodeRunIdGenerator, UuidWorkflowRunIdGenerator,
+};
 pub use ports::{DeleteWorkflowRunResult, WorkflowRunIdGenerator, WorkflowRunRepository};

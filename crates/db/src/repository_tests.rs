@@ -1,16 +1,20 @@
 use std::{
+    cell::Cell,
     path::PathBuf,
-    sync::{Arc, Barrier},
+    sync::{Arc, Barrier, Mutex},
     thread,
 };
 
 use ora_application::{
     ActivateVersionResult, AdvanceWorkflowRunResult, AgentDefinitionRepository,
-    CancelWorkflowRunResult, DeleteSnapshotResult, DeleteWorkflowResult, DeleteWorkflowRunResult,
-    NodeRunToStart, ProjectRepository, ProjectSpecSourceOverrideRepository,
-    ProjectWorkContextRepository, PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult,
-    RollbackDraftResult, SessionRepository, SkillRepository, StartWorkflowRunResult, TaskRepository,
-    WorkflowRepository, WorkflowRunEngineRepository, WorkflowRunRepository, WorktreeRepository,
+    CancelWorkflowRunResult, Clock, DeleteSnapshotResult, DeleteWorkflowResult,
+    DeleteWorkflowRunResult, EngineError, ExecutionContext, NodeExecutor, NodeRunToStart, NodeType,
+    ProjectRepository,
+    ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository, PublishSnapshotResult,
+    RepositoryError, RestartWorkflowRunResult, RollbackDraftResult, SessionRepository,
+    SkillRepository, StartWorkflowRunResult, TaskRepository, WorkflowGraphNode,
+    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowValidationError, WorktreeRepository,
 };
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
@@ -1367,6 +1371,419 @@ fn engine_repository_fail_orphaned_node_runs_is_idempotent_and_preserves_anchor(
     let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
     assert_eq!(run.status, WorkflowRunStatus::Failed);
     assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"start\"]}"));
+}
+
+/// Records every agent dispatch so tests can drive completion and assert fan-out.
+#[derive(Clone, Default)]
+struct RecordingNodeExecutor {
+    dispatched: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl NodeExecutor for RecordingNodeExecutor {
+    fn dispatch(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        node: &WorkflowGraphNode,
+        _context: &ExecutionContext,
+    ) {
+        self.dispatched
+            .lock()
+            .unwrap()
+            .push((node_run_id.to_string(), node.id.clone()));
+    }
+}
+
+/// Assigns deterministic ascending node-run ids so tests can predict dispatch order.
+#[derive(Default)]
+struct SequenceNodeRunIdGenerator {
+    next: Cell<u64>,
+}
+
+impl WorkflowNodeRunIdGenerator for SequenceNodeRunIdGenerator {
+    fn generate_node_run_id(&self) -> WorkflowNodeRunId {
+        let current = self.next.get();
+        self.next.set(current + 1);
+        WorkflowNodeRunId::new(format!("node-{current}"))
+    }
+}
+
+/// A deterministic clock for engine scheduling tests.
+#[derive(Clone, Copy)]
+struct FixedClock {
+    now: i64,
+}
+
+impl FixedClock {
+    fn new(now: i64) -> Self {
+        Self { now }
+    }
+}
+
+impl Clock for FixedClock {
+    fn now_timestamp_millis(&self) -> i64 {
+        self.now
+    }
+}
+
+/// Builds one pending run against a workflow whose frozen graph is the given JSON.
+fn create_pending_run_with_graph(
+    pool: &RepositoryPool,
+    graph_json: &str,
+) -> (WorkflowRunId, TaskId, WorktreeId) {
+    let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
+    let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+    let (workflow, draft) = workflow_with_draft("workflow-engine", graph_json, 10);
+    workflow_repository
+        .create_workflow(workflow.clone(), draft.clone())
+        .unwrap();
+    let snapshot = published_snapshot("snapshot-engine", &workflow.id, "v1", &draft.graph, 20);
+    workflow_repository
+        .publish_snapshot(
+            &workflow.id,
+            snapshot.id.clone(),
+            snapshot.version.clone(),
+            snapshot.created_at,
+        )
+        .unwrap();
+
+    let run_id = WorkflowRunId::new("run-1");
+    let task_id = TaskId::new("task-1");
+    let worktree_id = WorktreeId::new("worktree-1");
+    let run = WorkflowRun::new(
+        run_id.clone(),
+        workflow.id.clone(),
+        snapshot.id.clone(),
+        WorkflowRunStatus::Pending,
+        Some("{\"current_nodes\":[]}".to_string()),
+        Some("kickoff".to_string()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    let task = Task::workflow_run(
+        task_id.clone(),
+        ProjectId::new("project-1"),
+        "Workflow workflow-engine 30",
+        TaskStatus::Todo,
+        run_id.clone(),
+        worktree_id.clone(),
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    let worktree = Worktree::new(
+        worktree_id.clone(),
+        task_id.clone(),
+        Some("ora/task-1".to_string()),
+        WorktreeBaseline::recorded("base-commit").unwrap(),
+        WorktreeActivity::Active,
+        AuditFields::new(30, 30, /*is_deleted*/ false),
+    );
+    run_repository.create_run(run, task, worktree).unwrap();
+    (run_id, task_id, worktree_id)
+}
+
+/// A linear chain: start → agent `a` → output `out`.
+fn linear_graph() -> &'static str {
+    r#"{"nodes":[
+        {"id":"start","data":{"kind":"start"}},
+        {"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"open_code","modelId":"m"},"roleId":"R","skills":[],"prompt":"do a"}}},
+        {"id":"out","data":{"kind":"output"}}
+    ],"edges":[{"source":"start","target":"a"},{"source":"a","target":"out"}]}"#
+}
+
+/// Two parallel branches merging into `merge`, then `out`.
+fn fan_in_graph() -> &'static str {
+    r#"{"nodes":[
+        {"id":"start","data":{"kind":"start"}},
+        {"id":"l","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"roleId":"R","skills":[],"prompt":"l"}}},
+        {"id":"r","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"roleId":"R","skills":[],"prompt":"r"}}},
+        {"id":"merge","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"roleId":"R","skills":[],"prompt":"merge"}}},
+        {"id":"out","data":{"kind":"output"}}
+    ],"edges":[{"source":"start","target":"l"},{"source":"start","target":"r"},{"source":"l","target":"merge"},{"source":"r","target":"merge"},{"source":"merge","target":"out"}]}"#
+}
+
+/// A graph containing a v1-unsupported `condition` node.
+fn unsupported_graph() -> &'static str {
+    r#"{"nodes":[
+        {"id":"start","data":{"kind":"start"}},
+        {"id":"c","data":{"kind":"condition","condition":"x"}}
+    ],"edges":[{"source":"start","target":"c"}]}"#
+}
+
+/// A graph with no start node.
+fn no_start_graph() -> &'static str {
+    r#"{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"roleId":"R","skills":[],"prompt":"a"}}}],"edges":[]}"#
+}
+
+/// A graph with an orphaned node unreachable from start.
+fn unreachable_graph() -> &'static str {
+    r#"{"nodes":[
+        {"id":"start","data":{"kind":"start"}},
+        {"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"roleId":"R","skills":[],"prompt":"a"}}},
+        {"id":"orphan","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"roleId":"R","skills":[],"prompt":"orphan"}}}
+    ],"edges":[{"source":"start","target":"a"}]}"#
+}
+
+/// Builds a one-turn assistant conversation array used as an agent node output.
+fn assistant_conversation(text: &str) -> String {
+    serde_json::json!([{ "role": "assistant", "text": text }]).to_string()
+}
+
+/// Verifies the engine runs a linear chain to `Succeeded`, executing control nodes synchronously
+/// and driving the agent node through the executor.
+#[test]
+fn engine_runs_a_linear_chain_to_success() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, linear_graph());
+    let executor = RecordingNodeExecutor::default();
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        executor.clone(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+
+    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+
+    // The start node completed synchronously; the agent `a` is dispatched and in flight.
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
+    let start_run = node_runs.iter().find(|node_run| node_run.node_id == "start").unwrap();
+    assert_eq!(start_run.status, WorkflowNodeStatus::Succeeded);
+    assert_eq!(start_run.input.as_deref(), Some("kickoff"));
+    let agent_run = node_runs.iter().find(|node_run| node_run.node_id == "a").unwrap();
+    assert_eq!(agent_run.status, WorkflowNodeStatus::Running);
+    assert_eq!(agent_run.input.as_deref(), Some("do a"));
+    assert_eq!(executor.dispatched.lock().unwrap().len(), 1);
+
+    // Completing the agent lets the output node finish synchronously and the run succeed.
+    engine
+        .complete_node(
+            &run_id,
+            &agent_run.id,
+            Some(assistant_conversation("done")),
+            Some("end_turn".to_string()),
+        )
+        .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Succeeded);
+    assert_eq!(run.output.as_deref(), Some("done"));
+}
+
+/// Verifies a failing agent fails the run and anchors the failed node in `current_nodes`.
+#[test]
+fn engine_fails_the_run_when_a_node_fails() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, linear_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+
+    let agent_run = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap()
+        .into_iter()
+        .find(|node_run| node_run.node_id == "a")
+        .unwrap();
+    engine
+        .fail_node(&agent_run.id, "boom".to_string(), Some("partial".to_string()))
+        .unwrap();
+
+    let run = SqliteWorkflowRunRepository::new(pool.clone()).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Failed);
+    assert_eq!(run.error.as_deref(), Some("boom"));
+    assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"a\"]}"));
+    let agent_run = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap()
+        .into_iter()
+        .find(|node_run| node_run.node_id == "a")
+        .unwrap();
+    assert_eq!(agent_run.status, WorkflowNodeStatus::Failed);
+    assert_eq!(agent_run.output.as_deref(), Some("partial"));
+}
+
+/// Verifies both branches of a fan-in graph dispatch concurrently and `merge` waits for both.
+#[test]
+fn engine_dispatches_parallel_branches_concurrently() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, fan_in_graph());
+    let executor = RecordingNodeExecutor::default();
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        executor.clone(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+
+    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+
+    // Both leaves dispatched in the same wave; the merge node waits.
+    let dispatched: Vec<String> = executor
+        .dispatched
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, node_id)| node_id.clone())
+        .collect();
+    assert_eq!(dispatched, vec!["l", "r"]);
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
+    assert!(!node_runs.iter().any(|node_run| node_run.node_id == "merge"));
+
+    // Completing both leaves makes `merge` ready.
+    let left = node_runs.iter().find(|node_run| node_run.node_id == "l").unwrap().id.clone();
+    let right = node_runs.iter().find(|node_run| node_run.node_id == "r").unwrap().id.clone();
+    engine
+        .complete_node(&run_id, &left, Some(assistant_conversation("left")), None)
+        .unwrap();
+    engine
+        .complete_node(&run_id, &right, Some(assistant_conversation("right")), None)
+        .unwrap();
+    let dispatched: Vec<String> = executor
+        .dispatched
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, node_id)| node_id.clone())
+        .collect();
+    assert_eq!(dispatched, vec!["l", "r", "merge"]);
+
+    // Completing `merge` drains the graph and the run succeeds.
+    let merge = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap()
+        .into_iter()
+        .find(|node_run| node_run.node_id == "merge")
+        .unwrap();
+    engine
+        .complete_node(&run_id, &merge.id, Some(assistant_conversation("merged")), None)
+        .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Succeeded);
+    assert_eq!(run.output.as_deref(), Some("merged"));
+}
+
+/// Verifies cancelling a running run commits the cancelled transition.
+#[test]
+fn engine_cancels_a_running_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, linear_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+
+    assert_eq!(engine.cancel(&run_id).unwrap(), CancelWorkflowRunResult::Cancelled);
+    let run = SqliteWorkflowRunRepository::new(pool).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Cancelled);
+}
+
+/// Verifies restarting a finished run resets it and immediately re-runs it.
+#[test]
+fn engine_restarts_a_finished_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, linear_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+    assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
+    let agent_run = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap()
+        .into_iter()
+        .find(|node_run| node_run.node_id == "a")
+        .unwrap();
+    engine
+        .complete_node(&run_id, &agent_run.id, Some(assistant_conversation("done")), None)
+        .unwrap();
+    assert_eq!(
+        SqliteWorkflowRunRepository::new(pool.clone()).find_run(&run_id).unwrap().unwrap().status,
+        WorkflowRunStatus::Succeeded
+    );
+
+    assert_eq!(engine.restart(&run_id).unwrap(), RestartWorkflowRunResult::Restarted);
+    let run = SqliteWorkflowRunRepository::new(pool.clone()).find_run(&run_id).unwrap().unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Running);
+    let node_runs = SqliteWorkflowRunRepository::new(pool).list_node_runs(&run_id).unwrap();
+    assert!(node_runs.iter().any(|node_run| node_run.node_id == "start"
+        && node_run.status == WorkflowNodeStatus::Succeeded));
+    assert!(node_runs.iter().any(|node_run| node_run.node_id == "a"
+        && node_run.status == WorkflowNodeStatus::Running));
+}
+
+/// Verifies start rejects a graph containing a v1-unsupported node type.
+#[test]
+fn engine_rejects_unsupported_node_type() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, unsupported_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+
+    let error = engine.start(&run_id).unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::Validation(WorkflowValidationError::UnsupportedNodeType {
+            node_id,
+            node_type,
+        }) if node_id == "c" && node_type == NodeType::Condition
+    ));
+}
+
+/// Verifies start rejects a graph without a start node.
+#[test]
+fn engine_rejects_missing_start_node() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, no_start_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+
+    assert!(matches!(
+        engine.start(&run_id).unwrap_err(),
+        EngineError::Validation(WorkflowValidationError::MissingStartNode)
+    ));
+}
+
+/// Verifies start rejects nodes unreachable from the unique start node.
+#[test]
+fn engine_rejects_unreachable_nodes() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, unreachable_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+
+    let error = engine.start(&run_id).unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::Validation(WorkflowValidationError::UnreachableNodes { node_ids })
+            if node_ids == vec!["orphan".to_string()]
+    ));
 }
 
 /// Verifies a workflow with live runs cannot be deleted, protecting the runs' frozen snapshots.
