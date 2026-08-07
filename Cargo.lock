@@ -1741,6 +1741,7 @@ dependencies = [
  "pretty_assertions",
  "r2d2",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.19",
  "tracing",

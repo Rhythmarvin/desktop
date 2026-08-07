@@ -6,11 +6,16 @@
 
 mod graph;
 mod node_type;
+mod ports;
 
 pub use graph::{
     AgentConfig, AgentExecutor, AgentSkill, GraphError, WorkflowGraph, WorkflowGraphNode,
 };
 pub use node_type::{NodeType, UnknownNodeType};
+pub use ports::{
+    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
+    RestartWorkflowRunResult, StartWorkflowRunResult, WorkflowRunEngineRepository,
+};
 
 #[cfg(test)]
 mod tests;

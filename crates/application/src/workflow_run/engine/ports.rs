@@ -1,0 +1,144 @@
+use crate::RepositoryError;
+use ora_domain::{Task, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
+
+/// A node-run the engine wants to start in one scheduling wave.
+///
+/// The engine assigns the node-run id; the repository persists the row and the `current_nodes`
+/// anchor in the same transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeRunToStart {
+    pub id: WorkflowNodeRunId,
+    pub node_id: String,
+    pub node_type: String,
+    pub input: Option<String>,
+}
+
+/// Everything the engine needs to start or drive a run, fetched in one read.
+///
+/// `graph_json` is the raw frozen React Flow document; the engine parses it into a `WorkflowGraph`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionContext {
+    pub run: WorkflowRun,
+    pub task: Task,
+    pub worktree: Worktree,
+    pub graph_json: String,
+}
+
+/// Outcome of starting a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartWorkflowRunResult {
+    /// The run transitioned from `Pending` (empty `current_nodes`) to `Running`.
+    Started,
+    /// The run is not startable; the caller returns the current run idempotently.
+    Current,
+    NotFound,
+}
+
+/// Outcome of advancing one node-run (`complete` or `fail`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvanceWorkflowRunResult {
+    /// The node-run transitioned and the run state was maintained.
+    Advanced,
+    /// The node-run is not `Running` (a late or duplicate callback); the transition is a no-op.
+    NotRunning,
+    NotFound,
+}
+
+/// Outcome of cancelling a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelWorkflowRunResult {
+    Cancelled,
+    NotActive,
+    NotFound,
+}
+
+/// Outcome of restarting a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartWorkflowRunResult {
+    Restarted,
+    NotRestartable,
+    NotFound,
+}
+
+/// Persistence operations for the workflow run execution engine.
+///
+/// This port is deliberately separate from the graph-agnostic `WorkflowRunRepository` CRUD port:
+/// the engine owns node-run writes and the run state machine, and every state transition must be
+/// a single immediate transaction that maintains `state.current_nodes`. No generic overwrite of
+/// the full run state is exposed to callers.
+pub trait WorkflowRunEngineRepository {
+    /// Loads the run, its task, its worktree, and the frozen snapshot graph in one read.
+    fn find_execution_context(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Option<ExecutionContext>, RepositoryError>;
+
+    /// Starts a run by creating the start node-run and transitioning the run to `Running`.
+    ///
+    /// Only a `Pending` run with empty `current_nodes` transitions; anything else returns
+    /// `Current` so callers can return the existing run idempotently.
+    fn start_run(
+        &self,
+        run_id: &WorkflowRunId,
+        start_node_run: &NodeRunToStart,
+        now: i64,
+    ) -> Result<StartWorkflowRunResult, RepositoryError>;
+
+    /// Starts a wave of ready nodes, creating their node-run rows and updating `current_nodes`.
+    fn start_ready_nodes(
+        &self,
+        run_id: &WorkflowRunId,
+        node_runs: &[NodeRunToStart],
+        now: i64,
+    ) -> Result<(), RepositoryError>;
+
+    /// Marks one node-run succeeded, records its output and stop reason, and removes it from
+    /// `current_nodes`.
+    fn complete_node(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        output: Option<String>,
+        stop_reason: Option<String>,
+        now: i64,
+    ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;
+
+    /// Marks one node-run and its run failed, anchoring the failed node in `current_nodes`.
+    fn fail_node(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        error: String,
+        output: Option<String>,
+        now: i64,
+    ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;
+
+    /// Finishes a run as succeeded with the given output.
+    fn finish_run(
+        &self,
+        run_id: &WorkflowRunId,
+        output: Option<String>,
+        now: i64,
+    ) -> Result<(), RepositoryError>;
+
+    /// Cancels a running run: the run and its non-terminal node runs become `Cancelled` and
+    /// `current_nodes` is cleared.
+    fn cancel_run(
+        &self,
+        run_id: &WorkflowRunId,
+        now: i64,
+    ) -> Result<CancelWorkflowRunResult, RepositoryError>;
+
+    /// Restarts a non-running run: deletes its node runs and resets it to `Pending` with empty
+    /// `current_nodes`.
+    fn restart_run(
+        &self,
+        run_id: &WorkflowRunId,
+        now: i64,
+    ) -> Result<RestartWorkflowRunResult, RepositoryError>;
+
+    /// Lists runs in `Running` or `Failed` status for boot-time crash recovery.
+    fn list_recoverable_runs(&self) -> Result<Vec<WorkflowRunId>, RepositoryError>;
+
+    /// Fails the non-terminal node runs of the given runs and stops their running sessions.
+    fn fail_orphaned_node_runs(&self, run_ids: &[WorkflowRunId], now: i64)
+        -> Result<(), RepositoryError>;
+}

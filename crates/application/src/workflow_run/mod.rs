@@ -8,8 +8,10 @@ mod ports;
 mod tests;
 
 pub use engine::{
-    AgentConfig, AgentExecutor, AgentSkill, GraphError, NodeType, UnknownNodeType, WorkflowGraph,
-    WorkflowGraphNode,
+    AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentSkill, CancelWorkflowRunResult,
+    ExecutionContext, GraphError, NodeRunToStart, NodeType, RestartWorkflowRunResult,
+    StartWorkflowRunResult, UnknownNodeType, WorkflowGraph, WorkflowGraphNode,
+    WorkflowRunEngineRepository,
 };
 pub use handlers::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
