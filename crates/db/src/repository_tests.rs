@@ -1376,12 +1376,24 @@ fn engine_repository_restart_resets_run_and_deletes_node_runs() {
     assert_eq!(run.output, None);
     assert_eq!(run.started_at, None);
     assert_eq!(run.finished_at, None);
+    // The fresh run sees no node runs...
     assert_eq!(
-        SqliteWorkflowRunRepository::new(pool)
+        SqliteWorkflowRunRepository::new(pool.clone())
             .list_node_runs(&run_id)
             .unwrap(),
         Vec::new()
     );
+    // ...but the prior node runs are soft-deleted, not removed, so history stays queryable.
+    let soft_deleted_rows = pool
+        .with_connection(|connection| {
+            Ok(connection.query_row(
+                "SELECT COUNT(*) FROM workflow_node_runs WHERE run_id = ?1 AND is_deleted = 1",
+                rusqlite::params![run_id.as_ref()],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(soft_deleted_rows, 1);
 }
 
 /// Verifies a running run cannot be restarted.

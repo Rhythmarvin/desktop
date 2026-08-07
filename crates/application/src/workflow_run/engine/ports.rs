@@ -179,8 +179,8 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<CancelWorkflowRunResult, RepositoryError>;
 
-    /// Restarts a non-running run: deletes its node runs and resets it to `Pending` with empty
-    /// `current_nodes`.
+    /// Restarts a non-running run: soft-deletes its node runs and resets it to `Pending` with
+    /// empty `current_nodes`, so prior node-run history stays queryable.
     fn restart_run(
         &self,
         run_id: &WorkflowRunId,

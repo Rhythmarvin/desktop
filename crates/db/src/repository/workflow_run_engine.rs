@@ -386,10 +386,12 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 if WorkflowRunStatus::from_database_value(status)? == WorkflowRunStatus::Running {
                     return Ok(RestartWorkflowRunResult::NotRestartable);
                 }
-                // A restart is a fresh execution: the previous node runs are dropped entirely.
+                // A restart is a fresh execution: the previous node runs are soft-deleted so their
+                // history stays queryable, while the fresh run starts from an empty node-run set.
                 transaction.execute(
-                    "DELETE FROM workflow_node_runs WHERE run_id = ?1",
-                    params![run_id.as_ref()],
+                    "UPDATE workflow_node_runs SET is_deleted = 1, updated_at = ?2
+                     WHERE run_id = ?1 AND is_deleted = 0",
+                    params![run_id.as_ref(), now],
                 )?;
                 let state = current_nodes_to_state(&[])?;
                 transaction.execute(
