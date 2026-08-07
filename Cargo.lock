@@ -1706,6 +1706,7 @@ dependencies = [
  "ora-logging",
  "ora-process",
  "ora-scheduler",
+ "ora-skill-package",
  "pretty_assertions",
  "serde",
  "serde_json",

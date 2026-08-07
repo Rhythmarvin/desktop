@@ -1,5 +1,7 @@
 use crate::RepositoryError;
+use crate::workflow_run::engine::graph::WorkflowGraph;
 use ora_domain::{SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree};
+use thiserror::Error;
 
 /// A node-run the engine wants to start in one scheduling wave.
 ///
@@ -28,6 +30,33 @@ pub struct ExecutionContext {
 pub trait WorkflowNodeRunIdGenerator {
     /// Produces the identifier for a newly created node run.
     fn generate_node_run_id(&self) -> WorkflowNodeRunId;
+}
+
+/// Failures raised while validating start-time hard prerequisites.
+#[derive(Debug, Error)]
+pub enum StartPrerequisitesError {
+    #[error("workflow skill not found: {skill_id}")]
+    WorkflowSkillNotFound { skill_id: String },
+    #[error("workflow role not found: {role_id}")]
+    WorkflowRoleNotFound { role_id: String },
+    #[error("skill materialization failed: {message}")]
+    SkillMaterializationError { message: String },
+    #[error("repository operation failed")]
+    Repository(#[from] RepositoryError),
+}
+
+/// Validates start-time hard prerequisites and materializes enabled skills.
+///
+/// Skills and roles are launch dependencies: every enabled skill must resolve in the catalog and
+/// every agent's role must resolve in the agents catalog. The backend implementation also copies
+/// the enabled skills into the run worktree's `.claude/skills/` directory before the run starts.
+pub trait WorkflowRunStartPrerequisites: Send + Sync {
+    /// Resolves every enabled skill and role in the graph and materializes the enabled skills.
+    fn validate_and_materialize(
+        &self,
+        context: &ExecutionContext,
+        graph: &WorkflowGraph,
+    ) -> Result<(), StartPrerequisitesError>;
 }
 
 /// Outcome of starting a run.

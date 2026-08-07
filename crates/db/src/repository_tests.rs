@@ -12,9 +12,10 @@ use ora_application::{
     ProjectRepository,
     ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository, PublishSnapshotResult,
     RepositoryError, RestartWorkflowRunResult, RollbackDraftResult, SessionRepository,
-    SkillRepository, StartWorkflowRunResult, TaskRepository, WorkflowGraphNode,
-    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunEngine,
-    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowValidationError, WorktreeRepository,
+    SkillRepository, StartPrerequisitesError, StartWorkflowRunResult, TaskRepository, WorkflowGraph,
+    WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowRunStartPrerequisites,
+    WorkflowValidationError, WorktreeRepository,
 };
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
@@ -1395,6 +1396,19 @@ fn engine_repository_fail_orphaned_node_runs_is_idempotent_and_preserves_anchor(
     assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[\"start\"]}"));
 }
 
+/// A prerequisites check that always passes, used by engine scheduling tests.
+struct NoopStartPrerequisites;
+
+impl WorkflowRunStartPrerequisites for NoopStartPrerequisites {
+    fn validate_and_materialize(
+        &self,
+        _context: &ExecutionContext,
+        _graph: &WorkflowGraph,
+    ) -> Result<(), StartPrerequisitesError> {
+        Ok(())
+    }
+}
+
 /// Records every agent dispatch so tests can drive completion and assert fan-out.
 #[derive(Clone, Default)]
 struct RecordingNodeExecutor {
@@ -1564,6 +1578,7 @@ fn engine_runs_a_linear_chain_to_success() {
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
         executor.clone(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
 
@@ -1604,6 +1619,7 @@ fn engine_fails_the_run_when_a_node_fails() {
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
         RecordingNodeExecutor::default(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
     assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
@@ -1642,6 +1658,7 @@ fn engine_dispatches_parallel_branches_concurrently() {
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
         executor.clone(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
 
@@ -1703,6 +1720,7 @@ fn engine_cancels_a_running_run() {
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
         RecordingNodeExecutor::default(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
     assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
@@ -1721,6 +1739,7 @@ fn engine_restarts_a_finished_run() {
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
         RecordingNodeExecutor::default(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
     assert_eq!(engine.start(&run_id).unwrap(), StartWorkflowRunResult::Started);
@@ -1757,6 +1776,7 @@ fn engine_rejects_unsupported_node_type() {
         SqliteWorkflowRunEngineRepository::new(pool),
         RecordingNodeExecutor::default(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
 
@@ -1779,6 +1799,7 @@ fn engine_rejects_missing_start_node() {
         SqliteWorkflowRunEngineRepository::new(pool),
         RecordingNodeExecutor::default(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
 
@@ -1797,6 +1818,7 @@ fn engine_rejects_unreachable_nodes() {
         SqliteWorkflowRunEngineRepository::new(pool),
         RecordingNodeExecutor::default(),
         SequenceNodeRunIdGenerator::default(),
+        NoopStartPrerequisites,
         FixedClock::new(40),
     );
 

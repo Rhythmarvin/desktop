@@ -77,10 +77,10 @@ pub use workflow_run::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, DeleteWorkflowRunResult, EngineError,
     ExecutionContext, GetWorkflowRunHandler, GraphError, ListWorkflowNodeRunsHandler,
     ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler, NodeExecutor, NodeRunToStart,
-    NodeType, RestartWorkflowRunResult, StartWorkflowRunResult, UnknownNodeType,
-    UuidWorkflowNodeRunIdGenerator, UuidWorkflowRunIdGenerator, WorkflowGraph, WorkflowGraphNode,
-    WorkflowNodeRunIdGenerator, WorkflowRunCallback, WorkflowRunEngine,
+    NodeType, RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
+    UnknownNodeType, UuidWorkflowNodeRunIdGenerator, UuidWorkflowRunIdGenerator, WorkflowGraph,
+    WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRunCallback, WorkflowRunEngine,
     WorkflowRunEngineRepository, WorkflowRunIdGenerator, WorkflowRunRepository,
-    WorkflowValidationError,
+    WorkflowRunStartPrerequisites, WorkflowValidationError,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

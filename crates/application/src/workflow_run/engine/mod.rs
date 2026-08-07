@@ -21,8 +21,8 @@ pub use graph::{
 pub use node_type::{NodeType, UnknownNodeType};
 pub use ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
-    RestartWorkflowRunResult, StartWorkflowRunResult, WorkflowNodeRunIdGenerator,
-    WorkflowRunEngineRepository,
+    RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
+    WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository, WorkflowRunStartPrerequisites,
 };
 
 #[cfg(test)]
