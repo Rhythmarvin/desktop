@@ -12,7 +12,9 @@ use crate::task_diff::TaskDiffApi;
 use crate::workflow::WorkflowApi;
 use crate::workflow_run::WorkflowRunApi;
 use crate::workflow_run_engine::{ConcreteWorkflowRunControl, build_workflow_run_engine};
-use ora_application::ApplicationError;
+use ora_application::{ApplicationError, Clock, WorkflowRunEngineRepository};
+use ora_db::SqliteWorkflowRunEngineRepository;
+use ora_logging::ora_error;
 use ora_contracts::*;
 use ora_contracts::{EmptyErrorParams, PublicError};
 use ora_db::{DatabaseBootstrapper, DatabaseLocation, RepositoryPool, default_migration_catalog};
@@ -111,6 +113,10 @@ impl Backend {
             )
             .map_err(BackendBootstrapError::AgentRuntime)?,
         );
+        // Crash recovery: fail orphaned node runs and running runs left by a previous process
+        // before serving new commands (best-effort; a failure must not block startup).
+        run_workflow_run_boot_sweep(&pool, clock);
+
         let workflow_run_engine = build_workflow_run_engine(
             agent_runtime.clone(),
             pool.clone(),
@@ -895,6 +901,28 @@ fn ensure_directory(path: &Path) -> Result<(), BackendBootstrapError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Fails runs interrupted by a previous process, keeping `current_nodes` intact.
+///
+/// Runs that were `Running` or `Failed` when the process died have their non-terminal node runs
+/// marked `Failed` with `interrupted_by_restart`; the sweep is idempotent and best-effort so a
+/// storage failure cannot block startup.
+fn run_workflow_run_boot_sweep(pool: &RepositoryPool, clock: SystemClock) {
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    let run_ids = match repository.list_recoverable_runs() {
+        Ok(run_ids) => run_ids,
+        Err(error) => {
+            ora_error!(error = %error, "workflow run boot sweep failed to list recoverable runs");
+            return;
+        }
+    };
+    if run_ids.is_empty() {
+        return;
+    }
+    if let Err(error) = repository.fail_orphaned_node_runs(&run_ids, clock.now_timestamp_millis()) {
+        ora_error!(error = %error, "workflow run boot sweep failed to fail orphaned node runs");
+    }
 }
 
 #[cfg(test)]
