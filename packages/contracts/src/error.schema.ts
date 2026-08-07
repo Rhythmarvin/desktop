@@ -332,6 +332,24 @@ export const contractErrorSchema = z.object({
     }), z.object({
         "code": z.literal("workflow_run_active"),
         "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_graph_parse"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_validation"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_skill_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_role_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_start_failed"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_not_restartable"),
+        "params": emptyErrorParamsSchema
     })]));
 
 export const publicErrorSchema = z.union([z.object({
@@ -636,5 +654,23 @@ export const publicErrorSchema = z.union([z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("workflow_run_active"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_graph_parse"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_validation"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_skill_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_role_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_start_failed"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_not_restartable"),
         "params": emptyErrorParamsSchema
     })]);
