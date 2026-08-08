@@ -350,6 +350,9 @@ export const contractErrorSchema = z.object({
     }), z.object({
         "code": z.literal("workflow_run_not_restartable"),
         "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_not_editable"),
+        "params": emptyErrorParamsSchema
     })]));
 
 export const publicErrorSchema = z.union([z.object({
@@ -672,5 +675,8 @@ export const publicErrorSchema = z.union([z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("workflow_run_not_restartable"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_run_not_editable"),
         "params": emptyErrorParamsSchema
     })]);

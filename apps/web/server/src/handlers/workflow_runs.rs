@@ -28,6 +28,16 @@ pub struct ListRunsQuery {
     workflow_id: Option<String>,
 }
 
+/// Carries the HTTP body for the run-input update route before the path identifier is applied.
+///
+/// The `runId` lives in the route path, not the body, so it is intentionally absent here
+/// and recombined from the path when building the full contract request.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWorkflowRunInputBody {
+    input: Option<String>,
+}
+
 /// Creates one pending run against a published snapshot with a dedicated worktree.
 pub async fn create_workflow_run(
     State(app_state): State<AppState>,
@@ -86,13 +96,13 @@ pub async fn restart_workflow_run(
 pub async fn update_workflow_run_input(
     State(app_state): State<AppState>,
     Path(path): Path<RunPath>,
-    Json(request): Json<UpdateWorkflowRunInputRequest>,
+    Json(body): Json<UpdateWorkflowRunInputBody>,
 ) -> Result<Json<UpdateWorkflowRunInputResponse>, WebApiError> {
     app_state
         .backend()
         .update_workflow_run_input(UpdateWorkflowRunInputRequest {
             run_id: path.run_id,
-            input: request.input,
+            input: body.input,
         })
         .map(Json)
         .map_err(Into::into)
