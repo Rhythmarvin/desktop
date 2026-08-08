@@ -151,40 +151,31 @@ impl NodeExecutionError {
     }
 }
 
-/// Captures the worktree's changed and untracked files as worktree-relative path → content.
+/// Captures every worktree-visible file (tracked and untracked, gitignore-respecting) as
+/// worktree-relative path → content.
 ///
-/// Best-effort: when git is unavailable the snapshot is empty, so a node that cannot diff its
-/// worktree records no file changes instead of failing.
+/// Unlike `git status --porcelain`, which folds untracked directories into a single `?? dir/`
+/// entry and omits clean tracked files, `git ls-files -co` expands both: a node that creates
+/// files inside a new directory (e.g. `openspec/...`) or edits an already-committed file for the
+/// first time still shows up in the before/after delta. Best-effort — when git is unavailable
+/// the snapshot is empty, so a node that cannot diff its worktree records no file changes.
 fn capture_worktree_snapshot(worktree_root: &Path) -> BTreeMap<String, Option<String>> {
     let Ok(output) = Command::new("git")
-        .args(["status", "--porcelain", "-z"])
+        .args(["ls-files", "-co", "--exclude-standard", "-z"])
         .current_dir(worktree_root)
         .output()
     else {
         return BTreeMap::new();
     };
     let mut snapshot = BTreeMap::new();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut segments = stdout
+    for path in String::from_utf8_lossy(&output.stdout)
         .split('\0')
         .filter(|entry| !entry.is_empty())
-        .peekable();
-    while let Some(entry) = segments.next() {
-        if entry.len() < 4 {
-            continue;
-        }
-        let status = &entry[..2];
-        let path = entry[3..].to_string();
-        // Renames/copies carry the original path as the following NUL segment.
-        if status == "R " || status == "C " {
-            segments.next();
-        }
-        let content = if status.contains('D') {
-            None
-        } else {
-            std::fs::read_to_string(worktree_root.join(&path)).ok()
-        };
-        snapshot.insert(path, content);
+    {
+        // A file deleted since it was committed reads as `None`; a directory entry can only
+        // appear for an in-index submodule, which we deliberately skip as non-line-content.
+        let content = std::fs::read_to_string(worktree_root.join(path)).ok();
+        snapshot.insert(path.to_string(), content);
     }
     snapshot
 }
@@ -708,6 +699,49 @@ mod tests {
                 FileChange { path: "src/new.ts".to_string(), additions: 1, deletions: 0 },
             ]
         );
+    }
+
+    /// Verifies the snapshot covers clean tracked files and files inside untracked directories,
+    /// so the before/after delta reports the node's own edits rather than whole-file additions.
+    #[test]
+    fn capture_worktree_snapshot_diffs_clean_tracked_and_untracked_dir_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        run_git(root, &["init"]);
+        run_git(root, &["config", "user.email", "test@example.com"]);
+        run_git(root, &["config", "user.name", "Test"]);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        // A tracked file that is clean at the baseline and modified by the node.
+        std::fs::write(root.join("src/a.ts"), "one\ntwo\n").unwrap();
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "init"]);
+
+        let baseline = capture_worktree_snapshot(root);
+        // The clean tracked file is part of the baseline.
+        assert_eq!(baseline.get("src/a.ts"), Some(&Some("one\ntwo\n".to_string())));
+
+        // The node edits the tracked file and creates files inside a new untracked directory.
+        std::fs::write(root.join("src/a.ts"), "one\ntwo\nthree\n").unwrap();
+        std::fs::create_dir_all(root.join("openspec/changes/demo")).unwrap();
+        std::fs::write(root.join("openspec/changes/demo/proposal.md"), "fresh\n").unwrap();
+
+        assert_eq!(
+            compute_file_changes(&baseline, &capture_worktree_snapshot(root)),
+            vec![
+                FileChange { path: "openspec/changes/demo/proposal.md".to_string(), additions: 1, deletions: 0 },
+                FileChange { path: "src/a.ts".to_string(), additions: 1, deletions: 0 },
+            ]
+        );
+    }
+
+    /// Runs one git command in the worktree, panicking on failure.
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap_or_else(|error| panic!("git {args:?} failed: {error}"));
+        assert!(status.success(), "git {args:?} exited with {status}");
     }
 
     fn model_option(options: Vec<SessionConfigSelectOption>) -> SessionConfigOption {
