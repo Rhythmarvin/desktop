@@ -101,6 +101,7 @@ describe("buildDisplayRun", () => {
         finishedAt: null,
         error: null,
         output: null,
+        payload: null,
         sessionId: "session-explore",
       }],
     };

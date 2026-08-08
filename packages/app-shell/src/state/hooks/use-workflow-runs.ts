@@ -167,7 +167,7 @@ export function useRealWorkflowRun(runId: string | null | undefined) {
     enabled: runId != null && runId !== "",
     // Poll while the run is still executing so status, node states, and reasons stay live.
     refetchInterval: (query) =>
-      isTerminalRunStatus(query.state.data?.status ?? "pending") ? false : 1500,
+      isTerminalRunStatus(query.state.data?.run?.status ?? "pending") ? false : 1500,
   });
 }
 
