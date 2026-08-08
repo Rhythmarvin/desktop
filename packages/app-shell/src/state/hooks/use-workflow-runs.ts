@@ -257,6 +257,10 @@ export function buildDisplayRun(
   const runDurationMs = detail.run.startedAt != null && detail.run.finishedAt != null
     ? Number(detail.run.finishedAt - detail.run.startedAt)
     : undefined;
+  const totalTokens = Object.values(nodeStates).reduce(
+    (sum, state) => sum + (state.tokenUsage?.totalTokens ?? 0),
+    0,
+  );
   return {
     id: detail.run.id,
     projectId: "",
@@ -267,7 +271,10 @@ export function buildDisplayRun(
     kickoffInput: kickoffInput ?? undefined,
     nodeStates,
     openHitls: [],
-    totals: runDurationMs != undefined ? { durationMs: runDurationMs } : {},
+    totals: {
+      ...(runDurationMs != undefined ? { durationMs: runDurationMs } : {}),
+      ...(totalTokens > 0 ? { tokenUsage: { totalTokens } } : {}),
+    },
     createdAt: toIso(detail.run.createdAt),
     updatedAt: toIso(detail.run.updatedAt),
     ...(detail.run.finishedAt != null ? { finishedAt: toIso(detail.run.finishedAt) } : {}),

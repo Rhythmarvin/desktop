@@ -37,6 +37,8 @@ interface RunTheaterProps {
   onFocusNode: (nodeId: string) => void;
   /** Clears path pin so the terminal result act can own the stage. */
   onClearFocus?: () => void;
+  /** Total files the run-task worktree changed, shown on the terminal result act. */
+  changedFileCount?: number;
   artifacts: WorkflowArtifact[];
   conversationByNodeId: Map<string, WorkflowNodeConversationItem[]>;
   revealedArtifactId: string | null;
@@ -67,6 +69,7 @@ export function RunTheater({
   focusNodeId,
   onFocusNode,
   onClearFocus,
+  changedFileCount = 0,
   artifacts,
   conversationByNodeId,
   revealedArtifactId,
@@ -434,6 +437,7 @@ export function RunTheater({
                   <RunResultAct
                     run={run}
                     artifactCount={artifacts.length}
+                    changedFileCount={changedFileCount}
                     onShowOverview={onShowOverview}
                     onOpenArtifacts={artifacts.length > 0
                       ? () => {

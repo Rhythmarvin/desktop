@@ -34,6 +34,8 @@ import {
   useStartWorkflowRun,
 } from "../../state/hooks/use-workflow-runs";
 import { useProjects } from "../../state/hooks/use-projects";
+import { useTaskDiff } from "../../state/hooks/use-task-diff";
+import { parseTaskDiffPatch } from "../diff/task-diff-data";
 import {
   resolveStageFocusNodeId,
   resolveTheaterFocus,
@@ -74,6 +76,12 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
   const runQuery = useRealWorkflowRun(runId);
   const run = runQuery.data?.run ?? null;
   const runTaskId = runQuery.data?.taskId ?? null;
+  // Total files the run-task worktree changed, shown on the terminal result act.
+  // Shares the task-diff cache with the Changes panel once it has been opened.
+  const taskDiffQuery = useTaskDiff(runTaskId ?? "", "branch", runTaskId != null);
+  const changedFileCount = taskDiffQuery.data !== undefined
+    ? parseTaskDiffPatch(taskDiffQuery.data.patch).length
+    : 0;
   const startRun = useStartWorkflowRun();
   const cancelRun = useCancelWorkflowRun();
   const rerun = useRestartWorkflowRun();
@@ -549,6 +557,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
                     focusNodeId={stageFocusNodeId}
                     onFocusNode={focusNode}
                     onClearFocus={clearPathFocus}
+                    changedFileCount={changedFileCount}
                     artifacts={artifactsQuery.artifacts}
                     conversationByNodeId={artifactsQuery.conversationByNodeId}
                     revealedArtifactId={artifactsQuery.revealedId}

@@ -14,6 +14,8 @@ import type { GraphWorkflowRun, GraphWorkflowRunStatus } from "@ora/workflow-run
 interface RunResultActProps {
   run: GraphWorkflowRun;
   artifactCount: number;
+  /** Total files the run-task worktree changed across the whole run. */
+  changedFileCount?: number;
   onShowOverview: () => void;
   onOpenArtifacts?: () => void;
 }
@@ -25,6 +27,7 @@ interface RunResultActProps {
 export function RunResultAct({
   run,
   artifactCount,
+  changedFileCount = 0,
   onShowOverview,
   onOpenArtifacts,
 }: RunResultActProps) {
@@ -95,10 +98,10 @@ export function RunResultAct({
           </div>
           <div className="col-span-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 sm:col-span-1">
             <dt className="text-[10px] text-muted-foreground">
-              {t("workflowRun.artifacts.title")}
+              {t("workflowRun.field.fileChanges")}
             </dt>
             <dd className="mt-0.5 text-xs tabular-nums">
-              {t("workflowRun.artifacts.countBadge", { count: artifactCount })}
+              {changedFileCount}
             </dd>
           </div>
         </dl>

@@ -135,6 +135,7 @@ describe("buildDisplayRun", () => {
     const display = buildDisplayRun(withTokens, GRAPH);
     expect(display.nodeStates.explore.durationMs).toBe(20);
     expect(display.nodeStates.explore.tokenUsage).toEqual({ totalTokens: 1024 });
+    expect(display.totals.tokenUsage).toEqual({ totalTokens: 1024 });
   });
 
   it("projects the node conversation from its run output", () => {
