@@ -117,8 +117,13 @@ impl Backend {
         // before serving new commands (best-effort; a failure must not block startup).
         run_workflow_run_boot_sweep(&pool, clock);
 
-        let workflow_run_engine = build_workflow_run_engine(agent_runtime.clone(), pool.clone(), clock)
-            .control;
+        let workflow_run_engine = build_workflow_run_engine(
+            agent_runtime.clone(),
+            pool.clone(),
+            paths.skills_root.clone(),
+            clock,
+        )
+        .control;
 
         Ok(Self {
             project: Arc::new(ProjectApi::new(pool.clone(), sessions_root.clone(), clock)),

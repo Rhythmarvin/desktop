@@ -103,31 +103,15 @@ fn collect_requirements(graph: &WorkflowGraph) -> (Vec<String>, Vec<String>) {
 
 /// Resolves one enabled skill against the catalog and copies it into the worktree.
 ///
-/// A namespaced id like `cdase:sfmea_review` resolves by the suffix after the colon. When that
-/// name is not a catalog directory, `skill_repository` resolves a skill id (the editor stores
-/// skill ids as `skillId`) back to the catalog name.
+/// The catalog name comes from `resolve_skill_catalog_name`; the worktree directory uses its
+/// normalized form so agent CLIs discover the package as `/name`.
 fn materialize_skill(
     storage: &FilesystemSkillStorage,
     skill_repository: Option<&SqliteSkillRepository>,
     worktree_root: &Path,
     skill_id: &str,
 ) -> Result<(), StartPrerequisitesError> {
-    let candidate = skill_id.rsplit(':').next().unwrap_or(skill_id);
-    let catalog_name = if storage.formal_exists(candidate) {
-        candidate.to_string()
-    } else if let Some(repository) = skill_repository {
-        repository
-            .find_skill(&SkillId::new(candidate))
-            .map_err(StartPrerequisitesError::Repository)?
-            .map(|skill| skill.name)
-            .ok_or_else(|| StartPrerequisitesError::WorkflowSkillNotFound {
-                skill_id: skill_id.to_string(),
-            })?
-    } else {
-        return Err(StartPrerequisitesError::WorkflowSkillNotFound {
-            skill_id: skill_id.to_string(),
-        });
-    };
+    let catalog_name = resolve_skill_catalog_name(storage, skill_repository, skill_id)?;
     let dir_name = normalize_skill_name(&catalog_name);
     for discovery_dir in SKILL_DISCOVERY_DIRS {
         let target = worktree_root
@@ -145,7 +129,49 @@ fn materialize_skill(
     Ok(())
 }
 
-/// Normalizes a catalog name for the `.claude/skills/` directory: lowercase, `_` becomes `-`.
+/// Resolves one enabled skill id to its catalog name.
+///
+/// A namespaced id like `cdase:sfmea_review` resolves by the suffix after the colon. When that
+/// name is not a catalog directory, `skill_repository` resolves a skill id (the editor stores
+/// skill ids as `skillId`) back to the catalog name.
+fn resolve_skill_catalog_name(
+    storage: &FilesystemSkillStorage,
+    skill_repository: Option<&SqliteSkillRepository>,
+    skill_id: &str,
+) -> Result<String, StartPrerequisitesError> {
+    let candidate = skill_id.rsplit(':').next().unwrap_or(skill_id);
+    if storage.formal_exists(candidate) {
+        return Ok(candidate.to_string());
+    }
+    if let Some(repository) = skill_repository {
+        return repository
+            .find_skill(&SkillId::new(candidate))
+            .map_err(StartPrerequisitesError::Repository)?
+            .map(|skill| skill.name)
+            .ok_or_else(|| StartPrerequisitesError::WorkflowSkillNotFound {
+                skill_id: skill_id.to_string(),
+            });
+    }
+    Err(StartPrerequisitesError::WorkflowSkillNotFound {
+        skill_id: skill_id.to_string(),
+    })
+}
+
+/// Resolves an enabled skill id to the executable `/name` the agent CLI uses to invoke it: the
+/// normalized catalog name, matching the directory it was materialized into.
+pub(super) fn resolve_executable_skill_name(
+    storage: &FilesystemSkillStorage,
+    skill_repository: Option<&SqliteSkillRepository>,
+    skill_id: &str,
+) -> Result<String, StartPrerequisitesError> {
+    Ok(normalize_skill_name(&resolve_skill_catalog_name(
+        storage,
+        skill_repository,
+        skill_id,
+    )?))
+}
+
+/// Normalizes a catalog name for the `.agents/skills/` directory: lowercase, `_` becomes `-`.
 fn normalize_skill_name(name: &str) -> String {
     name.to_lowercase().replace('_', "-")
 }
@@ -177,6 +203,18 @@ mod tests {
     fn normalizes_skill_names_to_lowercase_dashes() {
         assert_eq!(normalize_skill_name("sfmea_review"), "sfmea-review");
         assert_eq!(normalize_skill_name("OpenSpec_Explore"), "openspec-explore");
+    }
+
+    #[test]
+    fn resolves_the_executable_skill_name_from_a_namespaced_id() {
+        let temp = TempDir::new().unwrap();
+        let skills_root = temp.path().join("skills");
+        std::fs::create_dir_all(skills_root.join("sfmea_review")).unwrap();
+        let storage = FilesystemSkillStorage::new(skills_root);
+        assert_eq!(
+            resolve_executable_skill_name(&storage, None, "cdase:sfmea_review").unwrap(),
+            "sfmea-review"
+        );
     }
 
     #[test]

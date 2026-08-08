@@ -11,6 +11,7 @@ use ora_db::{
 };
 use ora_domain::{WorkflowNodeRunId, WorkflowRunId};
 use ora_logging::ora_error;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 /// The concrete run engine as composed by the backend.
@@ -95,12 +96,14 @@ pub(crate) struct WorkflowRunEngineAssembly {
 pub(crate) fn build_workflow_run_engine(
     agent_runtime: Arc<AgentRuntimeManager>,
     pool: RepositoryPool,
+    skills_root: PathBuf,
     clock: SystemClock,
 ) -> WorkflowRunEngineAssembly {
     let callback = Arc::new(WorkflowRunEngineCallback::new());
     let executor = WorkflowRunNodeExecutor::new(
         agent_runtime,
         pool.clone(),
+        skills_root,
         SqliteAgentDefinitionRepository::new(pool.clone()),
         callback.clone(),
         clock,

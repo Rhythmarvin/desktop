@@ -5,9 +5,11 @@
 use crate::agent_runtime::AgentRuntimeManager;
 use crate::clock::SystemClock;
 use crate::error::BackendError;
+use crate::workflow_run_prerequisites::resolve_executable_skill_name;
 use ora_application::{
-    AgentDefinitionRepository, Clock, ExecutionContext, NodeExecutor, RepositoryError,
-    WorkflowGraph, WorkflowGraphNode, WorkflowRunCallback, WorkflowRunEngineRepository,
+    AgentDefinitionRepository, AgentSkill, Clock, ExecutionContext, FilesystemSkillStorage,
+    NodeExecutor, RepositoryError, WorkflowGraph, WorkflowGraphNode, WorkflowRunCallback,
+    WorkflowRunEngineRepository,
 };
 use ora_contracts::acp::content::{ContentBlock, TextContent};
 use ora_contracts::acp::prompt::StopReason;
@@ -20,12 +22,16 @@ use ora_contracts::{
     AgentCli as ContractAgentCli, AttachSessionRequest, PromptSessionEvent, PromptSessionRequest,
     SetSessionConfigRequest, StopSessionRequest, WarmSessionRequest, WarmSessionTarget,
 };
-use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository, SqliteWorkflowRunEngineRepository};
+use ora_db::{
+    RepositoryPool, SqliteAgentDefinitionRepository, SqliteSkillRepository,
+    SqliteWorkflowRunEngineRepository,
+};
 use ora_domain::{
     AgentDefinitionId, SessionId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
     WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -40,16 +46,20 @@ const UPSTREAM_PREDECESSOR_SEPARATOR: &str = "\n\n---\n\n";
 pub struct WorkflowRunNodeExecutor {
     agent_runtime: Arc<AgentRuntimeManager>,
     pool: RepositoryPool,
+    /// Skill catalog root used to resolve an enabled skill's executable `/name` for the prompt.
+    skills_root: PathBuf,
     agent_repository: SqliteAgentDefinitionRepository,
     callback: Arc<dyn WorkflowRunCallback>,
     clock: SystemClock,
 }
 
 impl WorkflowRunNodeExecutor {
-    /// Builds an executor from the session runtime, persistence, role catalog, and engine callback.
+    /// Builds an executor from the session runtime, persistence, skill catalog, role catalog, and
+    /// engine callback.
     pub fn new(
         agent_runtime: Arc<AgentRuntimeManager>,
         pool: RepositoryPool,
+        skills_root: PathBuf,
         agent_repository: SqliteAgentDefinitionRepository,
         callback: Arc<dyn WorkflowRunCallback>,
         clock: SystemClock,
@@ -57,6 +67,7 @@ impl WorkflowRunNodeExecutor {
         Self {
             agent_runtime,
             pool,
+            skills_root,
             agent_repository,
             callback,
             clock,
@@ -73,6 +84,7 @@ impl NodeExecutor for WorkflowRunNodeExecutor {
     ) {
         let agent_runtime = self.agent_runtime.clone();
         let pool = self.pool.clone();
+        let skills_root = self.skills_root.clone();
         let agent_repository = self.agent_repository.clone();
         let callback = self.callback.clone();
         let clock = self.clock;
@@ -83,6 +95,7 @@ impl NodeExecutor for WorkflowRunNodeExecutor {
             match drive_agent_node(
                 &agent_runtime,
                 &pool,
+                &skills_root,
                 &agent_repository,
                 &clock,
                 &node_run_id,
@@ -115,6 +128,8 @@ pub enum NodeExecutionError {
     WorkflowModelNotFound { agent_cli: String, model_id: String },
     #[error("agent node {node_id} has no agent configuration")]
     MissingAgentConfig { node_id: String },
+    #[error("enabled skill {skill_id} could not be resolved to an executable name")]
+    SkillResolution { skill_id: String },
     #[error("prompt session ended without a stop reason")]
     SessionEndedWithoutStopReason,
     #[error("workflow run repository operation failed")]
@@ -131,9 +146,11 @@ impl NodeExecutionError {
 }
 
 /// Runs the warm → attach → model → prompt → stop session chain for one agent node.
+#[allow(clippy::too_many_arguments)]
 async fn drive_agent_node(
     agent_runtime: &AgentRuntimeManager,
     pool: &RepositoryPool,
+    skills_root: &Path,
     agent_repository: &SqliteAgentDefinitionRepository,
     clock: &SystemClock,
     node_run_id: &WorkflowNodeRunId,
@@ -200,11 +217,12 @@ async fn drive_agent_node(
         _ => None,
     };
 
-    // Assemble the prompt: role instructions, the node task, then the transitive-predecessor
-    // lineage plus run input.
+    // Assemble the prompt: the enabled skills invoked by slash command, the node task, role
+    // instructions, then the transitive-predecessor lineage plus run input.
     let node_runs = repository.list_node_runs(&context.run.id)?;
     let upstream = assemble_upstream(context, node, &node_runs);
-    let prompt = assemble_prompt(node, role_content.as_deref(), &upstream);
+    let skill_names = resolve_skill_names(pool, skills_root, &config.skills)?;
+    let prompt = assemble_prompt(node, role_content.as_deref(), &upstream, &skill_names);
 
     let mut stream = agent_runtime
         .prompt_session(PromptSessionRequest {
@@ -345,30 +363,85 @@ fn match_model_value(
     }
 }
 
-/// Builds the prompt content blocks: role instructions, node task, and upstream context.
+/// Resolves each enabled skill to the executable `/name` its agent CLI uses, so the prompt can
+/// invoke it explicitly instead of relying on the agent to discover the materialized package.
+fn resolve_skill_names(
+    pool: &RepositoryPool,
+    skills_root: &Path,
+    skills: &[AgentSkill],
+) -> Result<Vec<String>, NodeExecutionError> {
+    let storage = FilesystemSkillStorage::new(skills_root.to_path_buf());
+    let skill_repository = SqliteSkillRepository::new(pool.clone());
+    let mut names = Vec::new();
+    for skill in skills.iter().filter(|skill| skill.enabled) {
+        let name = resolve_executable_skill_name(&storage, Some(&skill_repository), &skill.skill_id)
+            .map_err(|_| NodeExecutionError::SkillResolution {
+                skill_id: skill.skill_id.clone(),
+            })?;
+        names.push(name);
+    }
+    Ok(names)
+}
+
+/// Builds the prompt content blocks: the slash-command skill invocation with the node task, role
+/// instructions, and upstream context.
+///
+/// When the node enables skills, the invocation leads the message so the agent CLI parses it as a
+/// slash command; otherwise the role instructions lead, preserving the original ordering.
 fn assemble_prompt(
     node: &WorkflowGraphNode,
     role_content: Option<&str>,
     upstream: &str,
+    skill_names: &[String],
 ) -> Vec<ContentBlock> {
-    let mut blocks = Vec::new();
-    if let Some(role) = role_content {
-        blocks.push(ContentBlock::Text(TextContent::new(format!(
-            "<system_instructions>\n{role}\n</system_instructions>"
-        ))));
-    }
-    if let Some(prompt) = node
+    let node_prompt = node
         .agent_config
         .as_ref()
         .map(|config| config.prompt.as_str())
-        && !prompt.is_empty()
-    {
-        blocks.push(ContentBlock::Text(TextContent::new(prompt)));
+        .unwrap_or("");
+    let invocation = skill_invocation_prefix(skill_names);
+
+    let mut blocks = Vec::new();
+    if invocation.is_empty() {
+        if let Some(role) = role_content {
+            blocks.push(system_instructions_block(role));
+        }
+        if !node_prompt.is_empty() {
+            blocks.push(ContentBlock::Text(TextContent::new(node_prompt.to_string())));
+        }
+    } else {
+        // The `/name` invocation must be the first token the agent reads; the role instructions
+        // follow in the same turn rather than leading the message.
+        let text = if node_prompt.is_empty() {
+            invocation
+        } else {
+            format!("{invocation} {node_prompt}")
+        };
+        blocks.push(ContentBlock::Text(TextContent::new(text)));
+        if let Some(role) = role_content {
+            blocks.push(system_instructions_block(role));
+        }
     }
     if !upstream.is_empty() {
         blocks.push(ContentBlock::Text(TextContent::new(upstream)));
     }
     blocks
+}
+
+/// Renders the enabled skill names as a `/name1 /name2` invocation prefix, empty when none.
+fn skill_invocation_prefix(skill_names: &[String]) -> String {
+    skill_names
+        .iter()
+        .map(|name| format!("/{name}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Wraps role content in the system-instructions tag used by the session driver.
+fn system_instructions_block(role: &str) -> ContentBlock {
+    ContentBlock::Text(TextContent::new(format!(
+        "<system_instructions>\n{role}\n</system_instructions>"
+    )))
 }
 
 /// Concatenates the transitive predecessors' final assistant messages plus `run.input`.
@@ -597,7 +670,7 @@ mod tests {
                 prompt: "do the task".to_string(),
             }),
         };
-        let blocks = assemble_prompt(&node, Some("role text"), "upstream text");
+        let blocks = assemble_prompt(&node, Some("role text"), "upstream text", &[]);
         assert_eq!(blocks.len(), 3);
         match &blocks[0] {
             ContentBlock::Text(text) => {
@@ -612,6 +685,70 @@ mod tests {
         }
         match &blocks[2] {
             ContentBlock::Text(text) => assert_eq!(text.text, "upstream text"),
+            _ => panic!("expected text block"),
+        }
+    }
+
+    #[test]
+    fn assemble_prompt_leads_with_the_slash_command_invocation() {
+        let node = WorkflowGraphNode {
+            id: "a".to_string(),
+            node_type: ora_application::NodeType::Agent,
+            title: String::new(),
+            description: String::new(),
+            instruction: None,
+            agent_config: Some(ora_application::AgentConfig {
+                executor: ora_application::AgentExecutor {
+                    agent_cli: "open_code".to_string(),
+                    model_id: "m".to_string(),
+                },
+                role_id: Some("Researcher".to_string()),
+                skills: Vec::new(),
+                prompt: "do the task".to_string(),
+            }),
+        };
+        let blocks = assemble_prompt(
+            &node,
+            Some("role text"),
+            "upstream text",
+            &["sfmea-review".to_string(), "openspec-explore".to_string()],
+        );
+        assert_eq!(blocks.len(), 3);
+        // The invocation must open the message so the agent CLI parses the slash commands.
+        match &blocks[0] {
+            ContentBlock::Text(text) => {
+                assert_eq!(text.text, "/sfmea-review /openspec-explore do the task")
+            }
+            _ => panic!("expected text block"),
+        }
+        match &blocks[1] {
+            ContentBlock::Text(text) => assert!(text.text.contains("role text")),
+            _ => panic!("expected text block"),
+        }
+    }
+
+    #[test]
+    fn assemble_prompt_sends_the_invocation_alone_for_an_empty_node_prompt() {
+        let node = WorkflowGraphNode {
+            id: "a".to_string(),
+            node_type: ora_application::NodeType::Agent,
+            title: String::new(),
+            description: String::new(),
+            instruction: None,
+            agent_config: Some(ora_application::AgentConfig {
+                executor: ora_application::AgentExecutor {
+                    agent_cli: "open_code".to_string(),
+                    model_id: "m".to_string(),
+                },
+                role_id: None,
+                skills: Vec::new(),
+                prompt: String::new(),
+            }),
+        };
+        let blocks = assemble_prompt(&node, None, "", &["sfmea-review".to_string()]);
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            ContentBlock::Text(text) => assert_eq!(text.text, "/sfmea-review"),
             _ => panic!("expected text block"),
         }
     }
