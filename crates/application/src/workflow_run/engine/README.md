@@ -11,6 +11,8 @@ real Ora session.
   queries (successors/predecessors, transitive closures, ready set, reachability).
 - **Engine persistence port** (`ports.rs`, later phases): the `WorkflowRunEngineRepository` trait
   that the run engine uses, implemented in `ora-db`.
+- **Worktree initializer port** (`ports.rs`): the `WorkflowRunWorktreeInitializer` trait that the
+  deploy flow calls to validate roles and materialize skills into a run worktree's initial state.
 - **Run engine** (`engine.rs`, later phases): `start`/`cancel`/`restart` use cases, reactive DAG
   scheduling under a per-run serial executor, and the `NodeExecutor` port that hands agent
   execution to `ora-backend`.
@@ -19,7 +21,9 @@ real Ora session.
 
 - Does not persist anything itself; it only defines the persistence port.
 - Does not drive Ora sessions; agent execution is delegated through `NodeExecutor`.
-- Does not resolve roles or materialize skills; those are wired by the backend during start.
+- Does not resolve roles or materialize skills; those are wired by the backend at deploy time
+  (when the run worktree is created) through `WorkflowRunWorktreeInitializer`, so `start` only
+  validates graph executability.
 - Does not run the workflow-run CRUD handlers (see the parent `workflow_run` module).
 
 ## Public boundary

@@ -25,7 +25,7 @@ pub use ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
     RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
     UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
-    WorkflowRunStartPrerequisites,
+    WorkflowRunWorktreeInitializer,
 };
 
 #[cfg(test)]

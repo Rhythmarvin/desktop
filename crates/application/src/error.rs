@@ -413,21 +413,23 @@ impl ApplicationError {
             EngineError::WorkflowRunNotFound { run_id } => Self::WorkflowRunNotFound { run_id },
             EngineError::GraphParse(error) => Self::WorkflowRunGraphParse(error),
             EngineError::Validation(error) => Self::WorkflowRunValidation(error),
-            EngineError::Prerequisites(error) => match error {
-                StartPrerequisitesError::WorkflowSkillNotFound { skill_id } => {
-                    Self::WorkflowSkillNotFound { skill_id }
-                }
-                StartPrerequisitesError::WorkflowRoleNotFound { role_id } => {
-                    Self::WorkflowRoleNotFound { role_id }
-                }
-                StartPrerequisitesError::SkillMaterializationError { message } => {
-                    Self::WorkflowRunStartFailed { message }
-                }
-                StartPrerequisitesError::Repository(source) => {
-                    Self::WorkflowRunRepository { source }
-                }
-            },
             EngineError::Repository(source) => Self::WorkflowRunRepository { source },
+        }
+    }
+
+    /// Maps deploy-time worktree-initialization failures into stable application errors.
+    pub(crate) fn from_start_prerequisites_error(error: StartPrerequisitesError) -> Self {
+        match error {
+            StartPrerequisitesError::WorkflowSkillNotFound { skill_id } => {
+                Self::WorkflowSkillNotFound { skill_id }
+            }
+            StartPrerequisitesError::WorkflowRoleNotFound { role_id } => {
+                Self::WorkflowRoleNotFound { role_id }
+            }
+            StartPrerequisitesError::SkillMaterializationError { message } => {
+                Self::WorkflowRunStartFailed { message }
+            }
+            StartPrerequisitesError::Repository(source) => Self::WorkflowRunRepository { source },
         }
     }
 }

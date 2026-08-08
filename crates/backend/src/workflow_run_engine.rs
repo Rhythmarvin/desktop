@@ -1,7 +1,6 @@
 use crate::agent_runtime::AgentRuntimeManager;
 use crate::clock::SystemClock;
 use crate::workflow_run_executor::WorkflowRunNodeExecutor;
-use crate::workflow_run_prerequisites::SkillRoleMaterializer;
 use ora_application::{
     UuidWorkflowNodeRunIdGenerator, WorkflowRunCallback, WorkflowRunControlHandler,
     WorkflowRunEngine,
@@ -12,7 +11,6 @@ use ora_db::{
 };
 use ora_domain::{WorkflowNodeRunId, WorkflowRunId};
 use ora_logging::ora_error;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 /// The concrete run engine as composed by the backend.
@@ -20,7 +18,6 @@ pub(crate) type ConcreteWorkflowRunEngine = WorkflowRunEngine<
     SqliteWorkflowRunEngineRepository,
     WorkflowRunNodeExecutor,
     UuidWorkflowNodeRunIdGenerator,
-    SkillRoleMaterializer,
     SystemClock,
 >;
 
@@ -29,7 +26,6 @@ pub(crate) type ConcreteWorkflowRunControl = WorkflowRunControlHandler<
     SqliteWorkflowRunEngineRepository,
     WorkflowRunNodeExecutor,
     UuidWorkflowNodeRunIdGenerator,
-    SkillRoleMaterializer,
     SystemClock,
     SqliteWorkflowRunRepository,
 >;
@@ -95,11 +91,10 @@ pub(crate) struct WorkflowRunEngineAssembly {
     pub control: Arc<ConcreteWorkflowRunControl>,
 }
 
-/// Builds the run engine, its session executor, prerequisites, and control handler.
+/// Builds the run engine, its session executor, and control handler.
 pub(crate) fn build_workflow_run_engine(
     agent_runtime: Arc<AgentRuntimeManager>,
     pool: RepositoryPool,
-    skills_root: PathBuf,
     clock: SystemClock,
 ) -> WorkflowRunEngineAssembly {
     let callback = Arc::new(WorkflowRunEngineCallback::new());
@@ -114,7 +109,6 @@ pub(crate) fn build_workflow_run_engine(
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
         executor,
         UuidWorkflowNodeRunIdGenerator::new(),
-        SkillRoleMaterializer::new(skills_root, pool.clone()),
         clock,
     ));
     callback.set_engine(engine.clone());

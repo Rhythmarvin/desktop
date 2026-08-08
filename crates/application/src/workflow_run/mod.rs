@@ -13,7 +13,7 @@ pub use engine::{
     RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult, UnknownNodeType,
     UpdateWorkflowRunInputResult, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
     WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunStartPrerequisites, WorkflowValidationError,
+    WorkflowRunWorktreeInitializer, WorkflowValidationError,
 };
 pub use handlers::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,

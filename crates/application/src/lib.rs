@@ -81,7 +81,7 @@ pub use workflow_run::{
     UnknownNodeType, UpdateWorkflowRunInputResult, UuidWorkflowNodeRunIdGenerator,
     UuidWorkflowRunIdGenerator, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
     WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunIdGenerator, WorkflowRunRepository, WorkflowRunStartPrerequisites,
+    WorkflowRunIdGenerator, WorkflowRunRepository, WorkflowRunWorktreeInitializer,
     WorkflowValidationError,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

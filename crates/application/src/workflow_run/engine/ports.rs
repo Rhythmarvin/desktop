@@ -3,6 +3,7 @@ use crate::workflow_run::engine::graph::WorkflowGraph;
 use ora_domain::{
     SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree,
 };
+use std::path::Path;
 use thiserror::Error;
 
 /// A node-run the engine wants to start in one scheduling wave.
@@ -34,7 +35,7 @@ pub trait WorkflowNodeRunIdGenerator {
     fn generate_node_run_id(&self) -> WorkflowNodeRunId;
 }
 
-/// Failures raised while validating start-time hard prerequisites.
+/// Failures raised while setting up a run's worktree initial state at deploy time.
 #[derive(Debug, Error)]
 pub enum StartPrerequisitesError {
     #[error("workflow skill not found: {skill_id}")]
@@ -47,17 +48,19 @@ pub enum StartPrerequisitesError {
     Repository(#[from] RepositoryError),
 }
 
-/// Validates start-time hard prerequisites and materializes enabled skills.
+/// Validates and materializes a run worktree's initial state at deploy time.
 ///
-/// Skills and roles are launch dependencies: every enabled skill must resolve in the catalog and
-/// every agent's role must resolve in the agents catalog. The backend implementation also copies
-/// the enabled skills into the run worktree's `.claude/skills/` directory before the run starts.
-pub trait WorkflowRunStartPrerequisites: Send + Sync {
-    /// Resolves every enabled skill and role in the graph and materializes the enabled skills.
-    fn validate_and_materialize(
+/// Skills and roles are deploy dependencies: every agent's role must resolve in the agents catalog
+/// and every enabled skill must resolve in the catalog. The backend implementation also copies the
+/// enabled skills into `<worktree>/.agents/skills/` while the worktree is being created, so the
+/// run's initial state is complete before it is persisted and `start` needs no re-validation.
+pub trait WorkflowRunWorktreeInitializer: Send + Sync {
+    /// Resolves every declared role and skill in the graph and materializes the enabled skills
+    /// into the freshly provisioned run worktree.
+    fn initialize_worktree(
         &self,
-        context: &ExecutionContext,
         graph: &WorkflowGraph,
+        worktree_root: &Path,
     ) -> Result<(), StartPrerequisitesError>;
 }
 

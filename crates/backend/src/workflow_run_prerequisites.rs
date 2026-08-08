@@ -1,11 +1,6 @@
-// Wired into the run engine composition in the endpoints stage; until then only tests reference it.
-#![allow(dead_code)]
-
-use crate::task::resolve_task_cwd;
 use ora_application::{
-    AgentDefinitionRepository, ExecutionContext, FilesystemSkillStorage, NodeType, RepositoryError,
-    SkillRepository, SkillStorage, StartPrerequisitesError, WorkflowGraph,
-    WorkflowRunStartPrerequisites,
+    AgentDefinitionRepository, FilesystemSkillStorage, NodeType, RepositoryError, SkillRepository,
+    SkillStorage, StartPrerequisitesError, WorkflowGraph, WorkflowRunWorktreeInitializer,
 };
 use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository, SqliteSkillRepository};
 use ora_domain::{AgentDefinitionId, SkillId};
@@ -20,29 +15,30 @@ const MAX_SKILL_MANIFEST_BYTES: u64 = 1024 * 1024;
 /// every agent CLI.
 const SKILL_DISCOVERY_DIRS: [&str; 1] = [".agents"];
 
-/// Validates start-time skill and role prerequisites and materializes skills into the worktree.
+/// Validates and materializes a run worktree's initial state at deploy time.
 ///
-/// Skills and roles are launch hard-dependencies: every enabled skill must exist in the catalog
-/// and every agent's role must resolve in the agents catalog. Enabled skills are copied into
-/// `<worktree>/.claude/skills/<normalized>/`, where CLI tooling auto-discovers them.
+/// Roles and skills are deploy hard-dependencies: every agent's role must resolve in the agents
+/// catalog and every enabled skill must exist in the catalog. Enabled skills are copied into
+/// `<worktree>/.agents/skills/<normalized>/`, where agent CLIs auto-discover them, so the worktree
+/// is complete from the moment the run is created and `start` needs no re-validation.
 #[derive(Clone)]
-pub struct SkillRoleMaterializer {
+pub struct SkillRoleWorktreeInitializer {
     skills_root: PathBuf,
     pool: RepositoryPool,
 }
 
-impl SkillRoleMaterializer {
-    /// Builds a materializer from the skill catalog root and the shared repository pool.
+impl SkillRoleWorktreeInitializer {
+    /// Builds an initializer from the skill catalog root and the shared repository pool.
     pub fn new(skills_root: PathBuf, pool: RepositoryPool) -> Self {
         Self { skills_root, pool }
     }
 }
 
-impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
-    fn validate_and_materialize(
+impl WorkflowRunWorktreeInitializer for SkillRoleWorktreeInitializer {
+    fn initialize_worktree(
         &self,
-        context: &ExecutionContext,
         graph: &WorkflowGraph,
+        worktree_root: &Path,
     ) -> Result<(), StartPrerequisitesError> {
         let (skills, roles) = collect_requirements(graph);
 
@@ -56,16 +52,10 @@ impl WorkflowRunStartPrerequisites for SkillRoleMaterializer {
         }
 
         if !skills.is_empty() {
-            let worktree_root =
-                resolve_task_cwd(&self.pool, &context.task.id).map_err(|error| {
-                    StartPrerequisitesError::SkillMaterializationError {
-                        message: format!("failed to resolve run worktree: {error}"),
-                    }
-                })?;
             let storage = FilesystemSkillStorage::new(self.skills_root.clone());
             let skill_repository = SqliteSkillRepository::new(self.pool.clone());
             for skill_id in &skills {
-                materialize_skill(&storage, Some(&skill_repository), &worktree_root, skill_id)?;
+                materialize_skill(&storage, Some(&skill_repository), worktree_root, skill_id)?;
             }
         }
         Ok(())
@@ -177,6 +167,9 @@ fn rewrite_manifest_name(target: &Path, dir_name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ora_db::{
+        DatabaseBootstrapper, DatabaseLocation, default_migration_catalog,
+    };
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
@@ -184,6 +177,45 @@ mod tests {
     fn normalizes_skill_names_to_lowercase_dashes() {
         assert_eq!(normalize_skill_name("sfmea_review"), "sfmea-review");
         assert_eq!(normalize_skill_name("OpenSpec_Explore"), "openspec-explore");
+    }
+
+    #[test]
+    fn initialize_worktree_materializes_skills_into_the_given_worktree() {
+        let temp = TempDir::new().unwrap();
+        let skills_root = temp.path().join("skills");
+        let skill_dir = skills_root.join("sfmea_review");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: sfmea_review\ndescription: review\n---\n\nbody\n",
+        )
+        .unwrap();
+        let database_path = temp.path().join("ora.sqlite3");
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::path(&database_path),
+                &default_migration_catalog().expect("create migration catalog"),
+            )
+            .expect("bootstrap repository pool");
+        let initializer = SkillRoleWorktreeInitializer::new(skills_root, pool);
+        let graph = WorkflowGraph::parse(
+            r#"{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"skills":[{"skillId":"sfmea_review","enabled":true}]}}}],"edges":[]}"#,
+        )
+        .unwrap();
+        let worktree = temp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        initializer.initialize_worktree(&graph, &worktree).unwrap();
+
+        assert!(
+            worktree
+                .join(".agents")
+                .join("skills")
+                .join("sfmea-review")
+                .join("SKILL.md")
+                .is_file(),
+            "enabled skill is materialized into the worktree's initial state"
+        );
     }
 
     #[test]

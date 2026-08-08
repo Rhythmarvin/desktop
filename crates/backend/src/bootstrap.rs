@@ -117,13 +117,8 @@ impl Backend {
         // before serving new commands (best-effort; a failure must not block startup).
         run_workflow_run_boot_sweep(&pool, clock);
 
-        let workflow_run_engine = build_workflow_run_engine(
-            agent_runtime.clone(),
-            pool.clone(),
-            paths.skills_root.clone(),
-            clock,
-        )
-        .control;
+        let workflow_run_engine = build_workflow_run_engine(agent_runtime.clone(), pool.clone(), clock)
+            .control;
 
         Ok(Self {
             project: Arc::new(ProjectApi::new(pool.clone(), sessions_root.clone(), clock)),
@@ -136,13 +131,14 @@ impl Backend {
             task_diff: Arc::new(TaskDiffApi::new(pool.clone(), clock)),
             session: Arc::new(SessionApi::new(pool.clone())),
             agent_runtime,
-            skill: Arc::new(SkillApi::new(pool.clone(), paths.skills_root, clock)),
+            skill: Arc::new(SkillApi::new(pool.clone(), paths.skills_root.clone(), clock)),
             agent: Arc::new(AgentApi::new(pool.clone(), clock)),
             spec: Arc::new(SpecApi::new(pool.clone(), paths.ripgrep_path)),
             workflow: Arc::new(WorkflowApi::new(pool.clone(), clock)),
             workflow_run: Arc::new(WorkflowRunApi::new(
                 pool.clone(),
                 worktree_root.clone(),
+                paths.skills_root,
                 clock,
             )),
             workflow_run_engine,

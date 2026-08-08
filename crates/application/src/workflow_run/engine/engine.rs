@@ -4,9 +4,8 @@ use crate::workflow_run::engine::graph::{GraphError, WorkflowGraph, WorkflowGrap
 use crate::workflow_run::engine::node_type::NodeType;
 use crate::workflow_run::engine::ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
-    RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
-    UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
-    WorkflowRunStartPrerequisites,
+    RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
+    WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
 };
 use ora_domain::{WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId};
 use serde::Deserialize;
@@ -78,8 +77,6 @@ pub enum EngineError {
     GraphParse(#[from] GraphError),
     #[error("workflow graph is not executable")]
     Validation(#[from] WorkflowValidationError),
-    #[error("workflow start prerequisites failed")]
-    Prerequisites(#[from] StartPrerequisitesError),
     #[error("workflow run repository operation failed")]
     Repository(#[from] RepositoryError),
 }
@@ -97,45 +94,41 @@ struct ConversationEntry {
 /// and ready sets from persistence. Agent execution is delegated through `NodeExecutor`; the
 /// backend must route all commands and callbacks for one run through a single serial executor.
 #[derive(Clone)]
-pub struct WorkflowRunEngine<R, E, G, P, C> {
+pub struct WorkflowRunEngine<R, E, G, C> {
     repository: R,
     node_executor: E,
     node_run_id_generator: G,
-    prerequisites: P,
     clock: C,
 }
 
-impl<R, E, G, P, C> WorkflowRunEngine<R, E, G, P, C> {
+impl<R, E, G, C> WorkflowRunEngine<R, E, G, C> {
     /// Builds an engine from its ports.
     pub fn new(
         repository: R,
         node_executor: E,
         node_run_id_generator: G,
-        prerequisites: P,
         clock: C,
     ) -> Self {
         Self {
             repository,
             node_executor,
             node_run_id_generator,
-            prerequisites,
             clock,
         }
     }
 }
 
-impl<R, E, G, P, C> WorkflowRunEngine<R, E, G, P, C>
+impl<R, E, G, C> WorkflowRunEngine<R, E, G, C>
 where
     R: WorkflowRunEngineRepository,
     E: NodeExecutor,
     G: WorkflowNodeRunIdGenerator,
-    P: WorkflowRunStartPrerequisites,
     C: Clock,
 {
     /// Starts a run after validating the frozen graph.
     ///
-    /// Skill resolution, role resolution, and skill materialization are inserted between the
-    /// reachability check and `start_run` in stage 5.
+    /// Role and skill prerequisites are validated and materialized by the deploy flow when the run
+    /// worktree is created, so `start` only validates graph executability before scheduling.
     pub fn start(&self, run_id: &WorkflowRunId) -> Result<StartWorkflowRunResult, EngineError> {
         let context = self.execution_context(run_id)?;
         let graph = WorkflowGraph::parse(&context.graph_json)?;
@@ -156,9 +149,6 @@ where
             }
             .into());
         }
-        // Skills and roles are launch dependencies; enabled skills are materialized here.
-        self.prerequisites
-            .validate_and_materialize(&context, &graph)?;
         let start_node_run = NodeRunToStart {
             id: self.node_run_id_generator.generate_node_run_id(),
             node_id: start_node.id.clone(),
