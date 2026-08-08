@@ -1,7 +1,7 @@
 use ora_application::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange, NodeRunToStart,
-    RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, TokenUsage,
-    UpdateWorkflowRunInputResult, WorkflowRunEngineRepository,
+    RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
+    WorkflowRunEngineRepository,
 };
 use ora_domain::{
     SessionId, SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
@@ -183,7 +183,6 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
-        token_usage: Option<TokenUsage>,
         file_changes: Vec<FileChange>,
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
@@ -210,7 +209,7 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 if WorkflowNodeStatus::from_database_value(status)? != WorkflowNodeStatus::Running {
                     return Ok(AdvanceWorkflowRunResult::NotRunning);
                 }
-                let payload = complete_payload(stop_reason, token_usage, file_changes);
+                let payload = complete_payload(stop_reason, file_changes);
                 transaction.execute(
                     "UPDATE workflow_node_runs SET status = ?2, output = ?3, payload = ?4, finished_at = ?5, updated_at = ?5
                      WHERE id = ?1 AND is_deleted = 0",
@@ -541,22 +540,14 @@ fn current_nodes_to_state(current_nodes: &[String]) -> Result<String, crate::Dat
         .map_err(Into::into)
 }
 
-/// Builds the node-run `payload` blob: the ACP stop reason, recorded token usage, and incremental
-/// file changes, when any.
+/// Builds the node-run `payload` blob: the ACP stop reason and incremental file changes, when any.
 fn complete_payload(
     stop_reason: Option<String>,
-    token_usage: Option<TokenUsage>,
     file_changes: Vec<FileChange>,
 ) -> Option<String> {
     let mut payload = serde_json::Map::new();
     if let Some(reason) = stop_reason {
         payload.insert("stop_reason".to_string(), serde_json::json!(reason));
-    }
-    if let Some(usage) = token_usage {
-        payload.insert(
-            "token_usage".to_string(),
-            serde_json::json!({ "used": usage.used, "size": usage.size }),
-        );
     }
     if !file_changes.is_empty() {
         payload.insert(

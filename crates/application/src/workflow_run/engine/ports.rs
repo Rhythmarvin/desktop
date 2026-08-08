@@ -18,15 +18,6 @@ pub struct NodeRunToStart {
     pub input: Option<String>,
 }
 
-/// Token consumption recorded for one node execution, captured from the ACP session's usage update.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenUsage {
-    /// Tokens in context at the final usage update.
-    pub used: u64,
-    /// Total context window size in tokens.
-    pub size: u64,
-}
-
 /// One file's incremental change made by a node execution, captured from the worktree git diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileChange {
@@ -176,14 +167,13 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError>;
 
-    /// Marks one node-run succeeded, records its output, stop reason, token usage, and file
-    /// changes, and removes it from `current_nodes`.
+    /// Marks one node-run succeeded, records its output, stop reason, and file changes, and removes
+    /// it from `current_nodes`.
     fn complete_node(
         &self,
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
-        token_usage: Option<TokenUsage>,
         file_changes: Vec<FileChange>,
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;

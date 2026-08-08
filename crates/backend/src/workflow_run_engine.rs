@@ -2,8 +2,8 @@ use crate::agent_runtime::AgentRuntimeManager;
 use crate::clock::SystemClock;
 use crate::workflow_run_executor::WorkflowRunNodeExecutor;
 use ora_application::{
-    FileChange, TokenUsage, UuidWorkflowNodeRunIdGenerator, WorkflowRunCallback,
-    WorkflowRunControlHandler, WorkflowRunEngine,
+    FileChange, UuidWorkflowNodeRunIdGenerator, WorkflowRunCallback, WorkflowRunControlHandler,
+    WorkflowRunEngine,
 };
 use ora_db::{
     RepositoryPool, SqliteAgentDefinitionRepository, SqliteWorkflowRunEngineRepository,
@@ -62,7 +62,6 @@ impl WorkflowRunCallback for WorkflowRunEngineCallback {
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
-        token_usage: Option<TokenUsage>,
         file_changes: Vec<FileChange>,
     ) {
         if let Ok(guard) = self.engine.read()
@@ -72,7 +71,6 @@ impl WorkflowRunCallback for WorkflowRunEngineCallback {
                 node_run_id,
                 output,
                 stop_reason,
-                token_usage,
                 file_changes,
             )
         {

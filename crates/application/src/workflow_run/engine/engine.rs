@@ -4,7 +4,7 @@ use crate::workflow_run::engine::graph::{GraphError, WorkflowGraph, WorkflowGrap
 use crate::workflow_run::engine::node_type::NodeType;
 use crate::workflow_run::engine::ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange, NodeRunToStart,
-    RestartWorkflowRunResult, StartWorkflowRunResult, TokenUsage, UpdateWorkflowRunInputResult,
+    RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
     WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
 };
 use ora_domain::{WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId};
@@ -35,15 +35,14 @@ pub trait NodeExecutor {
 /// The backend session driver invokes this when an agent node's session finishes; callbacks MUST
 /// be routed through the run's serial executor so state transitions stay serial.
 pub trait WorkflowRunCallback: Send + Sync {
-    /// Reports a successful node completion with its accumulated conversation, stop reason, token
-    /// usage, and incremental file changes.
+    /// Reports a successful node completion with its accumulated conversation, stop reason, and
+    /// incremental file changes.
     fn complete_node(
         &self,
         run_id: &WorkflowRunId,
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
-        token_usage: Option<TokenUsage>,
         file_changes: Vec<FileChange>,
     );
 
@@ -210,13 +209,12 @@ where
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
-        token_usage: Option<TokenUsage>,
         file_changes: Vec<FileChange>,
     ) -> Result<(), EngineError> {
         let now = self.clock.now_timestamp_millis();
         match self
             .repository
-            .complete_node(node_run_id, output, stop_reason, token_usage, file_changes, now)?
+            .complete_node(node_run_id, output, stop_reason, file_changes, now)?
         {
             AdvanceWorkflowRunResult::Advanced => self.run_schedule(run_id),
             AdvanceWorkflowRunResult::NotRunning | AdvanceWorkflowRunResult::NotFound => Ok(()),
@@ -257,7 +255,7 @@ where
                 {
                     let output = control_node_output(&graph, node, &node_runs, &context);
                     self.repository
-                        .complete_node(&node_run.id, Some(output), None, None, Vec::new(), now)?;
+                        .complete_node(&node_run.id, Some(output), None, Vec::new(), now)?;
                 }
             }
 

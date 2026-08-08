@@ -9,7 +9,7 @@ use crate::task::resolve_task_cwd;
 use crate::workflow_run_prerequisites::resolve_executable_skill_name;
 use ora_application::{
     AgentDefinitionRepository, AgentSkill, Clock, ExecutionContext, FileChange, FilesystemSkillStorage,
-    NodeExecutor, RepositoryError, TokenUsage, WorkflowGraph, WorkflowGraphNode,
+    NodeExecutor, RepositoryError, WorkflowGraph, WorkflowGraphNode,
     WorkflowRunCallback, WorkflowRunEngineRepository,
 };
 use ora_contracts::acp::content::{ContentBlock, TextContent};
@@ -116,12 +116,11 @@ impl NodeExecutor for WorkflowRunNodeExecutor {
     }
 }
 
-/// One finished agent node turn: the accumulated conversation, the provider stop reason, the token
-/// usage reported by the final `usage_update`, and the worktree files this node incrementally changed.
+/// One finished agent node turn: the accumulated conversation, the provider stop reason, and the
+/// worktree files this node incrementally changed.
 struct AgentNodeOutcome {
     output: Option<String>,
     stop_reason: StopReason,
-    token_usage: Option<TokenUsage>,
     file_changes: Vec<FileChange>,
 }
 
@@ -303,16 +302,9 @@ async fn drive_agent_node(
     // `load_session` while this driver keeps consuming toward `Completed` (Q1).
     let mut accumulator = ConversationAccumulator::default();
     let mut stop_reason = None;
-    let mut token_usage = None;
     while let Some(event) = stream.recv().await {
         match event? {
             PromptSessionEvent::SessionUpdate { update } => {
-                if let SessionUpdate::UsageUpdate(usage) = &update {
-                    token_usage = Some(TokenUsage {
-                        used: usage.used,
-                        size: usage.size,
-                    });
-                }
                 accumulator.consume(&update);
             }
             PromptSessionEvent::PermissionRequest(_) => {}
@@ -340,7 +332,6 @@ async fn drive_agent_node(
     Ok(AgentNodeOutcome {
         output: accumulator.into_json(),
         stop_reason,
-        token_usage,
         file_changes,
     })
 }
@@ -358,7 +349,6 @@ fn report_outcome(
             node_run_id,
             outcome.output,
             Some("end_turn".to_string()),
-            outcome.token_usage,
             outcome.file_changes,
         ),
         StopReason::MaxTokens => callback.complete_node(
@@ -366,7 +356,6 @@ fn report_outcome(
             node_run_id,
             outcome.output,
             Some("max_tokens".to_string()),
-            outcome.token_usage,
             outcome.file_changes,
         ),
         StopReason::MaxTurnRequests => callback.complete_node(
@@ -374,7 +363,6 @@ fn report_outcome(
             node_run_id,
             outcome.output,
             Some("max_turn_requests".to_string()),
-            outcome.token_usage,
             outcome.file_changes,
         ),
         StopReason::Refusal => callback.fail_node(

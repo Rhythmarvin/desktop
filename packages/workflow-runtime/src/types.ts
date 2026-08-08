@@ -168,12 +168,6 @@ export type GraphWorkflowNodeStatus =
 /** HITL timeout policy; MVP mock always waits (`wait`) until submit. */
 export type HitlTimeoutPolicy = "fail" | "skip" | "wait";
 
-export interface GraphWorkflowTokenUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-}
-
 /** Glanceable runtime I/O for Theater inspector (not raw wire frames). */
 export interface GraphWorkflowNodeIo {
   /** One-line summary shown by default. */
@@ -196,8 +190,6 @@ export interface GraphWorkflowNodeState {
   sessionId?: string;
   startedAt?: string;
   finishedAt?: string;
-  durationMs?: number;
-  tokenUsage?: GraphWorkflowTokenUsage;
   errorMessage?: string;
   /** ACP stop reason recorded in `payload.stop_reason` when the node succeeded. */
   stopReason?: string;
@@ -274,10 +266,6 @@ export interface GraphWorkflowRun {
   nodeStates: Record<string, GraphWorkflowNodeState>;
   /** Open HITL gates (parallel prompts may all wait at once). Cleared on resolve / cancel. */
   openHitls: HitlRequest[];
-  totals: {
-    durationMs?: number;
-    tokenUsage?: GraphWorkflowTokenUsage;
-  };
   createdAt: string;
   updatedAt: string;
   finishedAt?: string;
@@ -308,8 +296,6 @@ export type WorkflowRunEvent =
       runId: string;
       nodeId: string;
       status: GraphWorkflowNodeStatus;
-      durationMs?: number;
-      tokenUsage?: GraphWorkflowTokenUsage;
     }
   | {
       type: "artifact_added";
@@ -330,12 +316,7 @@ export type WorkflowRunEvent =
       /** Submitted field values (keys = field.name). */
       payload: Record<string, unknown>;
     }
-  | {
-      type: "run_finished";
-      runId: string;
-      status: GraphWorkflowRunStatus;
-      totals: GraphWorkflowRun["totals"];
-    };
+  | { type: "run_finished"; runId: string; status: GraphWorkflowRunStatus };
 
 /** Opaque resume marker returned to a future NDJSON transport unchanged. */
 export type WorkflowEventCursor = string;

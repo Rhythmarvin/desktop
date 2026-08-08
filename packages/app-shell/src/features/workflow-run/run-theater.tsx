@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, cn, toast } from "@ora/ui";
-import { formatDuration } from "../../lib/format";
 import { useUpdateWorkflowRunInput } from "../../state/hooks/use-workflow-runs";
 import { filterArtifacts, latestArtifact } from "./artifact-filter";
 import { RunActInspector } from "./run-act-inspector";
@@ -515,18 +514,6 @@ export function RunTheater({
                       {t("workflowRun.theater.parallelCount", {
                         count: focus.activeIds.length,
                       })}
-                    </Badge>
-                  )}
-                  {run.totals.tokenUsage?.totalTokens !== undefined && (
-                    <Badge variant="secondary" className="tabular-nums">
-                      {t("workflowRun.totalsTokens", {
-                        count: run.totals.tokenUsage.totalTokens,
-                      })}
-                    </Badge>
-                  )}
-                  {run.totals.durationMs !== undefined && (
-                    <Badge variant="secondary" className="tabular-nums">
-                      {formatDuration(run.totals.durationMs)}
                     </Badge>
                   )}
                 </div>

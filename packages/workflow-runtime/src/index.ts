@@ -5,7 +5,6 @@ export type {
   GraphWorkflowRun,
   GraphWorkflowRunStatus,
   GraphWorkflowSnapshotNodePatch,
-  GraphWorkflowTokenUsage,
   HitlField,
   HitlFieldType,
   HitlGateKind,

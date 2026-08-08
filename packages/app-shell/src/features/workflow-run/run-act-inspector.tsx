@@ -5,7 +5,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { createMockWorkflowNodeType } from "@ora/workflow-mock";
-import { formatDuration, formatRunClock } from "../../lib/format";
+import { formatRunClock } from "../../lib/format";
 import {
   conditionBranchesSummary,
   createWorkflowSummaryLabels,
@@ -343,22 +343,6 @@ function RunActInspectorPanel({
               {timingRange}
             </p>
           )}
-          <div className="grid grid-cols-2 gap-2">
-            <MetricTile
-              label={t("workflowRun.field.duration")}
-              value={state.durationMs !== undefined
-                ? formatDuration(state.durationMs)
-                : "—"}
-            />
-            <MetricTile
-              label={t("workflowRun.field.tokens")}
-              value={state.tokenUsage?.totalTokens !== undefined
-                ? t("workflowRun.totalsTokens", {
-                  count: state.tokenUsage.totalTokens,
-                })
-                : "—"}
-            />
-          </div>
           {state.errorMessage !== undefined && state.errorMessage !== "" && (
             <p
               role="alert"
@@ -531,17 +515,3 @@ function ReadOnlyField({
   );
 }
 
-function MetricTile({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2">
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-xs font-medium tabular-nums">{value}</p>
-    </div>
-  );
-}

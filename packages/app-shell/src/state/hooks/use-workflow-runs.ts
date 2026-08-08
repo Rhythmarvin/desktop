@@ -234,9 +234,6 @@ export function buildDisplayRun(
   for (const node of definitionSnapshot.nodes) {
     const nodeRun = nodeRunByNodeId.get(node.id) ?? null;
     const payload = nodeRun?.payload != null ? parseNodePayload(nodeRun.payload) : null;
-    const durationMs = nodeRun?.startedAt != null && nodeRun?.finishedAt != null
-      ? Number(nodeRun.finishedAt - nodeRun.startedAt)
-      : undefined;
     const conversation = nodeRun?.output != null
       ? conversationFromNodeOutput(
         nodeRun.output,
@@ -255,12 +252,8 @@ export function buildDisplayRun(
         : {}),
       ...(nodeRun?.startedAt != null ? { startedAt: toIso(nodeRun.startedAt) } : {}),
       ...(nodeRun?.finishedAt != null ? { finishedAt: toIso(nodeRun.finishedAt) } : {}),
-      ...(durationMs != undefined ? { durationMs } : {}),
       ...(nodeRun?.error != null ? { errorMessage: nodeRun.error } : {}),
       ...(payload?.stop_reason != null ? { stopReason: payload.stop_reason } : {}),
-      ...(payload?.token_usage?.used != null
-        ? { tokenUsage: { totalTokens: payload.token_usage.used } }
-        : {}),
       ...(payload?.file_changes != null && payload.file_changes.length > 0
         ? { fileChanges: payload.file_changes }
         : {}),
@@ -268,13 +261,6 @@ export function buildDisplayRun(
       ...(conversation != null && conversation.length > 0 ? { conversation } : {}),
     };
   }
-  const runDurationMs = detail.run.startedAt != null && detail.run.finishedAt != null
-    ? Number(detail.run.finishedAt - detail.run.startedAt)
-    : undefined;
-  const totalTokens = Object.values(nodeStates).reduce(
-    (sum, state) => sum + (state.tokenUsage?.totalTokens ?? 0),
-    0,
-  );
   return {
     id: detail.run.id,
     projectId: "",
@@ -285,10 +271,6 @@ export function buildDisplayRun(
     kickoffInput: kickoffInput ?? undefined,
     nodeStates,
     openHitls: [],
-    totals: {
-      ...(runDurationMs != undefined ? { durationMs: runDurationMs } : {}),
-      ...(totalTokens > 0 ? { tokenUsage: { totalTokens } } : {}),
-    },
     createdAt: toIso(detail.run.createdAt),
     updatedAt: toIso(detail.run.updatedAt),
     ...(detail.run.finishedAt != null ? { finishedAt: toIso(detail.run.finishedAt) } : {}),
@@ -343,26 +325,21 @@ function conversationFromNodeOutput(
   }
 }
 
-/** Reads the ACP stop reason, token usage, and file changes from a node run's `payload` JSON,
+/** Reads the ACP stop reason and file changes from a node run's `payload` JSON,
  * tolerating malformed payloads. */
 function parseNodePayload(
   payload: string,
 ): {
   stop_reason?: string;
-  token_usage?: { used?: number };
   file_changes?: WorkflowNodeFileChange[];
 } | null {
   try {
     const value = JSON.parse(payload) as {
       stop_reason?: unknown;
-      token_usage?: { used?: unknown };
       file_changes?: Array<{ path?: unknown; additions?: unknown; deletions?: unknown }>;
     };
     return {
       ...(typeof value.stop_reason === "string" ? { stop_reason: value.stop_reason } : {}),
-      ...(value.token_usage != null && typeof value.token_usage.used === "number"
-        ? { token_usage: { used: value.token_usage.used } }
-        : {}),
       ...(Array.isArray(value.file_changes)
         ? {
           file_changes: value.file_changes.flatMap((change) => (

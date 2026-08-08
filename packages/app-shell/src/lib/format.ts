@@ -23,24 +23,6 @@ export function formatRunClock(iso: string, locale?: string): string {
   }).format(date);
 }
 
-/**
- * Formats an epoch-ms duration as a compact human string, showing seconds and
- * minutes instead of raw milliseconds. Sub-second durations stay in ms so the
- * value is not rounded to "0s". Examples: "850ms", "45s", "2m 30s".
- */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return `${Math.round(ms)}ms`;
-  }
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) {
-    return `${seconds}s`;
-  }
-  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
-}
-
 /** Formats an epoch-ms timestamp as a short relative label, e.g. "2h ago". */
 export function formatRelativeTime(timestamp: number, now: number): string {
   const elapsed = Math.max(0, now - timestamp);
