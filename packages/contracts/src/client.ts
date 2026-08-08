@@ -226,6 +226,8 @@ export function createContractsClient(
         executeOperation("cancelWorkflowRun", request, transport, options),
       restart: (request, options) =>
         executeOperation("restartWorkflowRun", request, transport, options),
+      updateInput: (request, options) =>
+        executeOperation("updateWorkflowRunInput", request, transport, options),
     },
   };
 }

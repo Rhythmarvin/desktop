@@ -137,6 +137,7 @@ export type ContractError =
     | { "code": "workflow_role_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_run_start_failed"; "params": EmptyErrorParams }
     | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams }
+    | { "code": "workflow_run_not_editable"; "params": EmptyErrorParams }
   );
 
 /**
@@ -276,7 +277,8 @@ export type PublicError =
   | { "code": "workflow_skill_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_role_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_run_start_failed"; "params": EmptyErrorParams }
-  | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams };
+  | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams }
+  | { "code": "workflow_run_not_editable"; "params": EmptyErrorParams };
 
 /**
  * Identifies one Ora request across adapters, spans, responses, and completion events.

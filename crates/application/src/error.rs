@@ -226,6 +226,8 @@ pub enum ApplicationError {
     WorkflowRunStartFailed { message: String },
     #[error("workflow run cannot be restarted while running")]
     WorkflowRunNotRestartable,
+    #[error("workflow run input can only be changed while the run is pending")]
+    WorkflowRunNotEditable,
     #[error("workflow run is active and cannot be deleted")]
     WorkflowRunActive,
     #[error("workflow repository operation failed")]
@@ -582,7 +584,8 @@ impl PartialEq for ApplicationError {
             }
             (WorkflowRunGraphParse(_), WorkflowRunGraphParse(_))
             | (WorkflowRunValidation(_), WorkflowRunValidation(_))
-            | (WorkflowRunNotRestartable, WorkflowRunNotRestartable) => true,
+            | (WorkflowRunNotRestartable, WorkflowRunNotRestartable)
+            | (WorkflowRunNotEditable, WorkflowRunNotEditable) => true,
             (
                 WorkflowSkillNotFound { skill_id: left },
                 WorkflowSkillNotFound { skill_id: right },

@@ -450,7 +450,9 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "CancelWorkflowRunRequest"
         | "CancelWorkflowRunResponse"
         | "RestartWorkflowRunRequest"
-        | "RestartWorkflowRunResponse" => "workflowRun",
+        | "RestartWorkflowRunResponse"
+        | "UpdateWorkflowRunInputRequest"
+        | "UpdateWorkflowRunInputResponse" => "workflowRun",
         // fileSystem
         "ListDirectoryRequest"
         | "ListDirectoryResponse"

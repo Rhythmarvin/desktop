@@ -201,6 +201,7 @@ pub enum PublicError {
     WorkflowRoleNotFound(EmptyErrorParams),
     WorkflowRunStartFailed(EmptyErrorParams),
     WorkflowRunNotRestartable(EmptyErrorParams),
+    WorkflowRunNotEditable(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -314,6 +315,7 @@ impl PublicError {
             Self::WorkflowRoleNotFound(_) => "workflow_role_not_found",
             Self::WorkflowRunStartFailed(_) => "workflow_run_start_failed",
             Self::WorkflowRunNotRestartable(_) => "workflow_run_not_restartable",
+            Self::WorkflowRunNotEditable(_) => "workflow_run_not_editable",
         }
     }
 }
@@ -620,7 +622,8 @@ mod tests {
                 | PublicError::WorkflowSkillNotFound(_)
                 | PublicError::WorkflowRoleNotFound(_)
                 | PublicError::WorkflowRunStartFailed(_)
-                | PublicError::WorkflowRunNotRestartable(_) => {}
+                | PublicError::WorkflowRunNotRestartable(_)
+                | PublicError::WorkflowRunNotEditable(_) => {}
             }
         }
 

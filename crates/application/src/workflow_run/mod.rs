@@ -11,8 +11,8 @@ pub use engine::{
     AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentSkill, CancelWorkflowRunResult,
     EngineError, ExecutionContext, GraphError, NodeExecutor, NodeRunToStart, NodeType,
     RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult, UnknownNodeType,
-    WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRunCallback,
-    WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
+    UpdateWorkflowRunInputResult, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
+    WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
     WorkflowRunStartPrerequisites, WorkflowValidationError,
 };
 pub use handlers::{

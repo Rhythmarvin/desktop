@@ -12,10 +12,10 @@ use ora_application::{
     ProjectRepository, ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository,
     PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult, RollbackDraftResult,
     SessionRepository, SkillRepository, StartPrerequisitesError, StartWorkflowRunResult,
-    TaskRepository, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
-    WorkflowRepository, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunRepository, WorkflowRunStartPrerequisites, WorkflowValidationError,
-    WorktreeRepository,
+    TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraph, WorkflowGraphNode,
+    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowRunStartPrerequisites,
+    WorkflowValidationError, WorktreeRepository,
 };
 use ora_contracts::{StartWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
 use ora_domain::{
@@ -1394,6 +1394,34 @@ fn engine_repository_restart_resets_run_and_deletes_node_runs() {
         })
         .unwrap();
     assert_eq!(soft_deleted_rows, 1);
+}
+
+/// Verifies a pending run's kickoff input can be updated, and is frozen once the run starts.
+#[test]
+fn engine_repository_updates_pending_run_input() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    assert_eq!(
+        repository
+            .update_run_input(&run_id, Some("kickoff".to_string()), 40)
+            .unwrap(),
+        UpdateWorkflowRunInputResult::Updated
+    );
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.input.as_deref(), Some("kickoff"));
+
+    // Once started, the input is frozen.
+    repository.start_run(&run_id, &start_node_run(None), 41).unwrap();
+    assert_eq!(
+        repository
+            .update_run_input(&run_id, Some("late".to_string()), 42)
+            .unwrap(),
+        UpdateWorkflowRunInputResult::NotEditable
+    );
 }
 
 /// Verifies a running run cannot be restarted.

@@ -8,7 +8,8 @@ use ora_contracts::{
     GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest,
     ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsRequest,
     ListWorkflowRunsResponse, RestartWorkflowRunRequest, RestartWorkflowRunResponse,
-    StartWorkflowRunRequest, StartWorkflowRunResponse,
+    StartWorkflowRunRequest, StartWorkflowRunResponse, UpdateWorkflowRunInputRequest,
+    UpdateWorkflowRunInputResponse,
 };
 use serde::Deserialize;
 
@@ -76,6 +77,22 @@ pub async fn restart_workflow_run(
         .backend()
         .restart_workflow_run(RestartWorkflowRunRequest {
             run_id: path.run_id,
+        })
+        .map(Json)
+        .map_err(Into::into)
+}
+
+/// Updates the kickoff input of one pending workflow run.
+pub async fn update_workflow_run_input(
+    State(app_state): State<AppState>,
+    Path(path): Path<RunPath>,
+    Json(request): Json<UpdateWorkflowRunInputRequest>,
+) -> Result<Json<UpdateWorkflowRunInputResponse>, WebApiError> {
+    app_state
+        .backend()
+        .update_workflow_run_input(UpdateWorkflowRunInputRequest {
+            run_id: path.run_id,
+            input: request.input,
         })
         .map(Json)
         .map_err(Into::into)

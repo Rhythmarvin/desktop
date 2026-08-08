@@ -1193,6 +1193,13 @@ backend_command!(
     restart_workflow_run,
     "Restarts one workflow run through the shared Backend."
 );
+backend_command!(
+    update_workflow_run_input,
+    UpdateWorkflowRunInputRequest,
+    UpdateWorkflowRunInputResponse,
+    update_workflow_run_input,
+    "Updates the kickoff input of one workflow run through the shared Backend."
+);
 
 // =============================================================================
 // desktop

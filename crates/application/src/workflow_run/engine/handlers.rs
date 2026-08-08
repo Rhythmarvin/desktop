@@ -1,13 +1,14 @@
 use crate::workflow_run::mapper::map_run;
 use crate::workflow_run::{
-    CancelWorkflowRunResult, NodeExecutor, RestartWorkflowRunResult, WorkflowNodeRunIdGenerator,
-    WorkflowRunEngine, WorkflowRunEngineRepository, WorkflowRunRepository,
-    WorkflowRunStartPrerequisites,
+    CancelWorkflowRunResult, NodeExecutor, RestartWorkflowRunResult, UpdateWorkflowRunInputResult,
+    WorkflowNodeRunIdGenerator, WorkflowRunEngine, WorkflowRunEngineRepository,
+    WorkflowRunRepository, WorkflowRunStartPrerequisites,
 };
 use crate::{ApplicationError, Clock};
 use ora_contracts::{
     CancelWorkflowRunRequest, CancelWorkflowRunResponse, RestartWorkflowRunRequest,
     RestartWorkflowRunResponse, StartWorkflowRunRequest, StartWorkflowRunResponse,
+    UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse,
 };
 use ora_domain::{WorkflowRun, WorkflowRunId};
 use std::sync::Arc;
@@ -95,6 +96,31 @@ where
         }
         let run = self.find_run(&run_id)?;
         Ok(RestartWorkflowRunResponse { run: map_run(run) })
+    }
+
+    /// Sets the kickoff input of a pending run.
+    pub fn update_input(
+        &self,
+        request: UpdateWorkflowRunInputRequest,
+    ) -> Result<UpdateWorkflowRunInputResponse, ApplicationError> {
+        let run_id = WorkflowRunId::new(&request.run_id);
+        match self
+            .engine
+            .update_run_input(&run_id, request.input)
+            .map_err(ApplicationError::from_workflow_engine_error)?
+        {
+            UpdateWorkflowRunInputResult::Updated => {}
+            UpdateWorkflowRunInputResult::NotEditable => {
+                return Err(ApplicationError::WorkflowRunNotEditable)
+            }
+            UpdateWorkflowRunInputResult::NotFound => {
+                return Err(ApplicationError::WorkflowRunNotFound {
+                    run_id: request.run_id,
+                })
+            }
+        }
+        let run = self.find_run(&run_id)?;
+        Ok(UpdateWorkflowRunInputResponse { run: map_run(run) })
     }
 
     /// Loads one visible run or reports it missing.

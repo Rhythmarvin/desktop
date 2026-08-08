@@ -97,6 +97,15 @@ pub enum RestartWorkflowRunResult {
     NotFound,
 }
 
+/// Outcome of updating a run's kickoff input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateWorkflowRunInputResult {
+    Updated,
+    /// The run is not `Pending` with empty `current_nodes`, so its input is frozen.
+    NotEditable,
+    NotFound,
+}
+
 /// Persistence operations for the workflow run execution engine.
 ///
 /// This port is deliberately separate from the graph-agnostic `WorkflowRunRepository` CRUD port:
@@ -186,6 +195,15 @@ pub trait WorkflowRunEngineRepository {
         run_id: &WorkflowRunId,
         now: i64,
     ) -> Result<RestartWorkflowRunResult, RepositoryError>;
+
+    /// Sets the kickoff input of a `Pending` run with empty `current_nodes`, so the start node
+    /// receives it when the run starts.
+    fn update_run_input(
+        &self,
+        run_id: &WorkflowRunId,
+        input: Option<String>,
+        now: i64,
+    ) -> Result<UpdateWorkflowRunInputResult, RepositoryError>;
 
     /// Lists runs in `Running` or `Failed` status for boot-time crash recovery.
     fn list_recoverable_runs(&self) -> Result<Vec<WorkflowRunId>, RepositoryError>;

@@ -147,6 +147,7 @@ pub fn run() {
             commands::start_workflow_run,
             commands::cancel_workflow_run,
             commands::restart_workflow_run,
+            commands::update_workflow_run_input,
             // =============================================================================
             // desktop
             // =============================================================================

@@ -1,6 +1,7 @@
 use ora_application::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
-    RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, WorkflowRunEngineRepository,
+    RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult,
+    UpdateWorkflowRunInputResult, WorkflowRunEngineRepository,
 };
 use ora_domain::{
     SessionId, SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
@@ -406,6 +407,42 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 )?;
                 transaction.commit()?;
                 Ok(RestartWorkflowRunResult::Restarted)
+            })
+            .map_err(engine_repository_error_from_database)
+    }
+
+    fn update_run_input(
+        &self,
+        run_id: &WorkflowRunId,
+        input: Option<String>,
+        now: i64,
+    ) -> Result<UpdateWorkflowRunInputResult, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let transaction =
+                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                let Some((status, state)) = transaction
+                    .query_row(
+                        "SELECT run_status, state FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
+                        params![run_id.as_ref()],
+                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+                    )
+                    .optional()?
+                else {
+                    return Ok(UpdateWorkflowRunInputResult::NotFound);
+                };
+                let status = WorkflowRunStatus::from_database_value(status)?;
+                let current_nodes = current_nodes_from_state(state.as_deref())?;
+                if status != WorkflowRunStatus::Pending || !current_nodes.is_empty() {
+                    return Ok(UpdateWorkflowRunInputResult::NotEditable);
+                }
+                transaction.execute(
+                    "UPDATE workflow_runs SET input = ?2, updated_at = ?3
+                     WHERE id = ?1 AND is_deleted = 0",
+                    params![run_id.as_ref(), input, now],
+                )?;
+                transaction.commit()?;
+                Ok(UpdateWorkflowRunInputResult::Updated)
             })
             .map_err(engine_repository_error_from_database)
     }

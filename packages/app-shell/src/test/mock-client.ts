@@ -598,6 +598,11 @@ export function createMockClient(state: MockClientState): ContractsClient {
         if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
         return { run: mockWorkflowRun(record) };
       },
+      updateInput: async (req) => {
+        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
+        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        return { run: mockWorkflowRun(record) };
+      },
       list: async (req) => ({
         runs: state.workflowRuns
           .filter((record) => record.projectId === req.projectId)

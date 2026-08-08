@@ -5,7 +5,8 @@ use crate::workflow_run::engine::node_type::NodeType;
 use crate::workflow_run::engine::ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
     RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
-    WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository, WorkflowRunStartPrerequisites,
+    UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
+    WorkflowRunStartPrerequisites,
 };
 use ora_domain::{WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId};
 use serde::Deserialize;
@@ -195,6 +196,16 @@ where
             result @ (RestartWorkflowRunResult::NotRestartable
             | RestartWorkflowRunResult::NotFound) => Ok(result),
         }
+    }
+
+    /// Sets the kickoff input of a `Pending` run so its start node receives it on start.
+    pub fn update_run_input(
+        &self,
+        run_id: &WorkflowRunId,
+        input: Option<String>,
+    ) -> Result<UpdateWorkflowRunInputResult, EngineError> {
+        let now = self.clock.now_timestamp_millis();
+        Ok(self.repository.update_run_input(run_id, input, now)?)
     }
 
     /// Marks one node-run succeeded and continues the scheduling wave.

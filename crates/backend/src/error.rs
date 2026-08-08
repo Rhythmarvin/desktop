@@ -591,6 +591,11 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorkflowRunNotRestartable(EmptyErrorParams {}),
                 "workflow run cannot be restarted while running",
             ),
+            ApplicationError::WorkflowRunNotEditable => (
+                ErrorClassification::Conflict,
+                PublicError::WorkflowRunNotEditable(EmptyErrorParams {}),
+                "workflow run input can only be changed while the run is pending",
+            ),
         };
 
         Self {

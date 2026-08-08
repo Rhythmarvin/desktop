@@ -66,4 +66,5 @@ pub const WORKFLOW_RUN_NODES_PATH: &str = "/api/workflow-runs/{runId}/nodes";
 pub const WORKFLOW_RUN_START_PATH: &str = "/api/workflow-runs/{runId}/start";
 pub const WORKFLOW_RUN_CANCEL_PATH: &str = "/api/workflow-runs/{runId}/cancel";
 pub const WORKFLOW_RUN_RESTART_PATH: &str = "/api/workflow-runs/{runId}/restart";
+pub const WORKFLOW_RUN_INPUT_PATH: &str = "/api/workflow-runs/{runId}/input";
 pub const WORKFLOW_SNAPSHOT_PATH: &str = "/api/workflow-snapshots/{snapshotId}";

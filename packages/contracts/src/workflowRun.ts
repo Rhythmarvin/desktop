@@ -111,6 +111,19 @@ export type StartWorkflowRunRequest = { runId: string };
 export type StartWorkflowRunResponse = { run: WorkflowRun };
 
 /**
+ * Sets the kickoff input of a pending run, used as the start node's input on start.
+ */
+export type UpdateWorkflowRunInputRequest = {
+  runId: string;
+  input: string | null;
+};
+
+/**
+ * Returns the run with its updated input.
+ */
+export type UpdateWorkflowRunInputResponse = { run: WorkflowRun };
+
+/**
  * Public node-run payload without persistence audit metadata.
  */
 export type WorkflowNodeRun = {

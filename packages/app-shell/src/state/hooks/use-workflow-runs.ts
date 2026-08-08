@@ -106,6 +106,19 @@ export function useRestartWorkflowRun() {
   });
 }
 
+/** Sets the kickoff input of a pending run, used as the start node's input on start. */
+export function useUpdateWorkflowRunInput() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string; input: string }) =>
+      client.workflowRun.updateInput({ runId: input.runId, input: input.input }),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+    },
+  });
+}
+
 /**
  * Renames one persisted workflow run through its run-task title.
  *

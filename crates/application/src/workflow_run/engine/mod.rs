@@ -24,7 +24,8 @@ pub use node_type::{NodeType, UnknownNodeType};
 pub use ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
     RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
-    WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository, WorkflowRunStartPrerequisites,
+    UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
+    WorkflowRunStartPrerequisites,
 };
 
 #[cfg(test)]

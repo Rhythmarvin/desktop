@@ -4,8 +4,8 @@ use crate::frontend::{
     FrontendEndpoint, FrontendHttpMethod, NO_PATH_PARAMS, WORKFLOW_RUN_PATH_PARAMS,
 };
 use ora_contracts::{
-    WORKFLOW_RUN_CANCEL_PATH, WORKFLOW_RUN_NODES_PATH, WORKFLOW_RUN_PATH,
-    WORKFLOW_RUN_RESTART_PATH, WORKFLOW_RUN_START_PATH, WORKFLOW_RUNS_PATH,
+    WORKFLOW_RUN_CANCEL_PATH, WORKFLOW_RUN_INPUT_PATH, WORKFLOW_RUN_NODES_PATH,
+    WORKFLOW_RUN_PATH, WORKFLOW_RUN_RESTART_PATH, WORKFLOW_RUN_START_PATH, WORKFLOW_RUNS_PATH,
 };
 
 const NAMESPACE: &str = "workflowRun";
@@ -109,5 +109,16 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         response_type: "RestartWorkflowRunResponse",
         path_params: WORKFLOW_RUN_PATH_PARAMS,
         has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "updateWorkflowRunInput",
+        namespace: NAMESPACE,
+        member_name: "updateInput",
+        method: FrontendHttpMethod::Post,
+        path_template: WORKFLOW_RUN_INPUT_PATH,
+        request_type: "UpdateWorkflowRunInputRequest",
+        response_type: "UpdateWorkflowRunInputResponse",
+        path_params: WORKFLOW_RUN_PATH_PARAMS,
+        has_json_body: true,
     },
 ];

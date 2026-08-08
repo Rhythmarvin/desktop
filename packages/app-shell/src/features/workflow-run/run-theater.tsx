@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, cn } from "@ora/ui";
+import { Badge, cn, toast } from "@ora/ui";
+import { useUpdateWorkflowRunInput } from "../../state/hooks/use-workflow-runs";
 import { filterArtifacts, latestArtifact } from "./artifact-filter";
 import { RunActInspector } from "./run-act-inspector";
 import { RunResultAct } from "./run-result-act";
@@ -76,6 +77,7 @@ export function RunTheater({
   onSessionConversationNodeIdChange,
 }: RunTheaterProps) {
   const { t } = useTranslation();
+  const updateInput = useUpdateWorkflowRunInput();
   const inspectorAnimationRef = useRef<number | null>(null);
   const inspectorWidthRef = useRef(DEFAULT_INSPECTOR_WIDTH);
   const inspectorCurrentWidthRef = useRef(0);
@@ -573,6 +575,21 @@ export function RunTheater({
                 state={primaryState ?? null}
                 artifacts={primaryArtifacts}
                 revealedArtifactId={revealedArtifactId}
+                editable={run.status === "pending"}
+                onPatchNode={run.status === "pending" && primaryNode?.data?.kind === "start"
+                  ? (patch) => {
+                    // The start node's instruction is the run's kickoff input; the backend has no
+                    // way to edit other nodes of the frozen snapshot.
+                    if (patch.instruction != null) {
+                      updateInput.mutate({
+                        runId: run.id,
+                        input: patch.instruction,
+                      }, {
+                        onError: () => toast.error(t("workflowRun.updateFailed")),
+                      });
+                    }
+                  }
+                  : undefined}
                 onClose={closeInspector}
               />
             </div>

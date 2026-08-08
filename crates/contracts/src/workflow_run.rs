@@ -260,6 +260,23 @@ pub struct RestartWorkflowRunResponse {
     pub run: WorkflowRun,
 }
 
+/// Sets the kickoff input of a pending run, used as the start node's input on start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct UpdateWorkflowRunInputRequest {
+    pub run_id: String,
+    pub input: Option<String>,
+}
+
+/// Returns the run with its updated input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct UpdateWorkflowRunInputResponse {
+    pub run: WorkflowRun,
+}
+
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     WorkflowRunStatus::export(config)?;
@@ -285,6 +302,8 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     CancelWorkflowRunResponse::export(config)?;
     RestartWorkflowRunRequest::export(config)?;
     RestartWorkflowRunResponse::export(config)?;
+    UpdateWorkflowRunInputRequest::export(config)?;
+    UpdateWorkflowRunInputResponse::export(config)?;
     Ok(())
 }
 

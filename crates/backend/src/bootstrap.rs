@@ -182,6 +182,16 @@ impl Backend {
             .map_err(BackendError::from)
     }
 
+    /// Sets the kickoff input of a pending workflow run.
+    pub fn update_workflow_run_input(
+        &self,
+        request: UpdateWorkflowRunInputRequest,
+    ) -> Result<UpdateWorkflowRunInputResponse, BackendError> {
+        self.workflow_run_engine
+            .update_input(request)
+            .map_err(BackendError::from)
+    }
+
     /// Returns the repository pool needed by server-only services excluded from this extraction.
     pub fn repository_pool(&self) -> RepositoryPool {
         self.pool.clone()

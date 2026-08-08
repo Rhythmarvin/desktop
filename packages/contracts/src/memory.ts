@@ -629,6 +629,9 @@ export function createMemoryContractsClient(
       restart: async () => {
         throw new Error("workflowRun.restart not implemented in memory client");
       },
+      updateInput: async () => {
+        throw new Error("workflowRun.updateInput not implemented in memory client");
+      },
     },
   };
 }
