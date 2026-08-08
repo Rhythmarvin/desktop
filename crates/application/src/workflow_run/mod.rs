@@ -10,10 +10,10 @@ mod tests;
 pub use engine::{
     AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentSkill, CancelWorkflowRunResult,
     EngineError, ExecutionContext, GraphError, NodeExecutor, NodeRunToStart, NodeType,
-    RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult, UnknownNodeType,
-    UpdateWorkflowRunInputResult, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
-    WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunWorktreeInitializer, WorkflowValidationError,
+    RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult, TokenUsage,
+    UnknownNodeType, UpdateWorkflowRunInputResult, WorkflowGraph, WorkflowGraphNode,
+    WorkflowNodeRunIdGenerator, WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunWorktreeInitializer, WorkflowValidationError,
 };
 pub use handlers::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,

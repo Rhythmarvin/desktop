@@ -8,8 +8,8 @@ use crate::error::BackendError;
 use crate::workflow_run_prerequisites::resolve_executable_skill_name;
 use ora_application::{
     AgentDefinitionRepository, AgentSkill, Clock, ExecutionContext, FilesystemSkillStorage,
-    NodeExecutor, RepositoryError, WorkflowGraph, WorkflowGraphNode, WorkflowRunCallback,
-    WorkflowRunEngineRepository,
+    NodeExecutor, RepositoryError, TokenUsage, WorkflowGraph, WorkflowGraphNode,
+    WorkflowRunCallback, WorkflowRunEngineRepository,
 };
 use ora_contracts::acp::content::{ContentBlock, TextContent};
 use ora_contracts::acp::prompt::StopReason;
@@ -113,10 +113,12 @@ impl NodeExecutor for WorkflowRunNodeExecutor {
     }
 }
 
-/// One finished agent node turn: the accumulated conversation and the provider stop reason.
+/// One finished agent node turn: the accumulated conversation, the provider stop reason, and the
+/// token usage reported by the final `usage_update`.
 struct AgentNodeOutcome {
     output: Option<String>,
     stop_reason: StopReason,
+    token_usage: Option<TokenUsage>,
 }
 
 /// Failures raised while driving one agent node's session.
@@ -235,9 +237,18 @@ async fn drive_agent_node(
     // `load_session` while this driver keeps consuming toward `Completed` (Q1).
     let mut accumulator = ConversationAccumulator::default();
     let mut stop_reason = None;
+    let mut token_usage = None;
     while let Some(event) = stream.recv().await {
         match event? {
-            PromptSessionEvent::SessionUpdate { update } => accumulator.consume(&update),
+            PromptSessionEvent::SessionUpdate { update } => {
+                if let SessionUpdate::UsageUpdate(usage) = &update {
+                    token_usage = Some(TokenUsage {
+                        used: usage.used,
+                        size: usage.size,
+                    });
+                }
+                accumulator.consume(&update);
+            }
             PromptSessionEvent::PermissionRequest(_) => {}
             PromptSessionEvent::Completed {
                 stop_reason: reason,
@@ -259,6 +270,7 @@ async fn drive_agent_node(
     Ok(AgentNodeOutcome {
         output: accumulator.into_json(),
         stop_reason,
+        token_usage,
     })
 }
 
@@ -275,18 +287,21 @@ fn report_outcome(
             node_run_id,
             outcome.output,
             Some("end_turn".to_string()),
+            outcome.token_usage,
         ),
         StopReason::MaxTokens => callback.complete_node(
             run_id,
             node_run_id,
             outcome.output,
             Some("max_tokens".to_string()),
+            outcome.token_usage,
         ),
         StopReason::MaxTurnRequests => callback.complete_node(
             run_id,
             node_run_id,
             outcome.output,
             Some("max_turn_requests".to_string()),
+            outcome.token_usage,
         ),
         StopReason::Refusal => callback.fail_node(
             run_id,

@@ -23,7 +23,7 @@ pub use handlers::WorkflowRunControlHandler;
 pub use node_type::{NodeType, UnknownNodeType};
 pub use ports::{
     AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
-    RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
+    RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult, TokenUsage,
     UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
     WorkflowRunWorktreeInitializer,
 };

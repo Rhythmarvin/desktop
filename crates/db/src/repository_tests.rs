@@ -12,7 +12,7 @@ use ora_application::{
     ProjectRepository, ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository,
     PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult, RollbackDraftResult,
     SessionRepository, SkillRepository, StartWorkflowRunResult,
-    TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraphNode,
+    TaskRepository, TokenUsage, UpdateWorkflowRunInputResult, WorkflowGraphNode,
     WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler, WorkflowRunEngine,
     WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowValidationError, WorktreeRepository,
 };
@@ -1138,6 +1138,7 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
                 &WorkflowNodeRunId::new("node-start"),
                 Some("out".to_string()),
                 Some("end_turn".to_string()),
+                None,
                 41,
             )
             .unwrap(),
@@ -1162,9 +1163,38 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
     // A late or duplicate callback is rejected idempotently.
     assert_eq!(
         repository
-            .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, 42)
+            .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, 42)
             .unwrap(),
         AdvanceWorkflowRunResult::NotRunning
+    );
+}
+
+/// Verifies token usage recorded on completion lands in the node-run payload.
+#[test]
+fn engine_repository_records_token_usage_in_the_node_payload() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+
+    repository
+        .complete_node(
+            &WorkflowNodeRunId::new("node-start"),
+            Some("out".to_string()),
+            Some("end_turn".to_string()),
+            Some(TokenUsage { used: 1_024, size: 8_000 }),
+            41,
+        )
+        .unwrap();
+
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
+    assert_eq!(
+        node_runs[0].payload.as_deref(),
+        Some("{\"stop_reason\":\"end_turn\",\"token_usage\":{\"size\":8000,\"used\":1024}}")
     );
 }
 
@@ -1178,7 +1208,7 @@ fn engine_repository_starts_ready_nodes_and_tracks_them() {
         .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, 41)
+        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, 41)
         .unwrap();
 
     repository
@@ -1285,7 +1315,7 @@ fn engine_repository_finish_run_succeeds() {
         .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, 41)
+        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, 41)
         .unwrap();
 
     repository
@@ -1354,6 +1384,7 @@ fn engine_repository_restart_resets_run_and_deletes_node_runs() {
         .complete_node(
             &WorkflowNodeRunId::new("node-start"),
             Some("out".to_string()),
+            None,
             None,
             41,
         )
@@ -1741,6 +1772,7 @@ fn engine_runs_a_linear_chain_to_success() {
             &agent_run.id,
             Some(assistant_conversation("done")),
             Some("end_turn".to_string()),
+            None,
         )
         .unwrap();
     let run = SqliteWorkflowRunRepository::new(pool)
@@ -1844,10 +1876,10 @@ fn engine_dispatches_parallel_branches_concurrently() {
         .id
         .clone();
     engine
-        .complete_node(&run_id, &left, Some(assistant_conversation("left")), None)
+        .complete_node(&run_id, &left, Some(assistant_conversation("left")), None, None)
         .unwrap();
     engine
-        .complete_node(&run_id, &right, Some(assistant_conversation("right")), None)
+        .complete_node(&run_id, &right, Some(assistant_conversation("right")), None, None)
         .unwrap();
     let dispatched: Vec<String> = executor
         .dispatched
@@ -1870,6 +1902,7 @@ fn engine_dispatches_parallel_branches_concurrently() {
             &run_id,
             &merge.id,
             Some(assistant_conversation("merged")),
+            None,
             None,
         )
         .unwrap();
@@ -1934,6 +1967,7 @@ fn engine_restarts_a_finished_run() {
             &run_id,
             &agent_run.id,
             Some(assistant_conversation("done")),
+            None,
             None,
         )
         .unwrap();

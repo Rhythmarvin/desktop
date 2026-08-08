@@ -18,6 +18,15 @@ pub struct NodeRunToStart {
     pub input: Option<String>,
 }
 
+/// Token consumption recorded for one node execution, captured from the ACP session's usage update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenUsage {
+    /// Tokens in context at the final usage update.
+    pub used: u64,
+    /// Total context window size in tokens.
+    pub size: u64,
+}
+
 /// Everything the engine needs to start or drive a run, fetched in one read.
 ///
 /// `graph_json` is the raw frozen React Flow document; the engine parses it into a `WorkflowGraph`.
@@ -156,13 +165,14 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError>;
 
-    /// Marks one node-run succeeded, records its output and stop reason, and removes it from
-    /// `current_nodes`.
+    /// Marks one node-run succeeded, records its output, stop reason, and token usage, and
+    /// removes it from `current_nodes`.
     fn complete_node(
         &self,
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
+        token_usage: Option<TokenUsage>,
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;
 
