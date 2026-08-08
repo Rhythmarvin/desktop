@@ -43,7 +43,7 @@ function turnFixture(): ChatTurn {
       },
     ],
     status: "completed",
-    stopReason: "endTurn",
+    stopReason: "end_turn",
     error: null,
     createdAt: 10,
   };
