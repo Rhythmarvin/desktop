@@ -1,5 +1,5 @@
 use ora_application::{
-    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, NodeRunToStart,
+    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange, NodeRunToStart,
     RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, TokenUsage,
     UpdateWorkflowRunInputResult, WorkflowRunEngineRepository,
 };
@@ -184,6 +184,7 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         output: Option<String>,
         stop_reason: Option<String>,
         token_usage: Option<TokenUsage>,
+        file_changes: Vec<FileChange>,
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
         self.pool
@@ -209,7 +210,7 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 if WorkflowNodeStatus::from_database_value(status)? != WorkflowNodeStatus::Running {
                     return Ok(AdvanceWorkflowRunResult::NotRunning);
                 }
-                let payload = complete_payload(stop_reason, token_usage);
+                let payload = complete_payload(stop_reason, token_usage, file_changes);
                 transaction.execute(
                     "UPDATE workflow_node_runs SET status = ?2, output = ?3, payload = ?4, finished_at = ?5, updated_at = ?5
                      WHERE id = ?1 AND is_deleted = 0",
@@ -540,35 +541,39 @@ fn current_nodes_to_state(current_nodes: &[String]) -> Result<String, crate::Dat
         .map_err(Into::into)
 }
 
-/// Builds the node-run `payload` blob: the ACP stop reason plus the recorded token usage, when any.
+/// Builds the node-run `payload` blob: the ACP stop reason, recorded token usage, and incremental
+/// file changes, when any.
 fn complete_payload(
     stop_reason: Option<String>,
     token_usage: Option<TokenUsage>,
+    file_changes: Vec<FileChange>,
 ) -> Option<String> {
-    match (stop_reason, token_usage) {
-        (None, None) => None,
-        (Some(reason), None) => Some(serde_json::json!({ "stop_reason": reason }).to_string()),
-        (None, Some(usage)) => Some(usage_payload(usage)),
-        (Some(reason), Some(usage)) => Some(serde_json::json!({
-            "stop_reason": reason,
-            "token_usage": {
-                "used": usage.used,
-                "size": usage.size,
-            },
-        })
-        .to_string()),
+    let mut payload = serde_json::Map::new();
+    if let Some(reason) = stop_reason {
+        payload.insert("stop_reason".to_string(), serde_json::json!(reason));
     }
-}
-
-/// Renders only the token-usage half of a node-run payload.
-fn usage_payload(usage: TokenUsage) -> String {
-    serde_json::json!({
-        "token_usage": {
-            "used": usage.used,
-            "size": usage.size,
-        },
-    })
-    .to_string()
+    if let Some(usage) = token_usage {
+        payload.insert(
+            "token_usage".to_string(),
+            serde_json::json!({ "used": usage.used, "size": usage.size }),
+        );
+    }
+    if !file_changes.is_empty() {
+        payload.insert(
+            "file_changes".to_string(),
+            serde_json::json!(file_changes.iter().map(|change| {
+                serde_json::json!({
+                    "path": change.path,
+                    "additions": change.additions,
+                    "deletions": change.deletions,
+                })
+            }).collect::<Vec<_>>()),
+        );
+    }
+    if payload.is_empty() {
+        return None;
+    }
+    Some(serde_json::Value::Object(payload).to_string())
 }
 
 /// Rewrites the run's `current_nodes` anchor inside the active transaction.

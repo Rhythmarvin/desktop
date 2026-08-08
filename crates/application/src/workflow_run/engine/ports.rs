@@ -27,6 +27,17 @@ pub struct TokenUsage {
     pub size: u64,
 }
 
+/// One file's incremental change made by a node execution, captured from the worktree git diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    /// Worktree-relative file path.
+    pub path: String,
+    /// Lines added by this node.
+    pub additions: u64,
+    /// Lines removed by this node.
+    pub deletions: u64,
+}
+
 /// Everything the engine needs to start or drive a run, fetched in one read.
 ///
 /// `graph_json` is the raw frozen React Flow document; the engine parses it into a `WorkflowGraph`.
@@ -165,14 +176,15 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError>;
 
-    /// Marks one node-run succeeded, records its output, stop reason, and token usage, and
-    /// removes it from `current_nodes`.
+    /// Marks one node-run succeeded, records its output, stop reason, token usage, and file
+    /// changes, and removes it from `current_nodes`.
     fn complete_node(
         &self,
         node_run_id: &WorkflowNodeRunId,
         output: Option<String>,
         stop_reason: Option<String>,
         token_usage: Option<TokenUsage>,
+        file_changes: Vec<FileChange>,
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;
 

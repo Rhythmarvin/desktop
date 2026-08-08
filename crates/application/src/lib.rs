@@ -75,7 +75,7 @@ pub use workflow::{
 pub use workflow_run::{
     AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentSkill, CancelWorkflowRunResult,
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, DeleteWorkflowRunResult, EngineError,
-    ExecutionContext, GetWorkflowRunHandler, GraphError, ListWorkflowNodeRunsHandler,
+    ExecutionContext, FileChange, GetWorkflowRunHandler, GraphError, ListWorkflowNodeRunsHandler,
     ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler, NodeExecutor, NodeRunToStart,
     NodeType, RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
     TokenUsage, UnknownNodeType, UpdateWorkflowRunInputResult, UuidWorkflowNodeRunIdGenerator,

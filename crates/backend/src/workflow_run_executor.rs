@@ -5,9 +5,10 @@
 use crate::agent_runtime::AgentRuntimeManager;
 use crate::clock::SystemClock;
 use crate::error::BackendError;
+use crate::task::resolve_task_cwd;
 use crate::workflow_run_prerequisites::resolve_executable_skill_name;
 use ora_application::{
-    AgentDefinitionRepository, AgentSkill, Clock, ExecutionContext, FilesystemSkillStorage,
+    AgentDefinitionRepository, AgentSkill, Clock, ExecutionContext, FileChange, FilesystemSkillStorage,
     NodeExecutor, RepositoryError, TokenUsage, WorkflowGraph, WorkflowGraphNode,
     WorkflowRunCallback, WorkflowRunEngineRepository,
 };
@@ -31,7 +32,10 @@ use ora_domain::{
     WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
+use similar::{ChangeTag, TextDiff};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -113,12 +117,13 @@ impl NodeExecutor for WorkflowRunNodeExecutor {
     }
 }
 
-/// One finished agent node turn: the accumulated conversation, the provider stop reason, and the
-/// token usage reported by the final `usage_update`.
+/// One finished agent node turn: the accumulated conversation, the provider stop reason, the token
+/// usage reported by the final `usage_update`, and the worktree files this node incrementally changed.
 struct AgentNodeOutcome {
     output: Option<String>,
     stop_reason: StopReason,
     token_usage: Option<TokenUsage>,
+    file_changes: Vec<FileChange>,
 }
 
 /// Failures raised while driving one agent node's session.
@@ -145,6 +150,91 @@ impl NodeExecutionError {
     fn message(&self) -> String {
         self.to_string()
     }
+}
+
+/// Captures the worktree's changed and untracked files as worktree-relative path → content.
+///
+/// Best-effort: when git is unavailable the snapshot is empty, so a node that cannot diff its
+/// worktree records no file changes instead of failing.
+fn capture_worktree_snapshot(worktree_root: &Path) -> BTreeMap<String, Option<String>> {
+    let Ok(output) = Command::new("git")
+        .args(["status", "--porcelain", "-z"])
+        .current_dir(worktree_root)
+        .output()
+    else {
+        return BTreeMap::new();
+    };
+    let mut snapshot = BTreeMap::new();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut segments = stdout
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .peekable();
+    while let Some(entry) = segments.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let status = &entry[..2];
+        let path = entry[3..].to_string();
+        // Renames/copies carry the original path as the following NUL segment.
+        if status == "R " || status == "C " {
+            segments.next();
+        }
+        let content = if status.contains('D') {
+            None
+        } else {
+            std::fs::read_to_string(worktree_root.join(&path)).ok()
+        };
+        snapshot.insert(path, content);
+    }
+    snapshot
+}
+
+/// Diffs the worktree state captured before a node ran against the state after it finished, so
+/// only this node's incremental changes are reported.
+fn compute_file_changes(
+    baseline: &BTreeMap<String, Option<String>>,
+    current: &BTreeMap<String, Option<String>>,
+) -> Vec<FileChange> {
+    let paths: BTreeSet<&String> = baseline.keys().chain(current.keys()).collect();
+    let mut changes = Vec::new();
+    for path in paths {
+        let before = baseline.get(path).and_then(Clone::clone);
+        let after = current.get(path).and_then(Clone::clone);
+        let (additions, deletions) = match (before, after) {
+            (None, Some(after)) => (count_lines(&after), 0),
+            (Some(before), None) => (0, count_lines(&before)),
+            (Some(before), Some(after)) => line_diff_counts(&before, &after),
+            (None, None) => continue,
+        };
+        if additions > 0 || deletions > 0 {
+            changes.push(FileChange {
+                path: path.clone(),
+                additions,
+                deletions,
+            });
+        }
+    }
+    changes
+}
+
+/// Counts the added and removed lines between two file contents.
+fn line_diff_counts(before: &str, after: &str) -> (u64, u64) {
+    let diff = TextDiff::from_lines(before, after);
+    let additions = diff
+        .iter_all_changes()
+        .filter(|change| change.tag() == ChangeTag::Insert)
+        .count() as u64;
+    let deletions = diff
+        .iter_all_changes()
+        .filter(|change| change.tag() == ChangeTag::Delete)
+        .count() as u64;
+    (additions, deletions)
+}
+
+/// Counts the lines of a file for new-file additions or whole-file deletions.
+fn count_lines(content: &str) -> u64 {
+    content.lines().count() as u64
 }
 
 /// Runs the warm → attach → model → prompt → stop session chain for one agent node.
@@ -226,6 +316,11 @@ async fn drive_agent_node(
     let skill_names = resolve_skill_names(pool, skills_root, &config.skills)?;
     let prompt = assemble_prompt(node, role_content.as_deref(), &upstream, &skill_names);
 
+    // Snapshot the worktree before this node runs so its completion diff is the node's own
+    // incremental change (previous nodes' changes are already in the baseline).
+    let worktree_root = resolve_task_cwd(pool, &context.task.id)?;
+    let baseline = capture_worktree_snapshot(&worktree_root);
+
     let mut stream = agent_runtime
         .prompt_session(PromptSessionRequest {
             session_id: warm.session_id.clone(),
@@ -267,10 +362,13 @@ async fn drive_agent_node(
         })
         .await?;
 
+    let file_changes = compute_file_changes(&baseline, &capture_worktree_snapshot(&worktree_root));
+
     Ok(AgentNodeOutcome {
         output: accumulator.into_json(),
         stop_reason,
         token_usage,
+        file_changes,
     })
 }
 
@@ -288,6 +386,7 @@ fn report_outcome(
             outcome.output,
             Some("end_turn".to_string()),
             outcome.token_usage,
+            outcome.file_changes,
         ),
         StopReason::MaxTokens => callback.complete_node(
             run_id,
@@ -295,6 +394,7 @@ fn report_outcome(
             outcome.output,
             Some("max_tokens".to_string()),
             outcome.token_usage,
+            outcome.file_changes,
         ),
         StopReason::MaxTurnRequests => callback.complete_node(
             run_id,
@@ -302,6 +402,7 @@ fn report_outcome(
             outcome.output,
             Some("max_turn_requests".to_string()),
             outcome.token_usage,
+            outcome.file_changes,
         ),
         StopReason::Refusal => callback.fail_node(
             run_id,
@@ -594,6 +695,28 @@ mod tests {
             SessionConfigValueId::new(value.to_string()),
             name.to_string(),
         )
+    }
+
+    #[test]
+    fn compute_file_changes_reports_only_the_incremental_delta() {
+        let mut baseline = BTreeMap::new();
+        baseline.insert("src/a.ts".to_string(), Some("one\ntwo\n".to_string()));
+        baseline.insert("src/b.ts".to_string(), Some("keep\n".to_string()));
+
+        let mut current = BTreeMap::new();
+        current.insert("src/a.ts".to_string(), Some("one\ntwo\nthree\n".to_string()));
+        current.insert("src/b.ts".to_string(), None);
+        current.insert("src/new.ts".to_string(), Some("fresh\n".to_string()));
+
+        // a.ts gained a line, b.ts was deleted, new.ts was added; keep unchanged is excluded.
+        assert_eq!(
+            compute_file_changes(&baseline, &current),
+            vec![
+                FileChange { path: "src/a.ts".to_string(), additions: 1, deletions: 0 },
+                FileChange { path: "src/b.ts".to_string(), additions: 0, deletions: 1 },
+                FileChange { path: "src/new.ts".to_string(), additions: 1, deletions: 0 },
+            ]
+        );
     }
 
     fn model_option(options: Vec<SessionConfigSelectOption>) -> SessionConfigOption {

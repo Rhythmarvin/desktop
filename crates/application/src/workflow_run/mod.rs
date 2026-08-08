@@ -9,7 +9,7 @@ mod tests;
 
 pub use engine::{
     AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentSkill, CancelWorkflowRunResult,
-    EngineError, ExecutionContext, GraphError, NodeExecutor, NodeRunToStart, NodeType,
+    EngineError, ExecutionContext, FileChange, GraphError, NodeExecutor, NodeRunToStart, NodeType,
     RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult, TokenUsage,
     UnknownNodeType, UpdateWorkflowRunInputResult, WorkflowGraph, WorkflowGraphNode,
     WorkflowNodeRunIdGenerator, WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine,

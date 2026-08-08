@@ -1139,6 +1139,7 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
                 Some("out".to_string()),
                 Some("end_turn".to_string()),
                 None,
+                Vec::new(),
                 41,
             )
             .unwrap(),
@@ -1163,7 +1164,7 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
     // A late or duplicate callback is rejected idempotently.
     assert_eq!(
         repository
-            .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, 42)
+            .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, Vec::new(), 42)
             .unwrap(),
         AdvanceWorkflowRunResult::NotRunning
     );
@@ -1185,6 +1186,7 @@ fn engine_repository_records_token_usage_in_the_node_payload() {
             Some("out".to_string()),
             Some("end_turn".to_string()),
             Some(TokenUsage { used: 1_024, size: 8_000 }),
+            Vec::new(),
             41,
         )
         .unwrap();
@@ -1208,7 +1210,7 @@ fn engine_repository_starts_ready_nodes_and_tracks_them() {
         .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, 41)
+        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, Vec::new(), 41)
         .unwrap();
 
     repository
@@ -1315,7 +1317,7 @@ fn engine_repository_finish_run_succeeds() {
         .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, 41)
+        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, None, Vec::new(), 41)
         .unwrap();
 
     repository
@@ -1386,6 +1388,7 @@ fn engine_repository_restart_resets_run_and_deletes_node_runs() {
             Some("out".to_string()),
             None,
             None,
+            Vec::new(),
             41,
         )
         .unwrap();
@@ -1773,6 +1776,7 @@ fn engine_runs_a_linear_chain_to_success() {
             Some(assistant_conversation("done")),
             Some("end_turn".to_string()),
             None,
+            Vec::new(),
         )
         .unwrap();
     let run = SqliteWorkflowRunRepository::new(pool)
@@ -1876,10 +1880,10 @@ fn engine_dispatches_parallel_branches_concurrently() {
         .id
         .clone();
     engine
-        .complete_node(&run_id, &left, Some(assistant_conversation("left")), None, None)
+        .complete_node(&run_id, &left, Some(assistant_conversation("left")), None, None, Vec::new())
         .unwrap();
     engine
-        .complete_node(&run_id, &right, Some(assistant_conversation("right")), None, None)
+        .complete_node(&run_id, &right, Some(assistant_conversation("right")), None, None, Vec::new())
         .unwrap();
     let dispatched: Vec<String> = executor
         .dispatched
@@ -1904,6 +1908,7 @@ fn engine_dispatches_parallel_branches_concurrently() {
             Some(assistant_conversation("merged")),
             None,
             None,
+            Vec::new(),
         )
         .unwrap();
     let run = SqliteWorkflowRunRepository::new(pool)
@@ -1969,6 +1974,7 @@ fn engine_restarts_a_finished_run() {
             Some(assistant_conversation("done")),
             None,
             None,
+            Vec::new(),
         )
         .unwrap();
     assert_eq!(
