@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight, IconFileDiff } from "@tabler/icons-react";
 import { useTaskChangesNavigation } from "../diff/task-changes-navigation-context";
-import type { TurnDiffFile } from "../chat/turn-diff-files";
+import { displayPath, type TurnDiffFile } from "../chat/turn-diff-files";
 
 interface RunActFileChangesProps {
   files: TurnDiffFile[];
@@ -62,29 +62,34 @@ export function RunActFileChanges({ files }: RunActFileChangesProps) {
       </header>
       {expanded && (
         <div className="divide-y divide-border/60">
-          {files.map((file) => (
-            <button
-              key={file.path}
-              type="button"
-              className="flex min-h-9 w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-muted/35 focus-visible:bg-muted/35 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              onClick={() => changesNavigation?.openFile(file.path)}
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={file.path}>
-                {file.path}
-              </span>
-              <span
-                className="flex shrink-0 gap-1.5 font-mono text-[10px]"
-                aria-label={t("chat.toolGroup.changeStats", {
-                  additions: file.additions,
-                  deletions: file.deletions,
-                })}
+          {files.map((file) => {
+            // The ACP diff path is absolute under the managed worktree; the task diff
+            // matches on worktree-relative paths, so normalize before displaying and opening.
+            const path = displayPath(file.path);
+            return (
+              <button
+                key={file.path}
+                type="button"
+                className="flex min-h-9 w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-muted/35 focus-visible:bg-muted/35 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                onClick={() => changesNavigation?.openFile(path)}
               >
-                <span className="text-emerald-600">+{file.additions}</span>
-                <span className="text-red-600">-{file.deletions}</span>
-              </span>
-              <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            </button>
-          ))}
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={path}>
+                  {path}
+                </span>
+                <span
+                  className="flex shrink-0 gap-1.5 font-mono text-[10px]"
+                  aria-label={t("chat.toolGroup.changeStats", {
+                    additions: file.additions,
+                    deletions: file.deletions,
+                  })}
+                >
+                  <span className="text-emerald-600">+{file.additions}</span>
+                  <span className="text-red-600">-{file.deletions}</span>
+                </span>
+                <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            );
+          })}
         </div>
       )}
     </section>
