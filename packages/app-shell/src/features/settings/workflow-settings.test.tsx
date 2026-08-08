@@ -78,14 +78,14 @@ function renderSettings(
   state.projects = [{ id: "p1", name: "Demo", rootPath: "/demo" }];
   // Live Agent/Skill catalogs consumed by the workflow inspector's selectors.
   state.agents = [
-    { id: "Architect", name: "架构师", description: "role" },
-    { id: "Planner", name: "规划师", description: "role" },
-    { id: "Researcher", name: "研究员", description: "role" },
-    { id: "Implementer", name: "实施者", description: "role" },
-    { id: "Reviewer", name: "审查员", description: "role" },
-    { id: "Tester", name: "测试员", description: "role" },
-    { id: "Debugger", name: "调试员", description: "role" },
-    { id: "Documentation Agent", name: "文档专员", description: "role" },
+    { id: "ag-architect", name: "Architect", description: "role" },
+    { id: "ag-planner", name: "Planner", description: "role" },
+    { id: "ag-researcher", name: "Researcher", description: "role" },
+    { id: "ag-implementer", name: "Implementer", description: "role" },
+    { id: "ag-reviewer", name: "Reviewer", description: "role" },
+    { id: "ag-tester", name: "Tester", description: "role" },
+    { id: "ag-debugger", name: "Debugger", description: "role" },
+    { id: "ag-documentation", name: "Documentation Agent", description: "role" },
   ];
   state.skills = [
     { id: "openspec-verify-change", name: "openspec-verify-change", description: "skill" },
@@ -622,7 +622,7 @@ describe("WorkflowSettings", () => {
     await user.click(reviewNode.closest(".react-flow__node") ?? reviewNode);
 
     expect(screen.getByLabelText("Agent 模型")).toBeInTheDocument();
-    expect(screen.getByLabelText("角色")).toHaveTextContent("审查员");
+    expect(screen.getByLabelText("角色")).toHaveTextContent("Reviewer");
     expect(screen.getAllByText("Skills")).toHaveLength(2);
     expect(screen.getByLabelText("自定义 Prompt")).toHaveValue(
       "按严重程度整理问题，并给出定位与修复建议。",
@@ -636,7 +636,7 @@ describe("WorkflowSettings", () => {
       );
     });
     const configuredParameters = within(reviewNode).getByLabelText("配置参数");
-    expect(configuredParameters).toHaveTextContent("角色审查员");
+    expect(configuredParameters).toHaveTextContent("角色Reviewer");
     expect(configuredParameters).toHaveTextContent("code_agent_cli · opencode/big-pickle");
     expect(configuredParameters).toHaveTextContent("Skillsopenspec-verify-change");
     expect(configuredParameters).not.toHaveTextContent("按严重程度整理问题，并给出定位与修复建议。");
@@ -679,9 +679,9 @@ describe("WorkflowSettings", () => {
 
     await user.click(screen.getByLabelText("角色"));
     const roleSearch = screen.getByLabelText("搜索可用角色");
-    await user.type(roleSearch, "测试");
-    await user.click(screen.getByRole("option", { name: "测试员" }));
-    expect(screen.getByLabelText("角色")).toHaveTextContent("测试员");
+    await user.type(roleSearch, "tester");
+    await user.click(screen.getByRole("option", { name: "Tester" }));
+    expect(screen.getByLabelText("角色")).toHaveTextContent("Tester");
   });
 
   it("keeps a manually switched Agent CLI when that CLI reports no models", async () => {

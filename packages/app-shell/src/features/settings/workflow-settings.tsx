@@ -178,14 +178,14 @@ function WorkflowSettingsContent({
       return capabilitiesOverride;
     }
     const baseCapabilities = createMockWorkflowCapabilities(locale);
-    // Store the agent id as roleId; the engine resolves it by name first and falls back to id,
-    // so both hand-authored name roleIds and UI-picked id roleIds run.
+    // Store the agent/skill name in the JSON (roleId / skillId), so exported workflows are
+    // readable and portable across Ora instances instead of opaque catalog ids.
     const roles = (agentsQuery.data ?? []).map((agent) => ({
-      value: agent.id,
+      value: agent.name,
       label: agent.name,
     }));
     const skills = (skillsQuery.data ?? []).map((skill) => ({
-      value: skill.id,
+      value: skill.name,
       label: skill.name,
     }));
     const mcps = MCP_CATALOG.map((mcp) => ({
