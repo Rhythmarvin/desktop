@@ -10,7 +10,9 @@ import { appI18n } from "../../i18n/i18n-instance";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
 import { createMockClient, createMockClientState, type MockClientState } from "../../test/mock-client";
+import { renderHookWithClient } from "../../test/hook-harness";
 import { createStubPlatform } from "../../test/stub-platform";
+import { useDeleteWorkflow } from "./workflow-definitions";
 import { WorkflowSettings } from "./workflow-settings";
 
 /** Seeds the mock client with the demo workflows and their published versions. */
@@ -887,5 +889,54 @@ describe("WorkflowSettings", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deploy to project" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Test run" })).not.toBeInTheDocument();
+  });
+
+  it("deleting the selected workflow auto-selects the next one and loads its canvas", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    // The mock library is seeded with code-review first and auto-selected.
+    await screen.findByText("代码审查工作流");
+    await screen.findByLabelText("工作流画布");
+    expect(screen.getByDisplayValue("代码审查工作流")).toBeInTheDocument();
+
+    // Delete the currently selected workflow.
+    await user.click(screen.getByRole("button", { name: "删除代码审查工作流" }));
+    const deleteDialog = await screen.findByRole("alertdialog", { name: "删除“代码审查工作流”？" });
+    await user.click(within(deleteDialog).getByRole("button", { name: "删除" }));
+
+    // The deleted workflow leaves the list and the first remaining one becomes selected,
+    // without a "workflow not found" error or a stale canvas from the deleted workflow.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "删除代码审查工作流" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("错开并行演示")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("错开并行演示")).toBeInTheDocument();
+    expect(screen.queryByText("未找到该工作流。")).not.toBeInTheDocument();
+  });
+});
+
+describe("useDeleteWorkflow", () => {
+  it("removes the deleted workflow from the library cache synchronously", async () => {
+    const state = createMockClientState();
+    seedDemoWorkflows(state);
+    const client = createMockClient(state);
+    const { result, queryClient } = renderHookWithClient(() => useDeleteWorkflow(), client);
+    // Pre-warm the library query like the settings page does.
+    await queryClient.fetchQuery({
+      queryKey: ["workflow", "library"],
+      queryFn: async () => (await client.workflow.list({})).workflows,
+    });
+    const before = queryClient.getQueryData(["workflow", "library"]) as Array<{ id: string }>;
+    expect(before.some((item) => item.id === "code-review")).toBe(true);
+
+    await act(async () => {
+      await result.current.mutateAsync("code-review");
+    });
+
+    // The cache must drop the row immediately, before any invalidateQueries refetch lands,
+    // so the settings auto-select reads a list that no longer contains the deleted id.
+    const after = queryClient.getQueryData(["workflow", "library"]) as Array<{ id: string }>;
+    expect(after.some((item) => item.id === "code-review")).toBe(false);
   });
 });
