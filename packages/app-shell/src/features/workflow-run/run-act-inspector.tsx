@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Button, cn } from "@ora/ui";
+import { Button, Input, Textarea, cn } from "@ora/ui";
 import {
   IconLayoutSidebarRightCollapse,
   IconSparkles,
@@ -20,6 +20,7 @@ import { RunStatusBadge } from "./run-status-mark";
 import { shouldPreviewBrief } from "./should-preview-brief";
 import type {
   GraphWorkflowNodeState,
+  GraphWorkflowSnapshotNodePatch,
   WorkflowArtifact,
   WorkflowNodeData,
 } from "@ora/workflow-runtime";
@@ -96,6 +97,7 @@ export function RunActInspector({
 
   return (
     <RunActInspectorPanel
+      nodeId={nodeId}
       data={data}
       state={state}
       artifacts={artifacts}
@@ -113,6 +115,7 @@ export function RunActInspector({
 }
 
 function RunActInspectorPanel({
+  nodeId,
   data,
   state,
   artifacts,
@@ -126,6 +129,7 @@ function RunActInspectorPanel({
   instructionSavePending,
   onClose,
 }: {
+  nodeId: string;
   data: WorkflowNodeData;
   state: GraphWorkflowNodeState;
   artifacts: WorkflowArtifact[];
@@ -157,6 +161,7 @@ function RunActInspectorPanel({
     ].join(" — ")
     : null;
   const agentConfig = data.agentConfig;
+  const canEdit = editable && onPatchNode !== undefined;
 
   return (
     <aside
@@ -323,7 +328,6 @@ function RunActInspectorPanel({
                 />
               )
           )}
-          )}
         </InspectorSection>
 
         <InspectorSection title={t("workflowRun.inspector.execution")}>
@@ -422,6 +426,46 @@ function InspectorSection({
       </h4>
       <div className="space-y-2.5">{children}</div>
     </section>
+  );
+}
+
+function EditableField({
+  id,
+  label,
+  value,
+  multiline = false,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  multiline?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="text-[11px] text-muted-foreground">
+        {label}
+      </label>
+      {multiline
+        ? (
+          <Textarea
+            id={id}
+            value={value}
+            rows={4}
+            className="min-h-24 resize-y text-xs leading-5"
+            onChange={(event) => onChange(event.target.value)}
+          />
+        )
+        : (
+          <Input
+            id={id}
+            value={value}
+            className="h-9 text-xs"
+            onChange={(event) => onChange(event.target.value)}
+          />
+        )}
+    </div>
   );
 }
 
