@@ -10,10 +10,16 @@ import {
 } from "@ora/workflow-runtime";
 import { useContractsClient } from "../../contracts-client-context";
 import { isTerminalRunStatus } from "../../features/workflow-run/run-status-style";
+import type { WorkflowRunSummary } from "@ora/contracts";
 
 const runsByWorkflowKey = (workflowId: string) => ["workflowRun", "byWorkflow", workflowId] as const;
 const runsByProjectKey = (projectId: string) => ["workflowRun", "byProject", projectId] as const;
 const runDetailKey = (runId: string) => ["workflowRun", "detail", runId] as const;
+
+/** True while any run in the list is still pending or executing, so list views can poll. */
+function hasActiveRun(runs: WorkflowRunSummary[] | undefined): boolean {
+  return runs?.some((run) => run.status === "pending" || run.status === "running") ?? false;
+}
 
 /**
  * Lists the runs of one workflow so the deploy dialog can derive the projects the
@@ -25,6 +31,8 @@ export function useWorkflowRunsByWorkflow(workflowId: string | null | undefined)
     queryKey: runsByWorkflowKey(workflowId ?? ""),
     queryFn: async () => (await client.workflowRun.listByWorkflow({ workflowId: workflowId! })).runs,
     enabled: workflowId != null && workflowId !== "",
+    // Completion is backend-driven with no frontend event, so poll while any run is active.
+    refetchInterval: (query) => (hasActiveRun(query.state.data) ? 4000 : false),
   });
 }
 
@@ -35,6 +43,8 @@ export function useWorkflowRunsByProject(projectId: string | null | undefined) {
     queryKey: runsByProjectKey(projectId ?? ""),
     queryFn: async () => (await client.workflowRun.list({ projectId: projectId! })).runs,
     enabled: projectId != null && projectId !== "",
+    // Completion is backend-driven with no frontend event, so poll while any run is active.
+    refetchInterval: (query) => (hasActiveRun(query.state.data) ? 4000 : false),
   });
 }
 
