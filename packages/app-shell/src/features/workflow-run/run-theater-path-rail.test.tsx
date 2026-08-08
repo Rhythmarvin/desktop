@@ -99,7 +99,6 @@ describe("RunTheaterPathRail", () => {
         reversed.nodes.map((node) => [node.id, { status: "idle" as const }]),
       ),
       openHitls: [],
-      totals: {},
       createdAt: "2026-08-04T12:00:00+08:00",
       updatedAt: "2026-08-04T12:00:00+08:00",
     };
