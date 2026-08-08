@@ -1491,7 +1491,6 @@ export const translationResources = {
     "workflowRun.inspector.collapse": "Close act details",
     "workflowRun.inspector.expand": "Expand act details",
     "workflowRun.inspector.resize": "Drag to resize act details; double-click to reset; drag narrow to close",
-<<<<<<< HEAD
     "workflowRun.inspector.skillOpen": "View brief for skill “{{name}}”",
     "workflowRun.inspector.roleOpen": "View brief for role “{{name}}”",
     "workflowRun.inspector.textOpen": "View full {{field}}",
