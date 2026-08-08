@@ -119,6 +119,24 @@ describe("buildDisplayRun", () => {
     expect(startNode?.data.instruction).toBe("只审查 README");
   });
 
+  it("projects node duration and token usage from the run payload", () => {
+    const withTokens = {
+      ...detail,
+      nodes: [{
+        nodeId: "explore",
+        status: "succeeded",
+        startedAt: 10n,
+        finishedAt: 30n,
+        error: null,
+        output: null,
+        payload: "{\"stop_reason\":\"end_turn\",\"token_usage\":{\"size\":8000,\"used\":1024}}",
+      }],
+    };
+    const display = buildDisplayRun(withTokens, GRAPH);
+    expect(display.nodeStates.explore.durationMs).toBe(20);
+    expect(display.nodeStates.explore.tokenUsage).toEqual({ totalTokens: 1024 });
+  });
+
   it("derives awaiting_input node state from a pending node-run", () => {
     const pendingDetail = {
       ...detail,

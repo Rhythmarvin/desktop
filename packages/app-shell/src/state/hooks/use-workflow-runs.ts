@@ -221,7 +221,10 @@ export function buildDisplayRun(
   const nodeStates: Record<string, GraphWorkflowNodeState> = {};
   for (const node of definitionSnapshot.nodes) {
     const nodeRun = nodeRunByNodeId.get(node.id) ?? null;
-    const stopReason = nodeRun?.payload != null ? parseStopReason(nodeRun.payload) : undefined;
+    const payload = nodeRun?.payload != null ? parseNodePayload(nodeRun.payload) : null;
+    const durationMs = nodeRun?.startedAt != null && nodeRun?.finishedAt != null
+      ? Number(nodeRun.finishedAt - nodeRun.startedAt)
+      : undefined;
     nodeStates[node.id] = {
       status: projectNodeStatus(
         nodeRun as { status: "pending" | "running" | "succeeded" | "failed" | "cancelled" } | null,
@@ -231,11 +234,18 @@ export function buildDisplayRun(
         : {}),
       ...(nodeRun?.startedAt != null ? { startedAt: toIso(nodeRun.startedAt) } : {}),
       ...(nodeRun?.finishedAt != null ? { finishedAt: toIso(nodeRun.finishedAt) } : {}),
+      ...(durationMs != undefined ? { durationMs } : {}),
       ...(nodeRun?.error != null ? { errorMessage: nodeRun.error } : {}),
-      ...(stopReason != null ? { stopReason } : {}),
+      ...(payload?.stop_reason != null ? { stopReason: payload.stop_reason } : {}),
+      ...(payload?.token_usage?.used != null
+        ? { tokenUsage: { totalTokens: payload.token_usage.used } }
+        : {}),
       ...(nodeRun?.output != null ? { output: { summary: nodeRun.output } } : {}),
     };
   }
+  const runDurationMs = detail.run.startedAt != null && detail.run.finishedAt != null
+    ? Number(detail.run.finishedAt - detail.run.startedAt)
+    : undefined;
   return {
     id: detail.run.id,
     projectId: "",
@@ -246,20 +256,31 @@ export function buildDisplayRun(
     kickoffInput: kickoffInput ?? undefined,
     nodeStates,
     openHitls: [],
-    totals: {},
+    totals: runDurationMs != undefined ? { durationMs: runDurationMs } : {},
     createdAt: toIso(detail.run.createdAt),
     updatedAt: toIso(detail.run.updatedAt),
     ...(detail.run.finishedAt != null ? { finishedAt: toIso(detail.run.finishedAt) } : {}),
   };
 }
 
-/** Reads the ACP stop reason from a node run's `payload` JSON, tolerating malformed payloads. */
-function parseStopReason(payload: string): string | undefined {
+/** Reads the ACP stop reason and token usage from a node run's `payload` JSON, tolerating
+ * malformed payloads. */
+function parseNodePayload(
+  payload: string,
+): { stop_reason?: string; token_usage?: { used?: number } } | null {
   try {
-    const value = JSON.parse(payload) as { stop_reason?: unknown };
-    return typeof value.stop_reason === "string" ? value.stop_reason : undefined;
+    const value = JSON.parse(payload) as {
+      stop_reason?: unknown;
+      token_usage?: { used?: unknown };
+    };
+    return {
+      ...(typeof value.stop_reason === "string" ? { stop_reason: value.stop_reason } : {}),
+      ...(value.token_usage != null && typeof value.token_usage.used === "number"
+        ? { token_usage: { used: value.token_usage.used } }
+        : {}),
+    };
   } catch {
-    return undefined;
+    return null;
   }
 }
 
