@@ -138,6 +138,26 @@ describe("buildDisplayRun", () => {
     expect(display.totals.tokenUsage).toEqual({ totalTokens: 1024 });
   });
 
+  it("projects node file changes from the run payload", () => {
+    const withFiles = {
+      ...detail,
+      nodes: [{
+        nodeId: "explore",
+        status: "succeeded",
+        startedAt: 10n,
+        finishedAt: 30n,
+        error: null,
+        output: null,
+        payload: "{\"file_changes\":[{\"path\":\"src/a.ts\",\"additions\":1,\"deletions\":0},{\"path\":\"src/new.ts\",\"additions\":1,\"deletions\":0}]}",
+      }],
+    };
+    const display = buildDisplayRun(withFiles, GRAPH);
+    expect(display.nodeStates.explore.fileChanges).toEqual([
+      { path: "src/a.ts", additions: 1, deletions: 0 },
+      { path: "src/new.ts", additions: 1, deletions: 0 },
+    ]);
+  });
+
   it("projects the node conversation from its run output", () => {
     const withConversation = {
       ...detail,

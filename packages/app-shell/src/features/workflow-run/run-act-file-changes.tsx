@@ -2,16 +2,18 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight, IconFileDiff } from "@tabler/icons-react";
 import { useTaskChangesNavigation } from "../diff/task-changes-navigation-context";
-import { displayPath, type TurnDiffFile } from "../chat/turn-diff-files";
+import { displayPath } from "../chat/turn-diff-files";
+import type { WorkflowNodeFileChange } from "@ora/workflow-runtime";
 
 interface RunActFileChangesProps {
-  files: TurnDiffFile[];
+  files: WorkflowNodeFileChange[];
 }
 
 /**
- * File changes a node's session made, rendered in the Theater act inspector's
- * outcomes section. Clicking a file opens it in the run workspace's Changes
- * panel — the same navigation the chat pane uses for per-turn diffs.
+ * File changes a node incrementally made (recorded from the worktree git diff),
+ * rendered in the Theater act inspector's outcomes section. Clicking a file
+ * opens it in the run workspace's Changes panel — the same navigation the chat
+ * pane uses for per-turn diffs.
  */
 export function RunActFileChanges({ files }: RunActFileChangesProps) {
   const { t } = useTranslation();

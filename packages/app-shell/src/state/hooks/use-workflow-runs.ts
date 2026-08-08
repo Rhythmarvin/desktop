@@ -7,6 +7,7 @@ import {
   type GraphWorkflowRun,
   type WorkflowDefinition,
   type WorkflowNodeConversationItem,
+  type WorkflowNodeFileChange,
 } from "@ora/workflow-runtime";
 import { useContractsClient } from "../../contracts-client-context";
 import { isTerminalRunStatus } from "../../features/workflow-run/run-status-style";
@@ -260,6 +261,9 @@ export function buildDisplayRun(
       ...(payload?.token_usage?.used != null
         ? { tokenUsage: { totalTokens: payload.token_usage.used } }
         : {}),
+      ...(payload?.file_changes != null && payload.file_changes.length > 0
+        ? { fileChanges: payload.file_changes }
+        : {}),
       ...(nodeRun?.output != null ? { output: { summary: nodeRun.output } } : {}),
       ...(conversation != null && conversation.length > 0 ? { conversation } : {}),
     };
@@ -339,20 +343,40 @@ function conversationFromNodeOutput(
   }
 }
 
-/** Reads the ACP stop reason and token usage from a node run's `payload` JSON, tolerating
- * malformed payloads. */
+/** Reads the ACP stop reason, token usage, and file changes from a node run's `payload` JSON,
+ * tolerating malformed payloads. */
 function parseNodePayload(
   payload: string,
-): { stop_reason?: string; token_usage?: { used?: number } } | null {
+): {
+  stop_reason?: string;
+  token_usage?: { used?: number };
+  file_changes?: WorkflowNodeFileChange[];
+} | null {
   try {
     const value = JSON.parse(payload) as {
       stop_reason?: unknown;
       token_usage?: { used?: unknown };
+      file_changes?: Array<{ path?: unknown; additions?: unknown; deletions?: unknown }>;
     };
     return {
       ...(typeof value.stop_reason === "string" ? { stop_reason: value.stop_reason } : {}),
       ...(value.token_usage != null && typeof value.token_usage.used === "number"
         ? { token_usage: { used: value.token_usage.used } }
+        : {}),
+      ...(Array.isArray(value.file_changes)
+        ? {
+          file_changes: value.file_changes.flatMap((change) => (
+            typeof change.path === "string"
+            && typeof change.additions === "number"
+            && typeof change.deletions === "number"
+              ? [{
+                path: change.path,
+                additions: change.additions,
+                deletions: change.deletions,
+              }]
+              : []
+          )),
+        }
         : {}),
     };
   } catch {

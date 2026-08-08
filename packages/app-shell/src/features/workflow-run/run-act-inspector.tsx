@@ -13,8 +13,6 @@ import {
   junctionFailureStrategyLabel,
   junctionWaitStrategyLabel,
 } from "../workflow-node-chrome";
-import { useNodeFileChanges } from "../../state/hooks/use-node-file-changes";
-import type { TurnDiffFile } from "../chat/turn-diff-files";
 import { RunActAgentConfig } from "./run-act-agent-config";
 import { RunActArtifacts } from "./run-act-artifacts";
 import { RunActFileChanges } from "./run-act-file-changes";
@@ -26,6 +24,7 @@ import type {
   GraphWorkflowSnapshotNodePatch,
   WorkflowArtifact,
   WorkflowNodeData,
+  WorkflowNodeFileChange,
 } from "@ora/workflow-runtime";
 
 interface RunActInspectorProps {
@@ -73,13 +72,8 @@ export function RunActInspector({
   onClose,
 }: RunActInspectorProps) {
   const { t } = useTranslation();
-  // Load the focused node's session file changes for the outcomes section; a node
-  // runs against its own session, so its tool-call history is per-node.
-  const fileChangesQuery = useNodeFileChanges(
-    state?.sessionId,
-    state != null && state.sessionId != null && state.sessionId !== "",
-  );
-  const fileChanges = fileChangesQuery.data ?? [];
+  // The node's incremental worktree changes arrive in its run payload, captured by the engine.
+  const fileChanges = state?.fileChanges ?? [];
 
   if (nodeId === null || data === null || state === null) {
     return (
@@ -153,7 +147,7 @@ function RunActInspectorPanel({
   onSaveInstruction?: () => void;
   onDiscardInstructionDraft?: () => void;
   instructionSavePending?: boolean;
-  fileChanges: TurnDiffFile[];
+  fileChanges: WorkflowNodeFileChange[];
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();

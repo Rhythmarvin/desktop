@@ -182,6 +182,14 @@ export interface GraphWorkflowNodeIo {
   detail?: string;
 }
 
+/** One file this node incrementally changed, recorded from the worktree git diff. */
+export interface WorkflowNodeFileChange {
+  /** Worktree-relative file path. */
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
 export interface GraphWorkflowNodeState {
   status: GraphWorkflowNodeStatus;
   /** Session bound to this node execution; opaque to the workflow UI. */
@@ -199,6 +207,8 @@ export interface GraphWorkflowNodeState {
   output?: GraphWorkflowNodeIo;
   /** The node's own conversation, projected from its run output by the real adapter. */
   conversation?: WorkflowNodeConversationItem[];
+  /** Incremental worktree changes recorded in `payload.file_changes`. */
+  fileChanges?: WorkflowNodeFileChange[];
 }
 
 /** Lifecycle state for one projected session item. */
