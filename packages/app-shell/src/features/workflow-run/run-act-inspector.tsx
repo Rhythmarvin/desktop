@@ -5,7 +5,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { createMockWorkflowNodeType } from "@ora/workflow-mock";
-import { formatRunClock } from "../../lib/format";
+import { formatDuration, formatRunClock } from "../../lib/format";
 import {
   conditionBranchesSummary,
   createWorkflowSummaryLabels,
@@ -336,7 +336,7 @@ function RunActInspectorPanel({
             <MetricTile
               label={t("workflowRun.field.duration")}
               value={state.durationMs !== undefined
-                ? t("workflowRun.totalsDuration", { ms: state.durationMs })
+                ? formatDuration(state.durationMs)
                 : "—"}
             />
             <MetricTile

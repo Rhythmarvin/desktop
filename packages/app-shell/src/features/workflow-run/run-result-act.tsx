@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { RunStatusBadge } from "./run-status-mark";
 import { runStatusTone } from "./run-status-style";
+import { formatDuration } from "../../lib/format";
 import type { GraphWorkflowRun, GraphWorkflowRunStatus } from "@ora/workflow-runtime";
 
 interface RunResultActProps {
@@ -76,7 +77,7 @@ export function RunResultAct({
             </dt>
             <dd className="mt-0.5 text-xs tabular-nums">
               {run.totals.durationMs !== undefined
-                ? t("workflowRun.totalsDuration", { ms: run.totals.durationMs })
+                ? formatDuration(run.totals.durationMs)
                 : "—"}
             </dd>
           </div>

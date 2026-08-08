@@ -197,6 +197,8 @@ export interface GraphWorkflowNodeState {
   input?: GraphWorkflowNodeIo;
   /** What this step produced when it finished (or HITL answer summary). */
   output?: GraphWorkflowNodeIo;
+  /** The node's own conversation, projected from its run output by the real adapter. */
+  conversation?: WorkflowNodeConversationItem[];
 }
 
 /** Lifecycle state for one projected session item. */

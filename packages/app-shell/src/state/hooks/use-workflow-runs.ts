@@ -6,6 +6,7 @@ import {
   type GraphWorkflowNodeState,
   type GraphWorkflowRun,
   type WorkflowDefinition,
+  type WorkflowNodeConversationItem,
 } from "@ora/workflow-runtime";
 import { useContractsClient } from "../../contracts-client-context";
 import { isTerminalRunStatus } from "../../features/workflow-run/run-status-style";
@@ -225,6 +226,15 @@ export function buildDisplayRun(
     const durationMs = nodeRun?.startedAt != null && nodeRun?.finishedAt != null
       ? Number(nodeRun.finishedAt - nodeRun.startedAt)
       : undefined;
+    const conversation = nodeRun?.output != null
+      ? conversationFromNodeOutput(
+        nodeRun.output,
+        detail.run.id,
+        node.id,
+        nodeRun.sessionId ?? undefined,
+        nodeRun.startedAt != null ? Number(nodeRun.startedAt) : undefined,
+      )
+      : undefined;
     nodeStates[node.id] = {
       status: projectNodeStatus(
         nodeRun as { status: "pending" | "running" | "succeeded" | "failed" | "cancelled" } | null,
@@ -241,6 +251,7 @@ export function buildDisplayRun(
         ? { tokenUsage: { totalTokens: payload.token_usage.used } }
         : {}),
       ...(nodeRun?.output != null ? { output: { summary: nodeRun.output } } : {}),
+      ...(conversation != null && conversation.length > 0 ? { conversation } : {}),
     };
   }
   const runDurationMs = detail.run.startedAt != null && detail.run.finishedAt != null
@@ -261,6 +272,54 @@ export function buildDisplayRun(
     updatedAt: toIso(detail.run.updatedAt),
     ...(detail.run.finishedAt != null ? { finishedAt: toIso(detail.run.finishedAt) } : {}),
   };
+}
+
+/** Projects a node run's `output` conversation array onto node-conversation messages.
+ *
+ * The executor writes the accumulated user/assistant transcript as
+ * `[{"role":"text"}]`; control-node outputs are plain strings and yield nothing.
+ * Entries carry no timestamps, so each message is stamped sequentially from the
+ * node's start time to keep ordering stable.
+ */
+function conversationFromNodeOutput(
+  output: string,
+  runId: string,
+  nodeId: string,
+  sessionId: string | undefined,
+  baseMs: number | undefined,
+): WorkflowNodeConversationItem[] {
+  try {
+    const entries = JSON.parse(output) as Array<{ role?: unknown; text?: unknown }>;
+    const startMs = baseMs ?? 0;
+    let index = 0;
+    const items: WorkflowNodeConversationItem[] = [];
+    for (const entry of entries) {
+      if (
+        (entry.role !== "user" && entry.role !== "assistant")
+        || typeof entry.text !== "string"
+        || entry.text.trim() === ""
+      ) {
+        continue;
+      }
+      const timestamp = new Date(startMs + index * 1000).toISOString();
+      items.push({
+        kind: "message",
+        id: `node-output-${index}`,
+        runId,
+        nodeId,
+        sessionId: sessionId ?? "",
+        role: entry.role,
+        markdown: entry.text,
+        status: "complete",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      index += 1;
+    }
+    return items;
+  } catch {
+    return [];
+  }
 }
 
 /** Reads the ACP stop reason and token usage from a node run's `payload` JSON, tolerating

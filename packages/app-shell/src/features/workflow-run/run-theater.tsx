@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, cn, toast } from "@ora/ui";
-import { useNodeSessionConversation } from "../../state/hooks/use-node-session-conversation";
+import { formatDuration } from "../../lib/format";
 import { useUpdateWorkflowRunInput } from "../../state/hooks/use-workflow-runs";
 import { filterArtifacts, latestArtifact } from "./artifact-filter";
 import { RunActInspector } from "./run-act-inspector";
@@ -154,17 +154,6 @@ export function RunTheater({
   const primaryState = primaryId !== null
     ? run.nodeStates[primaryId]
     : undefined;
-  const primarySessionId = primaryState?.sessionId;
-  const primaryConversationOpen = sessionConversationNodeId !== null
-    && sessionConversationNodeId === primaryId;
-  // Load the focused node's real Ora session transcript when its conversation dock is open,
-  // reusing the chat pane's session loader so it renders identically to the session page.
-  const nodeSession = useNodeSessionConversation(
-    run.id,
-    primaryId ?? "",
-    primarySessionId,
-    primaryConversationOpen && primarySessionId != null,
-  );
   const isEditableStart = run.status === "pending" && primaryNode?.data?.kind === "start";
 
   // Drop an uncommitted draft the moment the run leaves pending (or the run switches) so a stale
@@ -183,18 +172,19 @@ export function RunTheater({
         : filterArtifacts(artifacts, { type: "node", nodeId: primaryId }),
     [artifacts, primaryId],
   );
+  const primaryRealConversation = primaryState?.conversation;
   const primaryConversation = useMemo(
     () => {
+      // The real adapter projects the node's conversation from its run output; the mock
+      // runtime provides it through the live snapshot instead.
       const mockItems = primaryId === null
         ? []
         : (conversationByNodeId.get(primaryId) ?? []);
-      // Prefer the replayed real session transcript once loaded; fall back to the mock
-      // live projection for mock runs.
-      return nodeSession.data != null && nodeSession.data.length > 0
-        ? nodeSession.data
+      return primaryRealConversation != null && primaryRealConversation.length > 0
+        ? primaryRealConversation
         : mockItems;
     },
-    [primaryId, conversationByNodeId, nodeSession.data],
+    [primaryId, conversationByNodeId, primaryRealConversation],
   );
   const artifactCountByNode = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -532,9 +522,7 @@ export function RunTheater({
                   )}
                   {run.totals.durationMs !== undefined && (
                     <Badge variant="secondary" className="tabular-nums">
-                      {t("workflowRun.totalsDuration", {
-                        ms: run.totals.durationMs,
-                      })}
+                      {formatDuration(run.totals.durationMs)}
                     </Badge>
                   )}
                 </div>

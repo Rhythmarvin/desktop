@@ -4,7 +4,7 @@ import { Badge, cn } from "@ora/ui";
 import {
   createMockWorkflowNodeType,
 } from "@ora/workflow-mock";
-import { formatRunClock } from "../../lib/format";
+import { formatDuration, formatRunClock } from "../../lib/format";
 import { WorkflowNodeCardShell } from "../workflow-node-chrome";
 import {
   resolveTheaterActDetail,
@@ -117,7 +117,7 @@ export function RunTheaterActCard({
           </dt>
           <dd className="mt-0.5 text-xs tabular-nums">
             {state.durationMs !== undefined
-              ? t("workflowRun.totalsDuration", { ms: state.durationMs })
+              ? formatDuration(state.durationMs)
               : "—"}
           </dd>
         </div>

@@ -137,6 +137,48 @@ describe("buildDisplayRun", () => {
     expect(display.nodeStates.explore.tokenUsage).toEqual({ totalTokens: 1024 });
   });
 
+  it("projects the node conversation from its run output", () => {
+    const withConversation = {
+      ...detail,
+      nodes: [{
+        nodeId: "explore",
+        status: "succeeded",
+        startedAt: 10n,
+        finishedAt: 30n,
+        error: null,
+        output: "[{\"role\":\"user\",\"text\":\"帮我审查\"},{\"role\":\"assistant\",\"text\":\"好的，开始\"}]",
+        payload: null,
+      }],
+    };
+    const display = buildDisplayRun(withConversation, GRAPH);
+    expect(display.nodeStates.explore.conversation).toEqual([
+      {
+        kind: "message",
+        id: "node-output-0",
+        runId: "run-1",
+        nodeId: "explore",
+        sessionId: "",
+        role: "user",
+        markdown: "帮我审查",
+        status: "complete",
+        createdAt: new Date(10).toISOString(),
+        updatedAt: new Date(10).toISOString(),
+      },
+      {
+        kind: "message",
+        id: "node-output-1",
+        runId: "run-1",
+        nodeId: "explore",
+        sessionId: "",
+        role: "assistant",
+        markdown: "好的，开始",
+        status: "complete",
+        createdAt: new Date(1010).toISOString(),
+        updatedAt: new Date(1010).toISOString(),
+      },
+    ]);
+  });
+
   it("derives awaiting_input node state from a pending node-run", () => {
     const pendingDetail = {
       ...detail,
