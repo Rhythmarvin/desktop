@@ -13,8 +13,11 @@ import {
   junctionFailureStrategyLabel,
   junctionWaitStrategyLabel,
 } from "../workflow-node-chrome";
+import { useNodeFileChanges } from "../../state/hooks/use-node-file-changes";
+import type { TurnDiffFile } from "../chat/turn-diff-files";
 import { RunActAgentConfig } from "./run-act-agent-config";
 import { RunActArtifacts } from "./run-act-artifacts";
+import { RunActFileChanges } from "./run-act-file-changes";
 import { RunBriefPopover } from "./run-brief-popover";
 import { RunStatusBadge } from "./run-status-mark";
 import { shouldPreviewBrief } from "./should-preview-brief";
@@ -70,6 +73,13 @@ export function RunActInspector({
   onClose,
 }: RunActInspectorProps) {
   const { t } = useTranslation();
+  // Load the focused node's session file changes for the outcomes section; a node
+  // runs against its own session, so its tool-call history is per-node.
+  const fileChangesQuery = useNodeFileChanges(
+    state?.sessionId,
+    state != null && state.sessionId != null && state.sessionId !== "",
+  );
+  const fileChanges = fileChangesQuery.data ?? [];
 
   if (nodeId === null || data === null || state === null) {
     return (
@@ -109,6 +119,7 @@ export function RunActInspector({
       onSaveInstruction={onSaveInstruction}
       onDiscardInstructionDraft={onDiscardInstructionDraft}
       instructionSavePending={instructionSavePending}
+      fileChanges={fileChanges}
       onClose={onClose}
     />
   );
@@ -127,6 +138,7 @@ function RunActInspectorPanel({
   onSaveInstruction,
   onDiscardInstructionDraft,
   instructionSavePending,
+  fileChanges,
   onClose,
 }: {
   nodeId: string;
@@ -141,6 +153,7 @@ function RunActInspectorPanel({
   onSaveInstruction?: () => void;
   onDiscardInstructionDraft?: () => void;
   instructionSavePending?: boolean;
+  fileChanges: TurnDiffFile[];
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
@@ -363,18 +376,22 @@ function RunActInspectorPanel({
         </InspectorSection>
 
         <InspectorSection title={t("workflowRun.artifacts.title")}>
-          {artifacts.length === 0
+          {fileChanges.length > 0
             ? (
-              <p className="text-[11px] leading-5 text-muted-foreground">
-                {t("workflowRun.artifacts.empty")}
-              </p>
+              <RunActFileChanges files={fileChanges} />
             )
-            : (
+            : artifacts.length > 0
+            ? (
               <RunActArtifacts
                 artifacts={artifacts}
                 revealedId={revealedArtifactId}
                 embedded
               />
+            )
+            : (
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                {t("workflowRun.artifacts.empty")}
+              </p>
             )}
         </InspectorSection>
       </div>
