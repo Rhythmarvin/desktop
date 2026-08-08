@@ -32,7 +32,8 @@ use ora_domain::{
     WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use similar::{ChangeTag, TextDiff};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -150,64 +151,89 @@ impl NodeExecutionError {
     }
 }
 
-/// Captures the worktree's cumulative changes (tracked modifications plus untracked files) as
-/// worktree-relative paths with line additions/deletions against the base.
+/// Captures the worktree's changed and untracked files as worktree-relative path → content.
 ///
-/// This is the full diff up to the current point, not a per-node increment: each node's recorded
-/// file changes are simply the whole worktree diff at its completion. Best-effort — when git is
-/// unavailable the list is empty, so a node that cannot diff its worktree records no file changes.
-fn capture_worktree_changes(worktree_root: &Path) -> Vec<FileChange> {
-    let mut changes: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-
-    // Tracked modifications/deletions: `git diff --numstat` reports `added\tdeleted\tpath`.
-    if let Ok(output) = Command::new("git")
-        .args(["diff", "--numstat"])
-        .current_dir(worktree_root)
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let mut parts = line.split('\t');
-            let (Some(add), Some(del), Some(path)) = (parts.next(), parts.next(), parts.next())
-            else {
-                continue;
-            };
-            // Binary files report `-`; skip them rather than guessing a line count.
-            let (Ok(additions), Ok(deletions)) = (add.parse::<u64>(), del.parse::<u64>()) else {
-                continue;
-            };
-            changes.insert(path.to_string(), (additions, deletions));
-        }
-    }
-
-    // New untracked files: every line counts as an addition.
-    if let Ok(output) = Command::new("git")
+/// Best-effort: when git is unavailable the snapshot is empty, so a node that cannot diff its
+/// worktree records no file changes instead of failing.
+fn capture_worktree_snapshot(worktree_root: &Path) -> BTreeMap<String, Option<String>> {
+    let Ok(output) = Command::new("git")
         .args(["status", "--porcelain", "-z"])
         .current_dir(worktree_root)
         .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for entry in stdout.split('\0').filter(|entry| !entry.is_empty()) {
-            if entry.len() < 4 || &entry[..2] != "??" {
-                continue;
-            }
-            let path = &entry[3..];
-            let additions = std::fs::read_to_string(worktree_root.join(path))
-                .map(|content| content.lines().count() as u64)
-                .unwrap_or(0);
-            changes.entry(path.to_string()).or_insert((0, 0)).0 += additions;
+    else {
+        return BTreeMap::new();
+    };
+    let mut snapshot = BTreeMap::new();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut segments = stdout
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .peekable();
+    while let Some(entry) = segments.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let status = &entry[..2];
+        let path = entry[3..].to_string();
+        // Renames/copies carry the original path as the following NUL segment.
+        if status == "R " || status == "C " {
+            segments.next();
+        }
+        let content = if status.contains('D') {
+            None
+        } else {
+            std::fs::read_to_string(worktree_root.join(&path)).ok()
+        };
+        snapshot.insert(path, content);
+    }
+    snapshot
+}
+
+/// Diffs the worktree state captured before a node ran against the state after it finished, so
+/// only this node's incremental changes are reported.
+fn compute_file_changes(
+    baseline: &BTreeMap<String, Option<String>>,
+    current: &BTreeMap<String, Option<String>>,
+) -> Vec<FileChange> {
+    let paths: BTreeSet<&String> = baseline.keys().chain(current.keys()).collect();
+    let mut changes = Vec::new();
+    for path in paths {
+        let before = baseline.get(path).and_then(Clone::clone);
+        let after = current.get(path).and_then(Clone::clone);
+        let (additions, deletions) = match (before, after) {
+            (None, Some(after)) => (count_lines(&after), 0),
+            (Some(before), None) => (0, count_lines(&before)),
+            (Some(before), Some(after)) => line_diff_counts(&before, &after),
+            (None, None) => continue,
+        };
+        if additions > 0 || deletions > 0 {
+            changes.push(FileChange {
+                path: path.clone(),
+                additions,
+                deletions,
+            });
         }
     }
-
     changes
-        .into_iter()
-        .filter(|(_, (additions, deletions))| *additions > 0 || *deletions > 0)
-        .map(|(path, (additions, deletions))| FileChange {
-            path,
-            additions,
-            deletions,
-        })
-        .collect()
+}
+
+/// Counts the added and removed lines between two file contents.
+fn line_diff_counts(before: &str, after: &str) -> (u64, u64) {
+    let diff = TextDiff::from_lines(before, after);
+    let additions = diff
+        .iter_all_changes()
+        .filter(|change| change.tag() == ChangeTag::Insert)
+        .count() as u64;
+    let deletions = diff
+        .iter_all_changes()
+        .filter(|change| change.tag() == ChangeTag::Delete)
+        .count() as u64;
+    (additions, deletions)
+}
+
+/// Counts the lines of a file for new-file additions or whole-file deletions.
+fn count_lines(content: &str) -> u64 {
+    content.lines().count() as u64
 }
 
 /// Runs the warm → attach → model → prompt → stop session chain for one agent node.
@@ -291,6 +317,10 @@ async fn drive_agent_node(
 
     let worktree_root = resolve_task_cwd(pool, &context.task.id)?;
 
+    // Snapshot the worktree before this node runs so its completion diff is the node's own
+    // incremental change (previous nodes' changes are already in the baseline).
+    let baseline = capture_worktree_snapshot(&worktree_root);
+
     let mut stream = agent_runtime
         .prompt_session(PromptSessionRequest {
             session_id: warm.session_id.clone(),
@@ -325,9 +355,9 @@ async fn drive_agent_node(
         })
         .await?;
 
-    // Record the worktree's cumulative diff at this node's completion — the full change set so
-    // far, which keeps the recording logic simple (no per-node baseline tracking).
-    let file_changes = capture_worktree_changes(&worktree_root);
+    // Record the worktree delta since this node started: the baseline was captured before the
+    // prompt, so only this node's own changes are reported, not earlier nodes' work.
+    let file_changes = compute_file_changes(&baseline, &capture_worktree_snapshot(&worktree_root));
 
     Ok(AgentNodeOutcome {
         output: accumulator.into_json(),
@@ -659,38 +689,25 @@ mod tests {
     }
 
     #[test]
-    fn capture_worktree_changes_reports_the_cumulative_diff() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = temp.path();
-        run_git(root, &["init"]);
-        run_git(root, &["config", "user.email", "test@example.com"]);
-        run_git(root, &["config", "user.name", "Test"]);
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/a.ts"), "one\ntwo\n").unwrap();
-        run_git(root, &["add", "."]);
-        run_git(root, &["commit", "-m", "init"]);
+    fn compute_file_changes_reports_only_the_incremental_delta() {
+        let mut baseline = BTreeMap::new();
+        baseline.insert("src/a.ts".to_string(), Some("one\ntwo\n".to_string()));
+        baseline.insert("src/b.ts".to_string(), Some("keep\n".to_string()));
 
-        // Modify a tracked file and add an untracked file.
-        std::fs::write(root.join("src/a.ts"), "one\ntwo\nthree\n").unwrap();
-        std::fs::write(root.join("src/new.ts"), "fresh\n").unwrap();
+        let mut current = BTreeMap::new();
+        current.insert("src/a.ts".to_string(), Some("one\ntwo\nthree\n".to_string()));
+        current.insert("src/b.ts".to_string(), None);
+        current.insert("src/new.ts".to_string(), Some("fresh\n".to_string()));
 
+        // a.ts gained a line, b.ts was deleted, new.ts was added; keep unchanged is excluded.
         assert_eq!(
-            capture_worktree_changes(root),
+            compute_file_changes(&baseline, &current),
             vec![
                 FileChange { path: "src/a.ts".to_string(), additions: 1, deletions: 0 },
+                FileChange { path: "src/b.ts".to_string(), additions: 0, deletions: 1 },
                 FileChange { path: "src/new.ts".to_string(), additions: 1, deletions: 0 },
             ]
         );
-    }
-
-    /// Runs one git command in the worktree, panicking on failure.
-    fn run_git(cwd: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(cwd)
-            .status()
-            .unwrap_or_else(|error| panic!("git {args:?} failed: {error}"));
-        assert!(status.success(), "git {args:?} exited with {status}");
     }
 
     fn model_option(options: Vec<SessionConfigSelectOption>) -> SessionConfigOption {
