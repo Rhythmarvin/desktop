@@ -78,6 +78,10 @@ export function RunTheater({
 }: RunTheaterProps) {
   const { t } = useTranslation();
   const updateInput = useUpdateWorkflowRunInput();
+  // Local draft of the start-node instruction while the user edits it. Committed to the run's
+  // kickoff input only by the explicit save action, so per-keystroke refetches cannot clobber
+  // an in-progress edit or fire one mutation per character.
+  const [instructionDraft, setInstructionDraft] = useState<string | null>(null);
   const inspectorAnimationRef = useRef<number | null>(null);
   const inspectorWidthRef = useRef(DEFAULT_INSPECTOR_WIDTH);
   const inspectorCurrentWidthRef = useRef(0);
@@ -149,6 +153,17 @@ export function RunTheater({
   const primaryState = primaryId !== null
     ? run.nodeStates[primaryId]
     : undefined;
+  const isEditableStart = run.status === "pending" && primaryNode?.data?.kind === "start";
+
+  // Drop an uncommitted draft the moment the run leaves pending (or the run switches) so a stale
+  // draft cannot reappear on the start node after a restart. Implemented as a render-time reset
+  // keyed on the last pending lifecycle state instead of an effect to avoid a cascading render.
+  const [draftPendingKey, setDraftPendingKey] = useState("");
+  const nextDraftPendingKey = run.status === "pending" ? run.id : "";
+  if (nextDraftPendingKey !== draftPendingKey) {
+    setDraftPendingKey(nextDraftPendingKey);
+    setInstructionDraft(null);
+  }
   const primaryArtifacts = useMemo(
     () =>
       primaryId === null
@@ -252,6 +267,21 @@ export function RunTheater({
       onCollapsed: () => setInspectorCollapsed(true),
       onFrame: applyInspectorWidth,
       targetWidth: 0,
+    });
+  }
+
+  // Commits the drafted start-node instruction to the run's kickoff input in one request and
+  // clears the draft on success (the refetched run then surfaces the saved input).
+  function saveInstructionDraft(): void {
+    if (instructionDraft === null) {
+      return;
+    }
+    updateInput.mutate({
+      runId: run.id,
+      input: instructionDraft,
+    }, {
+      onSuccess: () => setInstructionDraft(null),
+      onError: () => toast.error(t("workflowRun.updateFailed")),
     });
   }
 
@@ -576,20 +606,23 @@ export function RunTheater({
                 artifacts={primaryArtifacts}
                 revealedArtifactId={revealedArtifactId}
                 editable={run.status === "pending"}
-                onPatchNode={run.status === "pending" && primaryNode?.data?.kind === "start"
+                onPatchNode={isEditableStart
                   ? (patch) => {
                     // The start node's instruction is the run's kickoff input; the backend has no
-                    // way to edit other nodes of the frozen snapshot.
+                    // way to edit other nodes of the frozen snapshot, so description patches are
+                    // intentionally ignored. Edits stay in a local draft until save.
                     if (patch.instruction != null) {
-                      updateInput.mutate({
-                        runId: run.id,
-                        input: patch.instruction,
-                      }, {
-                        onError: () => toast.error(t("workflowRun.updateFailed")),
-                      });
+                      setInstructionDraft(patch.instruction);
                     }
                   }
                   : undefined}
+                instructionDraft={isEditableStart ? instructionDraft : null}
+                onInstructionDraftChange={isEditableStart ? setInstructionDraft : undefined}
+                onSaveInstruction={isEditableStart ? saveInstructionDraft : undefined}
+                onDiscardInstructionDraft={isEditableStart
+                  ? () => setInstructionDraft(null)
+                  : undefined}
+                instructionSavePending={isEditableStart ? updateInput.isPending : false}
                 onClose={closeInspector}
               />
             </div>

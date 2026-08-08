@@ -180,7 +180,7 @@ export type RealWorkflowRunDetail = {
 /** Projects a persisted run detail onto the Theater/Overview display model. */
 export function buildDisplayRun(
   detail: {
-    run: { id: string; workflowId: string; status: string; state: string | null; startedAt: bigint | null; finishedAt: bigint | null; createdAt: bigint; updatedAt: bigint };
+    run: { id: string; workflowId: string; status: string; state: string | null; input: string | null; startedAt: bigint | null; finishedAt: bigint | null; createdAt: bigint; updatedAt: bigint };
     name: string;
     nodes: Array<{
       nodeId: string;
@@ -197,13 +197,24 @@ export function buildDisplayRun(
 ): GraphWorkflowRun {
   const envelope = parseWorkflowGraph(graph);
   const currentNodes = parseCurrentNodes(detail.run.state);
+  // The start node's instruction is the run's kickoff input. Editing it on a pending run stores
+  // the value on the run, not on the frozen snapshot, so overlay the committed run input on the
+  // start node (falling back to the snapshot instruction until an input has been saved).
+  const kickoffInput = detail.run.input;
+  const nodes = kickoffInput != null
+    ? envelope.nodes.map((node) => (
+      node.data.kind === "start"
+        ? { ...node, data: { ...node.data, instruction: kickoffInput } }
+        : node
+    ))
+    : envelope.nodes;
   const definitionSnapshot: WorkflowDefinition = {
     id: detail.run.workflowId,
     name: detail.name,
     description: envelope.description ?? "",
     updatedAt: toIso(detail.run.updatedAt),
     viewport: envelope.viewport,
-    nodes: envelope.nodes,
+    nodes,
     edges: envelope.edges,
   };
   const nodeRunByNodeId = new Map(detail.nodes.map((node) => [node.nodeId, node]));
@@ -232,6 +243,7 @@ export function buildDisplayRun(
     definitionSnapshot,
     name: detail.name,
     status: projectRunStatus(detail.run.status as "pending" | "running" | "succeeded" | "failed" | "cancelled", currentNodes),
+    kickoffInput: kickoffInput ?? undefined,
     nodeStates,
     openHitls: [],
     totals: {},

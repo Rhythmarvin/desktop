@@ -30,6 +30,22 @@ interface RunActInspectorProps {
   state: GraphWorkflowNodeState | null;
   artifacts: WorkflowArtifact[];
   revealedArtifactId: string | null;
+  /**
+   * When true, description / instruction are editable for this run only
+   * (`pending` overrides on the frozen snapshot).
+   */
+  editable?: boolean;
+  onPatchNode?: (patch: GraphWorkflowSnapshotNodePatch) => void;
+  /**
+   * When provided, the instruction field edits a local draft instead of patching on every
+   * keystroke and a save bar commits it once. `instructionDraft` stays `null` until the user
+   * types, so the field falls back to the snapshot instruction until then.
+   */
+  instructionDraft?: string | null;
+  onInstructionDraftChange?: (value: string) => void;
+  onSaveInstruction?: () => void;
+  onDiscardInstructionDraft?: () => void;
+  instructionSavePending?: boolean;
   onClose: () => void;
 }
 
@@ -43,6 +59,13 @@ export function RunActInspector({
   state,
   artifacts,
   revealedArtifactId,
+  editable = false,
+  onPatchNode,
+  instructionDraft,
+  onInstructionDraftChange,
+  onSaveInstruction,
+  onDiscardInstructionDraft,
+  instructionSavePending = false,
   onClose,
 }: RunActInspectorProps) {
   const { t } = useTranslation();
@@ -77,6 +100,13 @@ export function RunActInspector({
       state={state}
       artifacts={artifacts}
       revealedArtifactId={revealedArtifactId}
+      editable={editable}
+      onPatchNode={onPatchNode}
+      instructionDraft={instructionDraft}
+      onInstructionDraftChange={onInstructionDraftChange}
+      onSaveInstruction={onSaveInstruction}
+      onDiscardInstructionDraft={onDiscardInstructionDraft}
+      instructionSavePending={instructionSavePending}
       onClose={onClose}
     />
   );
@@ -87,12 +117,26 @@ function RunActInspectorPanel({
   state,
   artifacts,
   revealedArtifactId,
+  editable,
+  onPatchNode,
+  instructionDraft,
+  onInstructionDraftChange,
+  onSaveInstruction,
+  onDiscardInstructionDraft,
+  instructionSavePending,
   onClose,
 }: {
   data: WorkflowNodeData;
   state: GraphWorkflowNodeState;
   artifacts: WorkflowArtifact[];
   revealedArtifactId: string | null;
+  editable: boolean;
+  onPatchNode?: (patch: GraphWorkflowSnapshotNodePatch) => void;
+  instructionDraft?: string | null;
+  onInstructionDraftChange?: (value: string) => void;
+  onSaveInstruction?: () => void;
+  onDiscardInstructionDraft?: () => void;
+  instructionSavePending?: boolean;
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
@@ -229,11 +273,56 @@ function RunActInspectorPanel({
             <RunActAgentConfig config={agentConfig} />
           )}
           {nodeType.configFields.includes("instruction") && (
-            <ReadOnlyField
-              label={t("settings.workflow.field.instruction")}
-              value={data.instruction ?? ""}
-              multiline
-            />
+            canEdit
+              ? (
+                <div className="space-y-1.5">
+                  <EditableField
+                    id={`run-node-instruction-${nodeId}`}
+                    label={t("settings.workflow.field.instruction")}
+                    value={instructionDraft ?? data.instruction ?? ""}
+                    multiline
+                    onChange={(value) => {
+                      if (onSaveInstruction !== undefined) {
+                        onInstructionDraftChange?.(value);
+                      } else {
+                        onPatchNode({ instruction: value });
+                      }
+                    }}
+                  />
+                  {instructionDraft !== null && instructionDraft !== undefined && (
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="cursor-pointer"
+                        onClick={onDiscardInstructionDraft}
+                      >
+                        {t("workflowRun.inspector.discardDraft")}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="cursor-pointer"
+                        disabled={instructionSavePending}
+                        onClick={onSaveInstruction}
+                      >
+                        {instructionSavePending
+                          ? t("workflowRun.inspector.savingDraft")
+                          : t("workflowRun.inspector.saveDraft")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )
+              : (
+                <ReadOnlyField
+                  label={t("settings.workflow.field.instruction")}
+                  value={data.instruction ?? ""}
+                  multiline
+                />
+              )
+          )}
           )}
         </InspectorSection>
 

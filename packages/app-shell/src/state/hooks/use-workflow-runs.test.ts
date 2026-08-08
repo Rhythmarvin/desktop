@@ -57,6 +57,7 @@ describe("buildDisplayRun", () => {
       workflowId: "workflow-a",
       status: "pending",
       state: "{\"current_nodes\":[\"prompt-1\"]}",
+      input: null,
       startedAt: null,
       finishedAt: null,
       createdAt: 1n,
@@ -105,6 +106,16 @@ describe("buildDisplayRun", () => {
     };
     const display = buildDisplayRun(withSession, GRAPH);
     expect(display.nodeStates.explore.sessionId).toBe("session-explore");
+  });
+
+  it("surfaces the committed run input on the start node as kickoff input", () => {
+    const display = buildDisplayRun({
+      ...detail,
+      run: { ...detail.run, input: "只审查 README" },
+    }, GRAPH);
+    expect(display.kickoffInput).toBe("只审查 README");
+    const startNode = display.definitionSnapshot.nodes.find((node) => node.id === "start");
+    expect(startNode?.data.instruction).toBe("只审查 README");
   });
 
   it("derives awaiting_input node state from a pending node-run", () => {
