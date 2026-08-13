@@ -780,14 +780,14 @@ where
             serde_json::json!({ "type": "end" })
         }
     };
-    if is_terminal {
-        return ControlFlow::Break(());
+    match (is_terminal, on_event.send_frame(frame)) {
+        (true, _) => ControlFlow::Break(()),
+        (false, Ok(())) => ControlFlow::Continue(()),
+        (false, Err(_)) => {
+            lifecycle.complete_cancellation();
+            ControlFlow::Break(())
+        }
     }
-    if on_event.send_frame(frame).is_err() {
-        lifecycle.complete_cancellation();
-        return ControlFlow::Break(());
-    }
-    ControlFlow::Continue(())
 }
 
 /// Why a workspace watch loop ended, so the completion outcome distinguishes an explicit
@@ -1582,10 +1582,8 @@ pub async fn set_worktree_root(
 #[cfg(test)]
 mod tests {
     use super::{FrameSendError, FrameSink, forward_frame};
-    use ora_backend::{
-        BackendError, ErrorClassification, RequestLifecycle, UuidRequestIdGenerator,
-    };
-    use ora_contracts::{EmptyErrorParams, PublicError};
+    use ora_backend::{BackendError, ErrorClassification, RequestIdGenerator, RequestLifecycle};
+    use ora_contracts::{EmptyErrorParams, PublicError, RequestId};
     use ora_logging::with_recorded_trace_logging;
     use pretty_assertions::assert_eq;
     use serde_json::Value;
@@ -1593,13 +1591,50 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::layer::{Context, Layer};
 
-    /// A sink whose channel is already closed, simulating a disconnected frontend.
-    #[derive(Clone)]
-    struct ClosedSink;
+    /// Selects whether a recording sink accepts or rejects its attempted frame delivery.
+    #[derive(Clone, Copy)]
+    enum TestDelivery {
+        Accepted,
+        ChannelClosed,
+    }
 
-    impl FrameSink for ClosedSink {
-        fn send_frame(&self, _frame: Value) -> Result<(), FrameSendError> {
-            Err(FrameSendError)
+    /// Records attempted frames before returning the configured delivery result.
+    #[derive(Clone)]
+    struct RecordingSink {
+        attempted_frames: Arc<Mutex<Vec<Value>>>,
+        delivery: TestDelivery,
+    }
+
+    impl RecordingSink {
+        fn new(delivery: TestDelivery) -> Self {
+            Self {
+                attempted_frames: Arc::new(Mutex::new(Vec::new())),
+                delivery,
+            }
+        }
+
+        /// Returns every frame the forwarding seam attempted to deliver.
+        fn attempted_frames(&self) -> Vec<Value> {
+            self.attempted_frames.lock().unwrap().clone()
+        }
+    }
+
+    impl FrameSink for RecordingSink {
+        fn send_frame(&self, frame: Value) -> Result<(), FrameSendError> {
+            self.attempted_frames.lock().unwrap().push(frame);
+            match self.delivery {
+                TestDelivery::Accepted => Ok(()),
+                TestDelivery::ChannelClosed => Err(FrameSendError),
+            }
+        }
+    }
+
+    /// Generates the stable request id used by frame payload assertions.
+    struct FixedRequestIdGenerator(RequestId);
+
+    impl RequestIdGenerator for FixedRequestIdGenerator {
+        fn generate(&self) -> RequestId {
+            self.0
         }
     }
 
@@ -1607,48 +1642,83 @@ mod tests {
     #[test]
     fn send_failure_on_data_frame_emits_cancelled() {
         let recorder = OutcomeRecorder::default();
+        let sink = RecordingSink::new(TestDelivery::ChannelClosed);
         with_recorded_trace_logging(recorder.layer(), || {
-            let lifecycle = RequestLifecycle::start("test_stream", &UuidRequestIdGenerator);
+            let lifecycle = test_lifecycle();
             let flow = forward_frame::<Value, _>(
                 Some(Ok(serde_json::json!({ "n": 1 }))),
-                &ClosedSink,
+                &sink,
                 &lifecycle,
             );
             assert_eq!(flow, ControlFlow::Break(()));
         });
 
+        assert_eq!(
+            sink.attempted_frames(),
+            vec![serde_json::json!({
+                "type": "data",
+                "data": { "n": 1 },
+            })]
+        );
         assert_eq!(recorder.outcomes(), vec!["cancelled"]);
     }
 
-    /// Verifies a terminal event claims completion first, so a failed send never double-logs.
+    /// Verifies a normal terminal event delivers its `end` frame before the loop exits.
     #[test]
-    fn terminal_frame_with_send_failure_does_not_double_log() {
+    fn terminal_end_frame_is_sent_before_exit() {
         let recorder = OutcomeRecorder::default();
+        let sink = RecordingSink::new(TestDelivery::Accepted);
         with_recorded_trace_logging(recorder.layer(), || {
-            let lifecycle = RequestLifecycle::start("test_stream", &UuidRequestIdGenerator);
-            let flow = forward_frame::<Value, _>(None, &ClosedSink, &lifecycle);
+            let lifecycle = test_lifecycle();
+            let flow = forward_frame::<Value, _>(None, &sink, &lifecycle);
             assert_eq!(flow, ControlFlow::Break(()));
         });
 
+        assert_eq!(
+            sink.attempted_frames(),
+            vec![serde_json::json!({ "type": "end" })]
+        );
         assert_eq!(recorder.outcomes(), vec!["success"]);
     }
 
-    /// Verifies a typed error terminal frame records a `failure` and no `cancelled`.
+    /// Verifies a failed terminal delivery keeps the backend failure and still attempts its frame.
     #[test]
-    fn error_frame_with_send_failure_does_not_double_log() {
+    fn error_frame_with_send_failure_is_attempted_without_double_logging() {
         let recorder = OutcomeRecorder::default();
+        let sink = RecordingSink::new(TestDelivery::ChannelClosed);
         with_recorded_trace_logging(recorder.layer(), || {
-            let lifecycle = RequestLifecycle::start("test_stream", &UuidRequestIdGenerator);
+            let lifecycle = test_lifecycle();
             let error = BackendError::new(
                 ErrorClassification::Internal,
                 PublicError::InternalError(EmptyErrorParams {}),
                 "test failure",
             );
-            let flow = forward_frame::<Value, _>(Some(Err(error)), &ClosedSink, &lifecycle);
+            let flow = forward_frame::<Value, _>(Some(Err(error)), &sink, &lifecycle);
             assert_eq!(flow, ControlFlow::Break(()));
         });
 
+        assert_eq!(
+            sink.attempted_frames(),
+            vec![serde_json::json!({
+                "type": "error",
+                "error": {
+                    "code": "internal_error",
+                    "params": {},
+                    "requestId": "550e8400-e29b-41d4-a716-446655440000",
+                },
+            })]
+        );
         assert_eq!(recorder.outcomes(), vec!["failure"]);
+    }
+
+    /// Builds one lifecycle whose correlation id is stable in serialized frame assertions.
+    fn test_lifecycle() -> RequestLifecycle {
+        RequestLifecycle::start(
+            "test_stream",
+            &FixedRequestIdGenerator(
+                serde_json::from_str("\"550e8400-e29b-41d4-a716-446655440000\"").unwrap(),
+            ),
+        )
     }
 
     /// Records the `outcome` field of every completion event to assert disconnect semantics.
@@ -1658,17 +1728,20 @@ mod tests {
     }
 
     impl OutcomeRecorder {
+        /// Builds the scoped subscriber layer used by one test.
         fn layer(&self) -> OutcomeRecordingLayer {
             OutcomeRecordingLayer {
                 outcomes: self.outcomes.clone(),
             }
         }
 
+        /// Returns captured completion outcomes in emission order.
         fn outcomes(&self) -> Vec<String> {
             self.outcomes.lock().unwrap().clone()
         }
     }
 
+    /// Captures completion outcomes while leaving production formatting untouched.
     #[derive(Clone, Debug)]
     struct OutcomeRecordingLayer {
         outcomes: Arc<Mutex<Vec<String>>>,
@@ -1687,6 +1760,7 @@ mod tests {
         }
     }
 
+    /// Extracts the `outcome` field from one completion event.
     #[derive(Default)]
     struct OutcomeVisitor {
         outcome: Option<String>,

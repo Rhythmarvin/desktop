@@ -9,6 +9,9 @@ request id, opens the request span, invokes unary business logic, projects any b
 records at most one completion event. Session load, prompt, and `watchAppEvents` operations use `stream_contract`, which
 forwards ordered `data`, `error`, and `end` frames over a Tauri Channel. A private call id allows an
 `AbortSignal` to cancel only that stream, while one separate request id correlates the complete stream.
+Every terminal frame is offered to the Channel before the forwarding task exits. Explicit cancellation
+and a failed non-terminal delivery record `cancelled`; the runtime does not actively probe an idle
+Channel, so a client that disappears without cancelling is observed only when a later delivery fails.
 
 The frontend injects `createTauriTransport()` into `createContractsClient`. The transport maps contract operation names to Tauri commands and forwards the original request DTO unchanged. Shared backend failures use the same direct `{ code, params, requestId }` payload as Web, without a public message or outer envelope. Tauri and fetch reuse the same runtime decoder; local Tauri invocation failures have no HTTP status and never invent a request id.
 
@@ -62,7 +65,8 @@ Desktop initializes `ora-logging` before opening the backend and registers the G
 
 Each unary command or stream emits at most one request-completion event using the same request id as
 its public failure payload or error frame. Cancellation is completed at `DEBUG` and is not projected
-as `internal_error`. If rollback or cleanup also fails, Desktop retains the primary response and
+as `internal_error`. For streams, this covers explicit cancellation and channel closure observed while
+delivering a non-terminal frame. If rollback or cleanup also fails, Desktop retains the primary response and
 source chain and records the secondary failure as a separate operation with the same request id.
 
 At startup, Desktop reads the operating system's IANA timezone and fixes it for the process
