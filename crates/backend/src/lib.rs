@@ -25,5 +25,7 @@ pub use agent_runtime::{SessionEventStream, SessionLocator};
 pub use app_event::AppEventHub;
 pub use bootstrap::{Backend, BackendBootstrapError, BackendPaths};
 pub use error::{BackendError, ErrorClassification};
-pub use request_lifecycle::{RequestIdGenerator, RequestLifecycle, UuidRequestIdGenerator};
+pub use request_lifecycle::{
+    RequestIdGenerator, RequestLifecycle, StreamCompletionGuard, UuidRequestIdGenerator,
+};
 pub use skill_reconciliation::SkillStorageReconciliationError;

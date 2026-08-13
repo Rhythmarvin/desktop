@@ -156,9 +156,29 @@ impl RequestLifecycle {
     }
 }
 
+/// Records a `cancelled` completion when dropped, so a streaming request torn down by
+/// client disconnect or server shutdown still emits its one completion event.
+///
+/// `RequestLifecycle` already enforces exactly-once completion through `claim_completion`,
+/// so dropping this guard after a normal `complete_success`/`complete_failure` is a no-op.
+pub struct StreamCompletionGuard(RequestLifecycle);
+
+impl StreamCompletionGuard {
+    /// Attaches cancellation-on-drop semantics to a cloned lifecycle.
+    pub fn new(lifecycle: RequestLifecycle) -> Self {
+        Self(lifecycle)
+    }
+}
+
+impl Drop for StreamCompletionGuard {
+    fn drop(&mut self) {
+        self.0.complete_cancellation();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RequestIdGenerator, RequestLifecycle};
+    use super::{RequestIdGenerator, RequestLifecycle, StreamCompletionGuard};
     use crate::{BackendError, ErrorClassification};
     use ora_contracts::{EmptyErrorParams, PublicError, RequestId};
     use ora_logging::with_recorded_trace_logging;
@@ -317,5 +337,111 @@ mod tests {
         fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
             self.levels.lock().unwrap().push(*event.metadata().level());
         }
+    }
+
+    /// Verifies dropping a guard before any completion records exactly one `cancelled` outcome.
+    #[test]
+    fn stream_completion_guard_without_completion_emits_cancelled() {
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start(
+                "test_operation",
+                &FixedRequestIdGenerator(test_request_id()),
+            );
+            let guard = StreamCompletionGuard::new(lifecycle.clone());
+            drop(guard);
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["cancelled"]);
+    }
+
+    /// Verifies a normal success claims completion before the guard drop, so no `cancelled` is emitted.
+    #[test]
+    fn stream_completion_guard_after_success_is_noop() {
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start(
+                "test_operation",
+                &FixedRequestIdGenerator(test_request_id()),
+            );
+            let guard = StreamCompletionGuard::new(lifecycle.clone());
+            lifecycle.complete_success();
+            drop(guard);
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["success"]);
+    }
+
+    /// Verifies an explicit cancellation and a subsequent guard drop still log only once.
+    #[test]
+    fn stream_completion_guard_after_cancellation_is_idempotent() {
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start(
+                "test_operation",
+                &FixedRequestIdGenerator(test_request_id()),
+            );
+            let guard = StreamCompletionGuard::new(lifecycle.clone());
+            lifecycle.complete_cancellation();
+            drop(guard);
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["cancelled"]);
+    }
+
+    /// Records the `outcome` string of every completion event to assert disconnect semantics.
+    #[derive(Clone, Debug, Default)]
+    struct OutcomeRecorder {
+        outcomes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl OutcomeRecorder {
+        /// Builds the scoped subscriber layer used by one test.
+        fn layer(&self) -> OutcomeRecordingLayer {
+            OutcomeRecordingLayer {
+                outcomes: self.outcomes.clone(),
+            }
+        }
+
+        /// Returns captured completion outcomes in emission order.
+        fn outcomes(&self) -> Vec<String> {
+            self.outcomes.lock().unwrap().clone()
+        }
+    }
+
+    /// Captures the `outcome` field of completion events for disconnect-semantics assertions.
+    #[derive(Clone, Debug)]
+    struct OutcomeRecordingLayer {
+        outcomes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl<S> Layer<S> for OutcomeRecordingLayer
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
+            let mut visitor = OutcomeVisitor::default();
+            event.record(&mut visitor);
+            self.outcomes
+                .lock()
+                .unwrap()
+                .push(visitor.outcome.unwrap_or_default());
+        }
+    }
+
+    /// Extracts the `outcome` field from a completion event.
+    #[derive(Default)]
+    struct OutcomeVisitor {
+        outcome: Option<String>,
+    }
+
+    impl tracing::field::Visit for OutcomeVisitor {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "outcome" {
+                self.outcome = Some(value.to_string());
+            }
+        }
+
+        fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
     }
 }
