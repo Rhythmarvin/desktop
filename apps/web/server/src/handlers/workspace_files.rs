@@ -5,7 +5,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, Response, header};
 use futures_util::stream;
-use ora_backend::BackendError;
+use ora_backend::{BackendError, StreamCompletionGuard};
 use ora_contracts::{
     ContractError, EmptyErrorParams, ListWorkspaceDirectoryResponse, PublicError,
     ReadWorkspaceFileResponse, SearchWorkspaceResponse, WorkspaceFileChange,
@@ -175,9 +175,12 @@ pub(crate) fn stream_response(
     receiver: tokio::sync::mpsc::Receiver<Result<WorkspaceFileEventBatch, BackendError>>,
 ) -> Response<Body> {
     let lifecycle = current_lifecycle();
+    // Records a `cancelled` completion when the body is dropped early (client disconnect),
+    // because `complete_*` only runs on `receiver.recv()` returning, never on a dropped future.
+    let completion_guard = StreamCompletionGuard::new(lifecycle.clone());
     let body_stream = stream::unfold(
-        (receiver, false, lifecycle),
-        |(mut receiver, ended, lifecycle)| async move {
+        (receiver, false, lifecycle, completion_guard),
+        |(mut receiver, ended, lifecycle, completion_guard)| async move {
             if ended {
                 return None;
             }
@@ -211,7 +214,7 @@ pub(crate) fn stream_response(
             bytes.push(b'\n');
             Some((
                 Ok::<Bytes, Infallible>(Bytes::from(bytes)),
-                (receiver, next_ended, lifecycle),
+                (receiver, next_ended, lifecycle, completion_guard),
             ))
         },
     );

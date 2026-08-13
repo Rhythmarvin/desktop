@@ -265,21 +265,25 @@ fn skill_imports_router() -> Router<AppState> {
 mod tests {
     use super::build_router;
     use crate::bootstrap::build_app_state_for_database;
+    use crate::error::DeferredCompletion;
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request, StatusCode};
     use ora_application::WorktreeRepository;
     use ora_contracts::{
-        FileSystemBreadcrumb, FileSystemEntry, FileSystemEntryKind, ListDirectoryResponse,
-        RequestId,
+        APP_EVENT_WATCH_PATH, FileSystemBreadcrumb, FileSystemEntry, FileSystemEntryKind,
+        ListDirectoryResponse, RequestId,
     };
     use ora_db::{DatabaseBootstrapper, DatabaseLocation, SqliteWorktreeRepository};
     use ora_domain::WorktreeId;
+    use ora_logging::with_recorded_trace_logging;
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::fs;
     use std::path::Path;
+    use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
     use tower::util::ServiceExt;
+    use tracing_subscriber::layer::{Context, Layer};
 
     /// Verifies the liveness route reports process health without bootstrap state.
     #[tokio::test]
@@ -1737,5 +1741,88 @@ mod tests {
             .expect("contract error requestId must be a UUID");
         assert!(body.get("message").is_none());
         assert!(body.get("error").is_none());
+    }
+
+    /// Verifies dropping a streaming response body (client disconnect) records a `cancelled` completion.
+    ///
+    /// `watch_app_events` is an unbounded stream whose only terminal state is the client dropping
+    /// the connection, so this exercises the real axum body-drop → guard path end to end.
+    #[tokio::test]
+    async fn watch_stream_disconnect_emits_cancelled() {
+        let (_temp_dir, _database_path, app) = test_router();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(APP_EVENT_WATCH_PATH)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("request failed: {error}"));
+
+        assert!(response.extensions().get::<DeferredCompletion>().is_some());
+
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            drop(response);
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["cancelled"]);
+    }
+
+    /// Records the `outcome` field of every completion event to assert disconnect semantics.
+    #[derive(Clone, Debug, Default)]
+    struct OutcomeRecorder {
+        outcomes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl OutcomeRecorder {
+        /// Builds the scoped subscriber layer used by one test.
+        fn layer(&self) -> OutcomeRecordingLayer {
+            OutcomeRecordingLayer {
+                outcomes: self.outcomes.clone(),
+            }
+        }
+
+        /// Returns captured completion outcomes in emission order.
+        fn outcomes(&self) -> Vec<String> {
+            self.outcomes.lock().unwrap().clone()
+        }
+    }
+
+    /// Captures the `outcome` field of completion events, ignoring events that carry none.
+    #[derive(Clone, Debug)]
+    struct OutcomeRecordingLayer {
+        outcomes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl<S> Layer<S> for OutcomeRecordingLayer
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
+            let mut visitor = OutcomeVisitor::default();
+            event.record(&mut visitor);
+            if let Some(outcome) = visitor.outcome {
+                self.outcomes.lock().unwrap().push(outcome);
+            }
+        }
+    }
+
+    /// Extracts the `outcome` field from a completion event.
+    #[derive(Default)]
+    struct OutcomeVisitor {
+        outcome: Option<String>,
+    }
+
+    impl tracing::field::Visit for OutcomeVisitor {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "outcome" {
+                self.outcome = Some(value.to_string());
+            }
+        }
+
+        fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
     }
 }

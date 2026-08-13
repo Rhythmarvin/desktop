@@ -5,7 +5,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, Response, header};
 use futures_util::stream;
-use ora_backend::{BackendError, SessionEventStream};
+use ora_backend::{BackendError, SessionEventStream, StreamCompletionGuard};
 use ora_contracts::{
     AgentCli, AttachSessionRequest, AttachSessionResponse, ContractError, DeleteSessionRequest,
     DeleteSessionResponse, EmptyErrorParams, GetAgentRuntimeStatusRequest,
@@ -280,9 +280,12 @@ where
     Event: Serialize + Send + 'static,
 {
     let lifecycle = current_lifecycle();
+    // Records a `cancelled` completion when the body is dropped early (client disconnect),
+    // because `complete_*` only runs on `events.recv()` returning, never on a dropped future.
+    let completion_guard = StreamCompletionGuard::new(lifecycle.clone());
     let body_stream = stream::unfold(
-        (events, false, lifecycle),
-        |(mut events, ended, lifecycle)| async move {
+        (events, false, lifecycle, completion_guard),
+        |(mut events, ended, lifecycle, completion_guard)| async move {
             if ended {
                 return None;
             }
@@ -316,7 +319,7 @@ where
             bytes.push(b'\n');
             Some((
                 Ok::<Bytes, Infallible>(Bytes::from(bytes)),
-                (events, next_ended, lifecycle),
+                (events, next_ended, lifecycle, completion_guard),
             ))
         },
     );
