@@ -67,7 +67,7 @@ The RFC 3339 timestamp uses the configured process timezone and includes its UTC
 
 ## Request completion and errors
 
-Long-lived streams, including task workspace watching, mark the response as deferred and emit completion only when the stream ends or reports its typed contract error.
+Long-lived streams, including task workspace watching, mark the response as deferred and emit completion when the stream ends, reports its typed contract error, or is disconnected by the client. A client disconnect records a `cancelled` completion at `DEBUG` level, matching the explicit-cancellation path, so a dropped connection never silently erases the request from the completion log.
 
 Ora frontend requests receive a canonical UUID v4 at the Web, Tauri, or stream entry seam. The same identifier correlates the request span, public error payload or stream error frame, and completion event; Web also returns it through `X-Request-Id`. Client-provided request identifiers are never canonical.
 
