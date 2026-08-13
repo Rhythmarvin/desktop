@@ -6,6 +6,7 @@ use ora_backend::{Backend, BackendError, RequestLifecycle, UuidRequestIdGenerato
 use ora_contracts::*;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -701,18 +702,36 @@ pub async fn cancel_contract_stream(
     Ok(())
 }
 
+/// Delivery seam for NDJSON transport frames so forward loops can be unit-tested
+/// without a live Tauri webview.
+pub(crate) trait FrameSink: Clone {
+    /// Sends one frame; `Err` means the receiver is gone (client disconnected).
+    fn send_frame(&self, frame: serde_json::Value) -> Result<(), FrameSendError>;
+}
+
+/// Unit error marking a failed frame delivery (closed client channel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FrameSendError;
+
+impl FrameSink for Channel<serde_json::Value> {
+    fn send_frame(&self, frame: serde_json::Value) -> Result<(), FrameSendError> {
+        self.send(frame).map_err(|_| FrameSendError)
+    }
+}
+
 /// Forwards ordered data/error/end frames and drops the backend stream on channel failure.
-async fn forward_contract_stream<Event>(
+async fn forward_contract_stream<Event, Sink>(
     mut stream: ora_backend::SessionEventStream<Event>,
     cancellation: CancellationToken,
     stream_call_id: String,
     registry: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>,
     >,
-    on_event: Channel<serde_json::Value>,
+    on_event: Sink,
     lifecycle: RequestLifecycle,
 ) where
     Event: Serialize + Send + 'static,
+    Sink: FrameSink,
 {
     loop {
         tokio::select! {
@@ -721,22 +740,7 @@ async fn forward_contract_stream<Event>(
                 break;
             },
             event = stream.recv() => {
-                let is_terminal = matches!(&event, Some(Err(_)) | None);
-                let frame = match event {
-                    Some(Ok(data)) => serde_json::json!({ "type": "data", "data": data }),
-                    Some(Err(error)) => {
-                        lifecycle.complete_failure(&error);
-                        serde_json::json!({
-                            "type": "error",
-                            "error": error.contract_error(lifecycle.request_id()),
-                        })
-                    },
-                    None => {
-                        lifecycle.complete_success();
-                        serde_json::json!({ "type": "end" })
-                    },
-                };
-                if on_event.send(frame).is_err() || is_terminal {
+                if forward_frame(event, &on_event, &lifecycle).is_break() {
                     break;
                 }
             }
@@ -747,66 +751,111 @@ async fn forward_contract_stream<Event>(
     }
 }
 
-/// Forwards debounced native workspace changes until the Desktop stream is cancelled.
-pub(crate) async fn forward_workspace_watch(
+/// Forwards one backend event as a transport frame and reports whether the loop should continue.
+///
+/// A terminal event claims the lifecycle (success/failure) before the frame is sent, so a later
+/// channel-close cancellation is a no-op; a non-terminal frame whose send fails records a
+/// `cancelled` completion to match the explicit-cancellation path.
+fn forward_frame<Event, Sink>(
+    event: Option<Result<Event, BackendError>>,
+    on_event: &Sink,
+    lifecycle: &RequestLifecycle,
+) -> ControlFlow<()>
+where
+    Event: Serialize,
+    Sink: FrameSink,
+{
+    let is_terminal = matches!(&event, Some(Err(_)) | None);
+    let frame = match event {
+        Some(Ok(data)) => serde_json::json!({ "type": "data", "data": data }),
+        Some(Err(error)) => {
+            lifecycle.complete_failure(&error);
+            serde_json::json!({
+                "type": "error",
+                "error": error.contract_error(lifecycle.request_id()),
+            })
+        }
+        None => {
+            lifecycle.complete_success();
+            serde_json::json!({ "type": "end" })
+        }
+    };
+    if is_terminal {
+        return ControlFlow::Break(());
+    }
+    if on_event.send_frame(frame).is_err() {
+        lifecycle.complete_cancellation();
+        return ControlFlow::Break(());
+    }
+    ControlFlow::Continue(())
+}
+
+/// Why a workspace watch loop ended, so the completion outcome distinguishes an explicit
+/// cancellation from a closed frontend channel (the latter must not be logged as `success`).
+enum WatchEnd {
+    Cancelled,
+    ChannelClosed,
+}
+
+/// Forwards debounced native workspace changes until the Desktop stream is cancelled or the
+/// frontend disconnects.
+pub(crate) async fn forward_workspace_watch<Sink>(
     watcher: ora_fs::WorkspaceWatcher,
     cancellation: CancellationToken,
     stream_call_id: String,
     registry: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>,
     >,
-    on_event: Channel<serde_json::Value>,
+    on_event: Sink,
     lifecycle: RequestLifecycle,
-) {
+) where
+    Sink: FrameSink + Send + 'static,
+{
     let watch_cancellation = cancellation.clone();
     let terminal_channel = on_event.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        while !watch_cancellation.is_cancelled() {
-            match watcher.receive_batch(Duration::from_millis(100)) {
-                Ok(Some(changes)) if !changes.is_empty() => {
-                    let data = WorkspaceFileEventBatch {
-                        changes: changes.into_iter().map(to_contract_change).collect(),
-                    };
-                    if on_event
-                        .send(serde_json::json!({ "type": "data", "data": data }))
-                        .is_err()
-                    {
-                        break;
+    let result = tauri::async_runtime::spawn_blocking(
+        move || -> Result<WatchEnd, ora_fs::WorkspaceFileSystemError> {
+            while !watch_cancellation.is_cancelled() {
+                match watcher.receive_batch(Duration::from_millis(100)) {
+                    Ok(Some(changes)) if !changes.is_empty() => {
+                        let data = WorkspaceFileEventBatch {
+                            changes: changes.into_iter().map(to_contract_change).collect(),
+                        };
+                        if on_event
+                            .send_frame(serde_json::json!({ "type": "data", "data": data }))
+                            .is_err()
+                        {
+                            return Ok(WatchEnd::ChannelClosed);
+                        }
                     }
+                    Ok(Some(_)) | Ok(None) => {}
+                    Err(error) => return Err(error),
                 }
-                Ok(Some(_)) | Ok(None) => {}
-                Err(error) => return Err(error),
             }
-        }
-        Ok::<(), ora_fs::WorkspaceFileSystemError>(())
-    })
+            Ok(WatchEnd::Cancelled)
+        },
+    )
     .await;
 
-    if cancellation.is_cancelled() {
-        lifecycle.complete_cancellation();
-    } else {
-        match result {
-            Ok(Ok(())) => {
-                lifecycle.complete_success();
-                let _ = terminal_channel.send(serde_json::json!({ "type": "end" }));
-            }
-            Ok(Err(error)) => {
-                let backend_error = workspace_file_backend_error(error);
-                lifecycle.complete_failure(&backend_error);
-                let _ = terminal_channel.send(serde_json::json!({
-                    "type": "error",
-                    "error": backend_error.contract_error(lifecycle.request_id()),
-                }));
-            }
-            Err(error) => {
-                let backend_error =
-                    BackendError::internal("Desktop workspace watcher failed", error);
-                lifecycle.complete_failure(&backend_error);
-                let _ = terminal_channel.send(serde_json::json!({
-                    "type": "error",
-                    "error": backend_error.contract_error(lifecycle.request_id()),
-                }));
-            }
+    match result {
+        Ok(Ok(WatchEnd::Cancelled)) | Ok(Ok(WatchEnd::ChannelClosed)) => {
+            lifecycle.complete_cancellation()
+        }
+        Ok(Err(error)) => {
+            let backend_error = workspace_file_backend_error(error);
+            lifecycle.complete_failure(&backend_error);
+            let _ = terminal_channel.send_frame(serde_json::json!({
+                "type": "error",
+                "error": backend_error.contract_error(lifecycle.request_id()),
+            }));
+        }
+        Err(error) => {
+            let backend_error = BackendError::internal("Desktop workspace watcher failed", error);
+            lifecycle.complete_failure(&backend_error);
+            let _ = terminal_channel.send_frame(serde_json::json!({
+                "type": "error",
+                "error": backend_error.contract_error(lifecycle.request_id()),
+            }));
         }
     }
     if let Ok(mut registrations) = registry.lock() {
@@ -1528,4 +1577,128 @@ pub async fn set_worktree_root(
     }
     .instrument(request_span)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FrameSendError, FrameSink, forward_frame};
+    use ora_backend::{
+        BackendError, ErrorClassification, RequestLifecycle, UuidRequestIdGenerator,
+    };
+    use ora_contracts::{EmptyErrorParams, PublicError};
+    use ora_logging::with_recorded_trace_logging;
+    use pretty_assertions::assert_eq;
+    use serde_json::Value;
+    use std::ops::ControlFlow;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::layer::{Context, Layer};
+
+    /// A sink whose channel is already closed, simulating a disconnected frontend.
+    #[derive(Clone)]
+    struct ClosedSink;
+
+    impl FrameSink for ClosedSink {
+        fn send_frame(&self, _frame: Value) -> Result<(), FrameSendError> {
+            Err(FrameSendError)
+        }
+    }
+
+    /// Verifies a data frame that fails to send records a `cancelled` completion.
+    #[test]
+    fn send_failure_on_data_frame_emits_cancelled() {
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start("test_stream", &UuidRequestIdGenerator);
+            let flow = forward_frame::<Value, _>(
+                Some(Ok(serde_json::json!({ "n": 1 }))),
+                &ClosedSink,
+                &lifecycle,
+            );
+            assert_eq!(flow, ControlFlow::Break(()));
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["cancelled"]);
+    }
+
+    /// Verifies a terminal event claims completion first, so a failed send never double-logs.
+    #[test]
+    fn terminal_frame_with_send_failure_does_not_double_log() {
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start("test_stream", &UuidRequestIdGenerator);
+            let flow = forward_frame::<Value, _>(None, &ClosedSink, &lifecycle);
+            assert_eq!(flow, ControlFlow::Break(()));
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["success"]);
+    }
+
+    /// Verifies a typed error terminal frame records a `failure` and no `cancelled`.
+    #[test]
+    fn error_frame_with_send_failure_does_not_double_log() {
+        let recorder = OutcomeRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start("test_stream", &UuidRequestIdGenerator);
+            let error = BackendError::new(
+                ErrorClassification::Internal,
+                PublicError::InternalError(EmptyErrorParams {}),
+                "test failure",
+            );
+            let flow = forward_frame::<Value, _>(Some(Err(error)), &ClosedSink, &lifecycle);
+            assert_eq!(flow, ControlFlow::Break(()));
+        });
+
+        assert_eq!(recorder.outcomes(), vec!["failure"]);
+    }
+
+    /// Records the `outcome` field of every completion event to assert disconnect semantics.
+    #[derive(Clone, Debug, Default)]
+    struct OutcomeRecorder {
+        outcomes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl OutcomeRecorder {
+        fn layer(&self) -> OutcomeRecordingLayer {
+            OutcomeRecordingLayer {
+                outcomes: self.outcomes.clone(),
+            }
+        }
+
+        fn outcomes(&self) -> Vec<String> {
+            self.outcomes.lock().unwrap().clone()
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct OutcomeRecordingLayer {
+        outcomes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl<S> Layer<S> for OutcomeRecordingLayer
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
+            let mut visitor = OutcomeVisitor::default();
+            event.record(&mut visitor);
+            if let Some(outcome) = visitor.outcome {
+                self.outcomes.lock().unwrap().push(outcome);
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct OutcomeVisitor {
+        outcome: Option<String>,
+    }
+
+    impl tracing::field::Visit for OutcomeVisitor {
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "outcome" {
+                self.outcome = Some(value.to_string());
+            }
+        }
+
+        fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
+    }
 }
