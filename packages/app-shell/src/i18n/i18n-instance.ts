@@ -582,7 +582,6 @@ export const translationResources = {
     "settings.workflow.runAgain": "再次运行",
     "settings.nav.permissions": "权限与执行",
     "settings.nav.privacy": "数据与隐私",
-    "settings.nav.advanced": "高级",
     "settings.nav.developer": "开发者选项",
     "settings.appearance.title": "外观",
     "settings.appearance.description":
@@ -960,19 +959,17 @@ export const translationResources = {
     "settings.privacy.diagnostics": "共享诊断数据",
     "settings.privacy.diagnosticsDescription":
       "发送匿名性能和错误信息，帮助改进 Ora。",
-    "settings.advanced.title": "高级选项",
-    "settings.advanced.description": "配置面向高级用户的功能和实验性入口。",
-    "settings.advanced.developerMode": "开发者模式",
-    "settings.advanced.developerModeDescription":
-      "显示用于诊断和开发的设置。此选项只控制界面可见性，不是安全权限。",
-    "settings.advanced.developerModeLoading": "正在读取开发者模式…",
-    "settings.advanced.developerModeSaving": "正在保存开发者模式…",
-    "settings.advanced.developerModeLoadError": "无法读取开发者模式，请重试。",
-    "settings.advanced.developerModeUpdateError":
+    "settings.developer.developerMode": "开发者模式",
+    "settings.developer.developerModeDescription":
+      "开启后，在此页面显示日志级别等用于诊断和开发的设置。此选项只控制界面可见性，不是安全权限。",
+    "settings.developer.developerModeLoading": "正在读取开发者模式…",
+    "settings.developer.developerModeSaving": "正在保存开发者模式…",
+    "settings.developer.developerModeLoadError": "无法读取开发者模式，请重试。",
+    "settings.developer.developerModeUpdateError":
       "开发者模式更新失败，已保留上次生效的设置。",
     "settings.developer.title": "开发者选项",
     "settings.developer.description":
-      "调整当前 Ora 进程的诊断行为。这些选项不会改变访问权限。",
+      "开启开发者模式后，可在此页面调整当前 Ora 进程的诊断行为。此模式不会改变访问权限。",
     "settings.developer.logLevel": "日志级别",
     "settings.developer.logLevelDescription":
       "立即调整当前 Ora 进程记录的日志详细程度，并保存为下次启动的偏好。",
@@ -2066,7 +2063,6 @@ export const translationResources = {
     "settings.workflow.runAgain": "Run again",
     "settings.nav.permissions": "Permissions",
     "settings.nav.privacy": "Data & privacy",
-    "settings.nav.advanced": "Advanced",
     "settings.nav.developer": "Developer options",
     "settings.appearance.title": "Appearance",
     "settings.appearance.description":
@@ -2505,21 +2501,18 @@ export const translationResources = {
     "settings.privacy.diagnostics": "Share diagnostics",
     "settings.privacy.diagnosticsDescription":
       "Send anonymous performance and error data to help improve Ora.",
-    "settings.advanced.title": "Advanced",
-    "settings.advanced.description":
-      "Configure features and experimental entry points intended for advanced users.",
-    "settings.advanced.developerMode": "Developer mode",
-    "settings.advanced.developerModeDescription":
-      "Show settings intended for diagnostics and development. This controls UI visibility, not security permissions.",
-    "settings.advanced.developerModeLoading": "Loading developer mode…",
-    "settings.advanced.developerModeSaving": "Saving developer mode…",
-    "settings.advanced.developerModeLoadError":
+    "settings.developer.developerMode": "Developer mode",
+    "settings.developer.developerModeDescription":
+      "When enabled, this page shows log-level and other diagnostic or development settings. This controls UI visibility, not security permissions.",
+    "settings.developer.developerModeLoading": "Loading developer mode…",
+    "settings.developer.developerModeSaving": "Saving developer mode…",
+    "settings.developer.developerModeLoadError":
       "Developer mode could not be loaded. Try again.",
-    "settings.advanced.developerModeUpdateError":
+    "settings.developer.developerModeUpdateError":
       "The developer-mode update failed. The last effective setting has been retained.",
     "settings.developer.title": "Developer options",
     "settings.developer.description":
-      "Adjust diagnostic behavior for the current Ora process. These options do not change access permissions.",
+      "Enable developer mode to adjust diagnostic behavior for the current Ora process on this page. This mode does not change access permissions.",
     "settings.developer.logLevel": "Log level",
     "settings.developer.logLevelDescription":
       "Change how much the current Ora process logs immediately and save the preference for its next start.",

@@ -39,7 +39,6 @@ import {
   IconPuzzle,
   IconRobot,
   IconRoute,
-  IconSettings,
   IconShieldCheck,
   IconSparkles,
   IconSun,
@@ -75,7 +74,6 @@ type SettingsCategory =
   | "workflow"
   | "permissions"
   | "privacy"
-  | "advanced"
   | "developer";
 
 /** Presents shared Ora preferences in a dense IDE-style settings surface. */
@@ -90,10 +88,6 @@ export function SettingsDialog() {
   const [category, setCategory] = useState<SettingsCategory>("appearance");
   const developerMode = useDeveloperMode();
   const developerModeEnabled = developerMode.state?.enabled === true;
-  // A hidden category cannot remain active. Deriving the fallback also unmounts its
-  // controls in the same render that receives the authoritative disabled value.
-  const activeCategory =
-    category === "developer" && !developerModeEnabled ? "advanced" : category;
 
   const categories: Array<{
     id: SettingsCategory;
@@ -115,16 +109,11 @@ export function SettingsDialog() {
       label: t("settings.nav.permissions"),
     },
     { id: "privacy", icon: IconDatabase, label: t("settings.nav.privacy") },
-    { id: "advanced", icon: IconSettings, label: t("settings.nav.advanced") },
-    ...(developerModeEnabled
-      ? [
-          {
-            id: "developer" as const,
-            icon: IconBug,
-            label: t("settings.nav.developer"),
-          },
-        ]
-      : []),
+    {
+      id: "developer",
+      icon: IconBug,
+      label: t("settings.nav.developer"),
+    },
   ];
 
   return (
@@ -133,7 +122,7 @@ export function SettingsDialog() {
         showCloseButton
         className={cn(
           "max-w-none gap-0 overflow-hidden p-0 transition-[width,height] duration-200 sm:max-w-none",
-          activeCategory === "workflow"
+          category === "workflow"
             ? // Keep clear of the frameless titlebar controls so the app close
               // button stays reachable beside this near-fullscreen editor.
               "h-[calc(100dvh-6rem)] w-[calc(100vw-3rem)]"
@@ -147,7 +136,7 @@ export function SettingsDialog() {
         <div
           className={cn(
             "grid min-h-0 grid-rows-[auto_minmax(0,1fr)] sm:grid-rows-1",
-            activeCategory === "workflow"
+            category === "workflow"
               ? "sm:grid-cols-[144px_minmax(0,1fr)]"
               : "sm:grid-cols-[210px_minmax(0,1fr)]",
           )}
@@ -155,13 +144,13 @@ export function SettingsDialog() {
           <aside
             className={cn(
               "border-b border-border bg-muted/35 p-3 sm:border-b-0 sm:border-r",
-              activeCategory === "workflow" && "sm:px-2 sm:py-3",
+              category === "workflow" && "sm:px-2 sm:py-3",
             )}
           >
             <div
               className={cn(
                 "hidden h-11 items-center gap-2 px-2 sm:flex",
-                activeCategory === "workflow" && "px-1.5",
+                category === "workflow" && "px-1.5",
               )}
             >
               <div className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
@@ -184,10 +173,10 @@ export function SettingsDialog() {
                     onClick={() => setCategory(item.id)}
                     className={cn(
                       "flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                      activeCategory === "workflow"
+                      category === "workflow"
                         ? "sm:w-full sm:px-2"
                         : "sm:w-full",
-                      activeCategory === item.id
+                      category === item.id
                         ? "bg-background text-foreground shadow-sm ring-1 ring-border"
                         : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                     )}
@@ -201,7 +190,7 @@ export function SettingsDialog() {
             <p
               className={cn(
                 "mt-auto hidden px-2 pb-1 pt-6 text-[10px] leading-4 text-muted-foreground sm:block",
-                activeCategory === "workflow" && "sm:hidden",
+                category === "workflow" && "sm:hidden",
               )}
             >
               {t("settings.productName")}
@@ -210,40 +199,40 @@ export function SettingsDialog() {
             </p>
           </aside>
 
-          {activeCategory === "workflow" ? (
+          {category === "workflow" ? (
             <div className="min-h-0 min-w-0 overflow-hidden">
               <WorkflowSettings />
             </div>
           ) : (
             <ScrollArea className="min-h-0">
               <div className="mx-auto w-full max-w-3xl p-5 pb-12 sm:p-8 sm:pb-12">
-                {activeCategory === "appearance" && (
+                {category === "appearance" && (
                   <AppearanceSettings
                     settings={settings}
                     onUpdate={updateSettings}
                   />
                 )}
-                {activeCategory === "roles" && <RolesSettings />}
-                {activeCategory === "skills" && <SkillsSettings />}
-                {activeCategory === "plugins" && <PluginsSettings />}
-                {activeCategory === "permissions" && (
+                {category === "roles" && <RolesSettings />}
+                {category === "skills" && <SkillsSettings />}
+                {category === "plugins" && <PluginsSettings />}
+                {category === "permissions" && (
                   <PermissionSettings
                     settings={settings}
                     onUpdate={updateSettings}
                   />
                 )}
-                {activeCategory === "privacy" && (
+                {category === "privacy" && (
                   <PrivacySettings
                     settings={settings}
                     onUpdate={updateSettings}
                     onClearHistory={clearConversations}
                   />
                 )}
-                {activeCategory === "advanced" && (
-                  <AdvancedSettings developerMode={developerMode} />
-                )}
-                {activeCategory === "developer" && developerModeEnabled && (
-                  <DeveloperSettings />
+                {category === "developer" && (
+                  <DeveloperSettings
+                    developerMode={developerMode}
+                    developerModeEnabled={developerModeEnabled}
+                  />
                 )}
               </div>
             </ScrollArea>
@@ -691,26 +680,14 @@ function PrivacySettings({
   );
 }
 
-/** Keeps advanced feature discovery separate from privacy and diagnostic data controls. */
-function AdvancedSettings({
+/** Groups settings intended for diagnosis and development without treating them as authorization. */
+function DeveloperSettings({
   developerMode,
+  developerModeEnabled,
 }: {
   developerMode: ReturnType<typeof useDeveloperMode>;
+  developerModeEnabled: boolean;
 }) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-7">
-      <SettingsHeading
-        title={t("settings.advanced.title")}
-        description={t("settings.advanced.description")}
-      />
-      <DeveloperModeSettings controller={developerMode} />
-    </div>
-  );
-}
-
-/** Groups settings intended for diagnosis and development without treating them as authorization. */
-function DeveloperSettings() {
   const { t } = useTranslation();
   return (
     <div className="space-y-7">
@@ -718,7 +695,8 @@ function DeveloperSettings() {
         title={t("settings.developer.title")}
         description={t("settings.developer.description")}
       />
-      <RuntimeLogLevelSettings />
+      <DeveloperModeSettings controller={developerMode} />
+      {developerModeEnabled && <RuntimeLogLevelSettings />}
     </div>
   );
 }

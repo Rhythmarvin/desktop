@@ -2,7 +2,7 @@ import { Button, Switch } from "@ora/ui";
 import { useTranslation } from "react-i18next";
 import type { DeveloperModeController } from "../../state/hooks/use-developer-mode";
 
-/** Presents the switch exposed by the always-reachable Advanced settings category. */
+/** Presents the developer-mode switch inside the always-reachable Developer options page. */
 export function DeveloperModeSettings({
   controller,
 }: {
@@ -24,14 +24,14 @@ export function DeveloperModeSettings({
       <div className="flex items-center gap-4">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
-            {t("settings.advanced.developerMode")}
+            {t("settings.developer.developerMode")}
           </p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {t("settings.advanced.developerModeDescription")}
+            {t("settings.developer.developerModeDescription")}
           </p>
         </div>
         <Switch
-          aria-label={t("settings.advanced.developerMode")}
+          aria-label={t("settings.developer.developerMode")}
           checked={state?.enabled ?? false}
           disabled={isLoading || loadError !== null || isSaving}
           onCheckedChange={submitEnabled}
@@ -39,18 +39,18 @@ export function DeveloperModeSettings({
       </div>
       {isLoading && (
         <p role="status" className="mt-2 text-xs text-muted-foreground">
-          {t("settings.advanced.developerModeLoading")}
+          {t("settings.developer.developerModeLoading")}
         </p>
       )}
       {isSaving && (
         <p role="status" className="mt-2 text-xs text-muted-foreground">
-          {t("settings.advanced.developerModeSaving")}
+          {t("settings.developer.developerModeSaving")}
         </p>
       )}
       {loadError !== null && (
         <div className="mt-2 flex items-center gap-2">
           <p role="alert" className="text-xs text-destructive">
-            {t("settings.advanced.developerModeLoadError")}
+            {t("settings.developer.developerModeLoadError")}
           </p>
           <Button size="sm" variant="outline" onClick={() => void retry()}>
             {t("common.retry")}
@@ -59,7 +59,7 @@ export function DeveloperModeSettings({
       )}
       {updateError !== null && (
         <p role="alert" className="mt-2 text-xs text-destructive">
-          {t("settings.advanced.developerModeUpdateError")}
+          {t("settings.developer.developerModeUpdateError")}
         </p>
       )}
     </section>

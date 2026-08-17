@@ -1,12 +1,11 @@
 import { createChatStore } from "@ora/chat";
 import type { ContractsClient } from "@ora/contracts";
 import { PlatformProvider } from "@ora/platform";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { appI18n } from "../../i18n/i18n-instance";
-import { queryKeys } from "../../state/hooks/query-keys";
 import { useUiStore } from "../../state/stores/ui-store";
 import {
   createHookWrapper,
@@ -25,23 +24,19 @@ describe("SettingsDialog developer options", () => {
     useUiStore.setState({ settingsOpen: true });
   });
 
-  it("keeps Advanced and its switch reachable while developer-only navigation stays hidden", async () => {
+  it("keeps Developer options reachable and reveals log level in place after enabling developer mode", async () => {
     const client = createMockClient(createMockClientState());
     renderDialog(client);
 
     expect(
-      screen.queryByRole("button", { name: "Developer options" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Advanced" }),
+      screen.getByRole("button", { name: "Developer options" }),
     ).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Data & privacy" }),
-    );
     expect(
-      screen.queryByRole("switch", { name: "Developer mode" }),
+      screen.queryByRole("button", { name: "Advanced" }),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Developer options" }),
+    );
     const developerModeSwitch = await screen.findByRole("switch", {
       name: "Developer mode",
     });
@@ -51,11 +46,11 @@ describe("SettingsDialog developer options", () => {
     ).not.toBeInTheDocument();
     await userEvent.click(developerModeSwitch);
     expect(
-      await screen.findByRole("button", { name: "Developer options" }),
+      await screen.findByRole("combobox", { name: "Log level" }),
     ).toBeInTheDocument();
   });
 
-  it("keeps Advanced reachable and the switch disabled when the initial read fails", async () => {
+  it("keeps Developer options reachable and hides log level when the initial read fails", async () => {
     const client = createMockClient(createMockClientState());
     client.developerMode.get = vi
       .fn()
@@ -63,12 +58,14 @@ describe("SettingsDialog developer options", () => {
     renderDialog(client);
 
     expect(
-      screen.getByRole("button", { name: "Advanced" }),
+      screen.getByRole("button", { name: "Developer options" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Developer options" }),
+      screen.queryByRole("button", { name: "Advanced" }),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Developer options" }),
+    );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "could not be loaded",
@@ -76,9 +73,12 @@ describe("SettingsDialog developer options", () => {
     expect(
       screen.getByRole("switch", { name: "Developer mode" }),
     ).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.queryByRole("combobox", { name: "Log level" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows the developer category and authoritative effective log level when enabled", async () => {
+  it("shows the switch and authoritative effective log level together when enabled", async () => {
     const state = createMockClientState();
     state.developerMode = { enabled: true };
     state.runtimeLogLevel = {
@@ -93,15 +93,18 @@ describe("SettingsDialog developer options", () => {
     });
     await userEvent.click(developerNavigation);
 
+    expect(
+      await screen.findByRole("switch", { name: "Developer mode" }),
+    ).toBeChecked();
     const selector = await screen.findByRole("combobox", { name: "Log level" });
     expect(selector).toHaveTextContent("Trace (most detailed)");
     expect(screen.queryByText(/ORA_LOG_LEVEL/)).not.toBeInTheDocument();
   });
 
-  it("redirects to Advanced and unmounts developer content when disabled", async () => {
+  it("stays on Developer options and hides log level after developer mode is disabled", async () => {
     const state = createMockClientState();
     state.developerMode = { enabled: true };
-    const { queryClient } = renderDialog(createMockClient(state));
+    renderDialog(createMockClient(state));
 
     await userEvent.click(
       await screen.findByRole("button", { name: "Developer options" }),
@@ -110,23 +113,22 @@ describe("SettingsDialog developer options", () => {
       await screen.findByRole("combobox", { name: "Log level" }),
     ).toBeInTheDocument();
 
-    act(() => {
-      queryClient.setQueryData(queryKeys.developerMode, { enabled: false });
-    });
-
+    await userEvent.click(
+      screen.getByRole("switch", { name: "Developer mode" }),
+    );
     await waitFor(() => {
       expect(
-        screen.queryByRole("button", { name: "Developer options" }),
+        screen.queryByRole("combobox", { name: "Log level" }),
       ).not.toBeInTheDocument();
     });
     expect(
-      screen.queryByRole("combobox", { name: "Log level" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Advanced" }),
+      screen.getByRole("heading", { name: "Developer options" }),
     ).toBeInTheDocument();
     expect(
       await screen.findByRole("switch", { name: "Developer mode" }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("button", { name: "Developer options" }),
     ).toBeInTheDocument();
   });
 });

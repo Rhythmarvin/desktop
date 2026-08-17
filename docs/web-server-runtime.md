@@ -67,7 +67,7 @@ When unset, the server binds `0.0.0.0:32578`. An invalid host or port fails star
 
 Logging variables are documented in [Runtime Logging](runtime-logging.md).
 
-The Web runtime initializes logging provisionally from `ORA_LOG_LEVEL` or `info`, then opens and migrates Backend. It reads the typed `user_config.log_level` row and, when there is no environment override, reloads the process filter before readiness. Final precedence is `ORA_LOG_LEVEL`, the SQLite preference, then `info`; malformed persisted values and persistence failures are explicit runtime errors rather than silent resets. The same database stores `user_config.developer_mode`, which controls whether shared Settings shows Developer options but does not authorize backend operations.
+The Web runtime initializes logging provisionally from `ORA_LOG_LEVEL` or `info`, then opens and migrates Backend. It reads the typed `user_config.log_level` row and, when there is no environment override, reloads the process filter before readiness. Final precedence is `ORA_LOG_LEVEL`, the SQLite preference, then `info`; malformed persisted values and persistence failures are explicit runtime errors rather than silent resets. The same database stores `user_config.developer_mode`, which controls whether shared Settings reveals developer-only controls inside Developer options but does not authorize backend operations.
 
 ## Health endpoints
 
@@ -197,7 +197,7 @@ These operations read or update the server-authoritative process-wide filter. An
 - `GET /api/settings/developer-mode`
 - `PUT /api/settings/developer-mode` with `{ "enabled": true | false }`
 
-These operations read or atomically persist the shared SQLite-backed developer-mode preference. Developer mode controls whether the shared Settings UI reveals Developer options; it is not an authorization boundary. A malformed persisted value is reported when this route reads it rather than during Web startup.
+These operations read or atomically persist the shared SQLite-backed developer-mode preference. Developer mode controls whether the shared Settings UI reveals developer-only controls on the always-reachable Developer options page; it is not an authorization boundary. A malformed persisted value is reported when this route reads it rather than during Web startup.
 
 Each route translates transport input into the matching `ora-contracts` request DTO, delegates to the shared backend, and serializes the returned contract response without adding adapter-local response shapes.
 
