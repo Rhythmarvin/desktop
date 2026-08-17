@@ -22,6 +22,7 @@ ora-fs = { workspace = true }
 ora-history = { workspace = true }
 ora-logging = { workspace = true }
 ora-process = { workspace = true }
+ora-runtime-settings = { workspace = true }
 ora-scheduler = { workspace = true }
 ora-skill-package = { workspace = true }
 ora-utils = { workspace = true }

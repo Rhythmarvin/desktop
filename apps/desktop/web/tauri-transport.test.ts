@@ -169,6 +169,78 @@ describe("createTauriTransport", () => {
     });
   });
 
+  it("maps runtime log-level reads and updates to Desktop commands", async () => {
+    const response = {
+      configuredLevel: "debug",
+      effectiveLevel: "debug",
+      startupOverride: null,
+    };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "getRuntimeLogLevel",
+        request: {},
+        method: "GET",
+        path: "/api/runtime/log-level",
+        body: undefined,
+        headers: {},
+      }),
+    ).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "setRuntimeLogLevel",
+        request: { level: "debug" },
+        method: "PUT",
+        path: "/api/runtime/log-level",
+        body: { level: "debug" },
+        headers: { "content-type": "application/json" },
+      }),
+    ).resolves.toEqual(response);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "get_runtime_log_level", {
+      request: {},
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "set_runtime_log_level", {
+      request: { level: "debug" },
+    });
+  });
+
+  it("maps developer-mode reads and updates to Desktop commands", async () => {
+    const response = { enabled: true };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "getDeveloperMode",
+        request: {},
+        method: "GET",
+        path: "/api/settings/developer-mode",
+        body: undefined,
+        headers: {},
+      }),
+    ).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "setDeveloperMode",
+        request: { enabled: true },
+        method: "PUT",
+        path: "/api/settings/developer-mode",
+        body: { enabled: true },
+        headers: { "content-type": "application/json" },
+      }),
+    ).resolves.toEqual(response);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "get_developer_mode", {
+      request: {},
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "set_developer_mode", {
+      request: { enabled: true },
+    });
+  });
+
   it("rejects explicitly unsupported operations before invoking Rust", async () => {
     const invoke = vi.fn();
     const transport = createTauriTransport(invoke, () => ({

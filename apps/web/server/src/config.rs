@@ -23,7 +23,6 @@ const USER_PROFILE_ENV_VAR: &str = "USERPROFILE";
 
 const DEFAULT_HOST: &str = "0.0.0.0";
 const DEFAULT_PORT: u16 = 32578;
-const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_LOG_MODE: &str = "stdout";
 const DEFAULT_LOG_MAX_DAYS: &str = "3";
 pub(crate) const DEFAULT_TIMEZONE: &str = "Asia/Shanghai";
@@ -37,6 +36,7 @@ pub struct RuntimeConfig {
     worktree: WorktreeConfig,
     server: ServerConfig,
     logging: LoggingConfig,
+    startup_log_level_override: Option<LogLevel>,
     timezone_source: TimezoneSource,
     timezone_warning: Option<TimezoneWarning>,
 }
@@ -82,6 +82,11 @@ impl RuntimeConfig {
         &self.logging
     }
 
+    /// Returns the explicit startup environment level without treating it as persisted state.
+    pub fn startup_log_level_override(&self) -> Option<LogLevel> {
+        self.startup_log_level_override
+    }
+
     /// Returns where the Web process obtained its selected logging timezone.
     pub(crate) fn timezone_source(&self) -> TimezoneSource {
         self.timezone_source
@@ -100,6 +105,7 @@ impl RuntimeConfig {
         let file_system = FileSystemConfig::from_reader(&mut read_variable)?;
         let worktree = WorktreeConfig::from_reader(&mut read_variable, &file_system)?;
         let resolved_timezone = crate::timezone::resolve(&mut read_variable);
+        let startup_log_level_override = read_log_level_override(&mut read_variable)?;
 
         Ok(Self {
             binaries: RuntimeBinaryPaths::from_reader(&mut read_variable)?,
@@ -108,7 +114,12 @@ impl RuntimeConfig {
             file_system,
             database,
             server: ServerConfig::from_reader(&mut read_variable)?,
-            logging: read_logging_config(&mut read_variable, resolved_timezone.timezone)?,
+            logging: read_logging_config_with_level(
+                &mut read_variable,
+                resolved_timezone.timezone,
+                startup_log_level_override.unwrap_or(LogLevel::Info),
+            )?,
+            startup_log_level_override,
             timezone_source: resolved_timezone.source,
             timezone_warning: resolved_timezone.warning,
         })
@@ -354,27 +365,12 @@ impl ServerConfig {
     }
 }
 
-/// Loads the logging configuration from the environment contract defined for the web server bootstrap.
-fn read_logging_config(
+/// Builds logging sinks around a startup level already resolved by the composition root.
+fn read_logging_config_with_level(
     mut read_variable: impl FnMut(&str) -> Option<String>,
     timezone: chrono_tz::Tz,
+    level: LogLevel,
 ) -> Result<LoggingConfig, WebBootstrapError> {
-    let level = match read_variable(LOG_LEVEL_ENV_VAR)
-        .unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_string())
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "trace" => LogLevel::Trace,
-        "debug" => LogLevel::Debug,
-        "info" => LogLevel::Info,
-        "warn" => LogLevel::Warn,
-        "error" => LogLevel::Error,
-        value => {
-            return Err(WebBootstrapError::InvalidLogLevel {
-                value: value.to_string(),
-            });
-        }
-    };
     let data_dir = read_data_dir_root(&mut read_variable)?;
     let file_config = FileLoggingConfig::new(
         data_dir.join("logs").join("ora.log"),
@@ -399,6 +395,21 @@ fn read_logging_config(
     Ok(LoggingConfig::new(level, output, timezone))
 }
 
+/// Parses an optional environment override while preserving absence as distinct startup state.
+fn read_log_level_override(
+    mut read_variable: impl FnMut(&str) -> Option<String>,
+) -> Result<Option<LogLevel>, WebBootstrapError> {
+    let Some(raw_level) = read_variable(LOG_LEVEL_ENV_VAR) else {
+        return Ok(None);
+    };
+    raw_level
+        .parse::<LogLevel>()
+        .map(Some)
+        .map_err(|error| WebBootstrapError::InvalidLogLevel {
+            value: error.value().to_string(),
+        })
+}
+
 /// Parses the configured retention window and rejects zero-day values explicitly.
 fn read_log_max_days(
     mut read_variable: impl FnMut(&str) -> Option<String>,
@@ -420,12 +431,13 @@ fn read_log_max_days(
 mod tests {
     use super::{
         DATA_DIR_ENV_VAR, DEFAULT_HOST, DEFAULT_PORT, DENO_PATH_ENV_VAR, DatabaseConfig,
-        FileSystemConfig, HOME_ENV_VAR, HOST_ENV_VAR, LOG_MODE_ENV_VAR, PORT_ENV_VAR,
-        RIPGREP_PATH_ENV_VAR, RuntimeBinaryPaths, RuntimeConfig, ServerConfig,
+        FileSystemConfig, HOME_ENV_VAR, HOST_ENV_VAR, LOG_LEVEL_ENV_VAR, LOG_MODE_ENV_VAR,
+        PORT_ENV_VAR, RIPGREP_PATH_ENV_VAR, RuntimeBinaryPaths, RuntimeConfig, ServerConfig,
         WORKTREE_DIR_ENV_VAR, WorktreeConfig,
     };
     use crate::error::WebBootstrapError;
     use crate::timezone::{TimezoneSource, TimezoneWarning};
+    use ora_logging::LogLevel;
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
@@ -577,13 +589,14 @@ mod tests {
     fn loads_logging_configuration_from_data_dir() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("state");
-        let config = super::read_logging_config(
+        let config = super::read_logging_config_with_level(
             |key| match key {
                 DATA_DIR_ENV_VAR => Some(data_dir.to_string_lossy().to_string()),
                 LOG_MODE_ENV_VAR => Some("file".to_string()),
                 _ => None,
             },
             chrono_tz::Asia::Shanghai,
+            LogLevel::Info,
         )
         .unwrap_or_else(|error| panic!("expected logging configuration to load: {error}"));
 
@@ -597,6 +610,50 @@ mod tests {
                 assert_eq!(file_config.path, expected_path);
             }
         }
+    }
+
+    /// Verifies Web delegates normalized log-level parsing to the shared logging vocabulary.
+    #[test]
+    fn loads_supported_log_levels_through_the_shared_parser() {
+        for (raw, expected) in [
+            ("trace", LogLevel::Trace),
+            (" DEBUG ", LogLevel::Debug),
+            ("Info", LogLevel::Info),
+            ("wArN", LogLevel::Warn),
+            ("ERROR", LogLevel::Error),
+        ] {
+            let level = super::read_log_level_override(|key| match key {
+                LOG_LEVEL_ENV_VAR => Some(raw.to_string()),
+                _ => None,
+            })
+            .unwrap_or_else(|error| panic!("expected supported level to load: {error}"));
+
+            assert_eq!(level, Some(expected));
+        }
+    }
+
+    /// Verifies Web retains its info default when no explicit level is configured.
+    #[test]
+    fn defaults_logging_level_to_info() {
+        let level = super::read_log_level_override(|_| None)
+            .unwrap_or_else(|error| panic!("expected default level to load: {error}"));
+
+        assert_eq!(level.unwrap_or(LogLevel::Info), LogLevel::Info);
+    }
+
+    /// Verifies Web preserves its typed bootstrap error while using the shared parser.
+    #[test]
+    fn rejects_unsupported_logging_level() {
+        let error = super::read_log_level_override(|key| match key {
+            LOG_LEVEL_ENV_VAR => Some("verbose".to_string()),
+            _ => None,
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            WebBootstrapError::InvalidLogLevel { value } if value == "verbose"
+        ));
     }
 
     /// Verifies the server configuration defaults to the documented host and port.

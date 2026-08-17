@@ -42,15 +42,16 @@ The configured root is only a creation target. Existing worktree locations are r
 The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns all default runtime state:
 
 - SQLite: `app_data_dir/ora.sqlite3`
-- Configuration: `app_data_dir/config.json`
+- Desktop-only configuration: `app_data_dir/config.json`
+- Shared user preferences, including developer mode and log level: `app_data_dir/ora.sqlite3`, table `user_config`
 - Logs: `app_data_dir/logs/ora.log`
 - Default new-worktree root: `~/.ora/worktrees`
 - Session history: `app_data_dir/sessions`
  - Skill packages root: `app_data_dir/atoms/skills`
 
-On first launch, Desktop creates the app data directory, `~/.ora/worktrees`, and a versioned configuration file using an atomic sibling-temporary-file replacement. `config.json` currently holds version `1` and the `worktreeRoot`. Existing malformed, unknown-version, or otherwise invalid configuration is fatal; Desktop does not silently reset it.
+On first launch, Desktop creates the app data directory, `~/.ora/worktrees`, and a versioned configuration file using an atomic sibling-temporary-file replacement. `config.json` currently holds version `1`, `worktreeRoot`, `dashboardHost`, and `dashboardPort`; it does not store the log level. Existing malformed, unknown-version, or otherwise invalid configuration is fatal; Desktop does not silently reset it.
 
-`ORA_DATA_DIR` controls Desktop's runtime data root. `task run:desktop` points it at the repo `.data` directory so Desktop shares the web server's database. Relative project roots stored in that database are resolved against the data directory's parent (the repo root), not the Tauri process cwd — `tauri dev` starts in `apps/desktop/src-tauri`, which would otherwise miss paths such as `.data/rustun`. Without `ORA_DATA_DIR`, runtime data paths come from Tauri's `app_data_dir`; the first-run worktree root remains `~/.ora/worktrees`, and folder-picker selections are already absolute.
+`ORA_DATA_DIR` controls Desktop's runtime data root. `task run:desktop` points it at the repo `.data` directory so Desktop shares the web server's database. Relative project roots stored in that database are resolved against the data directory's parent (the repo root), not the Tauri process cwd — `tauri dev` starts in `apps/desktop/src-tauri`, which would otherwise miss paths such as `.data/rustun`. Without `ORA_DATA_DIR`, runtime data paths come from Tauri's `app_data_dir`; the first-run worktree root remains `~/.ora/worktrees`, and folder-picker selections are already absolute. `ORA_LOG_LEVEL` configures logging behavior only and does not change any persistent path.
 
 The worktree root is non-sensitive configuration. Users can change it from Settings → Data & privacy on Desktop. A selected value must be an absolute path to an existing directory. The new value affects task creations that start after the update; in-flight operations retain their original snapshot, and existing worktrees are not moved.
 
@@ -58,7 +59,13 @@ The configured root is only a creation target. Existing worktree locations are r
 
 ## Logging
 
-Desktop initializes `ora-logging` before opening the backend and registers the Gitlancer logger bridge. Logs rotate daily and retain three files. Debug builds write to stdout and the file; release builds write to the file only. The logging guard remains managed for the application lifetime.
+Desktop first initializes `ora-logging` provisionally from `ORA_LOG_LEVEL` or `info`, preserving migration and bootstrap diagnostics. It then opens and migrates Backend, reads `user_config.log_level`, and reloads the filter before constructing managed state when no environment override exists. The final precedence is `ORA_LOG_LEVEL`, the SQLite preference, then `info`. Environment values are trimmed and ASCII-case-insensitive; an unsupported environment or malformed persisted value fails startup. Logs rotate daily and retain three files. Debug builds write to stdout and the file; release builds write to the file only. The logging guard remains managed for the application lifetime.
+
+Settings always exposes an Advanced category containing the shared developer-mode switch. When enabled, Settings → Developer options appears and contains the log-level selector. The selector calls `get_runtime_log_level` and `set_runtime_log_level` over Tauri and displays the current effective level without exposing environment-variable details. Both commands enter their request span before reading or updating manager state. A successful set reloads the process-wide filter immediately and atomically upserts `user_config.log_level`; its internal transaction finishes updating the cache or performing rollback even if the invoking request stops waiting. If persistence fails, Desktop rolls the effective filter back and returns the primary failure when possible; a rollback failure is recorded separately. Developer mode controls UI discoverability only and is not an authorization boundary.
+
+Only future events are affected. The Desktop build's stdout/file mode, `app_data_dir/logs/ora.log` path, JSON shape, daily rotation, three-day retention, operating-system timezone, and writer workers remain unchanged.
+
+`task run:desktop` maps its optional `LOG_LEVEL` Task variable to `ORA_LOG_LEVEL` and defaults it to `debug` for development. That environment exists only for the Task process and its children: after the Task exits, a later launch does not inherit the previous explicit level unless the parent shell or operating system independently defines it.
 
 Each unary command or stream emits at most one request-completion event using the same request id as
 its public failure payload or error frame. Cancellation is completed at `DEBUG` and is not projected

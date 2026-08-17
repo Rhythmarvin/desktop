@@ -7,6 +7,7 @@ mod skill;
 mod skill_import;
 mod task;
 mod task_diff;
+mod user_config;
 mod workflow;
 mod workflow_run;
 mod worktree;
@@ -59,6 +60,7 @@ pub use task_diff::{
     TaskGitCommit, TaskGitPush, TaskGitWriter, TaskGitWriterError, UuidTaskDiffCommentIdGenerator,
     task_diff_id,
 };
+pub use user_config::{DeveloperMode, UserConfigRepository, UserConfigService};
 pub use workflow::{
     ActivateVersionResult, ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler,
     DeleteSnapshotResult, DeleteWorkflowHandler, DeleteWorkflowResult, GetDraftHandler,

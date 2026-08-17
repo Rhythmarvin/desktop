@@ -336,6 +336,64 @@ test("lists installed plugins with a bodyless GET request", async () => {
   assert.deepEqual(actual, response);
 });
 
+test("reads and updates the process-wide runtime log level", async () => {
+  const requests: ContractTransportRequest[] = [];
+  const response = {
+    configuredLevel: "debug" as const,
+    effectiveLevel: "debug" as const,
+    startupOverride: "trace" as const,
+  };
+  const client = createContractsClient(recordingTransport(requests, response));
+
+  assert.deepEqual(await client.runtimeLogLevel.get({}), response);
+  assert.deepEqual(await client.runtimeLogLevel.set({ level: "debug" }), response);
+  assert.deepEqual(requests, [
+    {
+      operationName: "getRuntimeLogLevel",
+      request: {},
+      method: "GET",
+      path: "/api/runtime/log-level",
+      body: undefined,
+      headers: {},
+    },
+    {
+      operationName: "setRuntimeLogLevel",
+      request: { level: "debug" },
+      method: "PUT",
+      path: "/api/runtime/log-level",
+      body: { level: "debug" },
+      headers: { "content-type": "application/json" },
+    },
+  ]);
+});
+
+test("reads and updates the shared developer-mode preference", async () => {
+  const requests: ContractTransportRequest[] = [];
+  const response = { enabled: true };
+  const client = createContractsClient(recordingTransport(requests, response));
+
+  assert.deepEqual(await client.developerMode.get({}), response);
+  assert.deepEqual(await client.developerMode.set({ enabled: true }), response);
+  assert.deepEqual(requests, [
+    {
+      operationName: "getDeveloperMode",
+      request: {},
+      method: "GET",
+      path: "/api/settings/developer-mode",
+      body: undefined,
+      headers: {},
+    },
+    {
+      operationName: "setDeveloperMode",
+      request: { enabled: true },
+      method: "PUT",
+      path: "/api/settings/developer-mode",
+      body: { enabled: true },
+      headers: { "content-type": "application/json" },
+    },
+  ]);
+});
+
 test("omits standalone worktree operations from generated contracts", () => {
   assert.equal("createWorktree" in endpoints, false);
   assert.equal("getWorktree" in endpoints, false);

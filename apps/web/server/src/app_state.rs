@@ -1,10 +1,14 @@
 use crate::config::RuntimeBinaryPaths;
 use crate::service::{FileSystemApi, WorkspaceFileApi};
-use ora_backend::Backend;
+use ora_backend::{Backend, BackendPreferredLogLevelStore};
 use ora_plugin_manager::PluginManager;
+use ora_runtime_settings::RuntimeLogLevelManager;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
+
+pub type WebRuntimeLogLevelManager =
+    RuntimeLogLevelManager<ora_logging::LogLevelControl, BackendPreferredLogLevelStore>;
 
 /// Holds the shared state that HTTP handlers need to serve requests.
 #[derive(Clone)]
@@ -14,6 +18,7 @@ pub struct AppState {
     workspace_file_api: Arc<WorkspaceFileApi>,
     plugin_manager: Arc<PluginManager>,
     binary_paths: RuntimeBinaryPaths,
+    runtime_log_level: WebRuntimeLogLevelManager,
     ready: Arc<AtomicBool>,
     shutdown: CancellationToken,
 }
@@ -26,6 +31,7 @@ impl AppState {
         workspace_file_api: Arc<WorkspaceFileApi>,
         plugin_manager: Arc<PluginManager>,
         binary_paths: RuntimeBinaryPaths,
+        runtime_log_level: WebRuntimeLogLevelManager,
     ) -> Self {
         Self {
             backend,
@@ -33,6 +39,7 @@ impl AppState {
             workspace_file_api,
             plugin_manager,
             binary_paths,
+            runtime_log_level,
             ready: Arc::new(AtomicBool::new(false)),
             shutdown: CancellationToken::new(),
         }
@@ -70,6 +77,11 @@ impl AppState {
     /// Returns the explicit executables shared by Rust-owned Web services.
     pub fn binary_paths(&self) -> &RuntimeBinaryPaths {
         &self.binary_paths
+    }
+
+    /// Returns the process-wide runtime log-level manager shared by every Web client.
+    pub fn runtime_log_level(&self) -> &WebRuntimeLogLevelManager {
+        &self.runtime_log_level
     }
 
     /// Marks the runtime as ready after bootstrap finishes successfully.

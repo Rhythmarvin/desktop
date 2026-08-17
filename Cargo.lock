@@ -1723,6 +1723,7 @@ dependencies = [
  "ora-history",
  "ora-logging",
  "ora-process",
+ "ora-runtime-settings",
  "ora-scheduler",
  "ora-skill-package",
  "ora-utils",
@@ -1820,6 +1821,7 @@ dependencies = [
  "gitlancer",
  "pretty_assertions",
  "regex",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.19",
@@ -1880,6 +1882,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ora-runtime-settings"
+version = "0.0.0"
+dependencies = [
+ "ora-logging",
+ "pretty_assertions",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ora-scheduler"
 version = "0.0.0"
 dependencies = [
@@ -1934,10 +1947,12 @@ dependencies = [
  "ora-fs",
  "ora-logging",
  "ora-plugin-manager",
+ "ora-runtime-settings",
  "ora-skill-package",
  "ora-utils",
  "pretty_assertions",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

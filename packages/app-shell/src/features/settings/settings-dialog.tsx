@@ -28,6 +28,7 @@ import {
 } from "@ora/ui";
 import {
   IconAdjustments,
+  IconBug,
   IconCheck,
   IconDatabase,
   IconDeviceDesktop,
@@ -38,6 +39,7 @@ import {
   IconPuzzle,
   IconRobot,
   IconRoute,
+  IconSettings,
   IconShieldCheck,
   IconSparkles,
   IconSun,
@@ -48,6 +50,9 @@ import { RolesSettings, SkillsSettings } from "./atoms-settings";
 import { PluginsSettings } from "./plugins-settings";
 import { SettingsHeading } from "./settings-heading";
 import { WorkflowSettings } from "./workflow-settings";
+import { RuntimeLogLevelSettings } from "./runtime-log-level-settings";
+import { DeveloperModeSettings } from "./developer-mode-settings";
+import { useDeveloperMode } from "../../state/hooks/use-developer-mode";
 import { useUiStore } from "../../state/stores/ui-store";
 import {
   useSettingsStore,
@@ -69,7 +74,9 @@ type SettingsCategory =
   | "plugins"
   | "workflow"
   | "permissions"
-  | "privacy";
+  | "privacy"
+  | "advanced"
+  | "developer";
 
 /** Presents shared Ora preferences in a dense IDE-style settings surface. */
 export function SettingsDialog() {
@@ -81,6 +88,12 @@ export function SettingsDialog() {
   const chatStore = useChatStore();
   const clearConversations = useStore(chatStore, (state) => state.clearAll);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
+  const developerMode = useDeveloperMode();
+  const developerModeEnabled = developerMode.state?.enabled === true;
+  // A hidden category cannot remain active. Deriving the fallback also unmounts its
+  // controls in the same render that receives the authoritative disabled value.
+  const activeCategory =
+    category === "developer" && !developerModeEnabled ? "advanced" : category;
 
   const categories: Array<{
     id: SettingsCategory;
@@ -102,6 +115,16 @@ export function SettingsDialog() {
       label: t("settings.nav.permissions"),
     },
     { id: "privacy", icon: IconDatabase, label: t("settings.nav.privacy") },
+    { id: "advanced", icon: IconSettings, label: t("settings.nav.advanced") },
+    ...(developerModeEnabled
+      ? [
+          {
+            id: "developer" as const,
+            icon: IconBug,
+            label: t("settings.nav.developer"),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -110,7 +133,7 @@ export function SettingsDialog() {
         showCloseButton
         className={cn(
           "max-w-none gap-0 overflow-hidden p-0 transition-[width,height] duration-200 sm:max-w-none",
-          category === "workflow"
+          activeCategory === "workflow"
             ? // Keep clear of the frameless titlebar controls so the app close
               // button stays reachable beside this near-fullscreen editor.
               "h-[calc(100dvh-6rem)] w-[calc(100vw-3rem)]"
@@ -124,7 +147,7 @@ export function SettingsDialog() {
         <div
           className={cn(
             "grid min-h-0 grid-rows-[auto_minmax(0,1fr)] sm:grid-rows-1",
-            category === "workflow"
+            activeCategory === "workflow"
               ? "sm:grid-cols-[144px_minmax(0,1fr)]"
               : "sm:grid-cols-[210px_minmax(0,1fr)]",
           )}
@@ -132,13 +155,13 @@ export function SettingsDialog() {
           <aside
             className={cn(
               "border-b border-border bg-muted/35 p-3 sm:border-b-0 sm:border-r",
-              category === "workflow" && "sm:px-2 sm:py-3",
+              activeCategory === "workflow" && "sm:px-2 sm:py-3",
             )}
           >
             <div
               className={cn(
                 "hidden h-11 items-center gap-2 px-2 sm:flex",
-                category === "workflow" && "px-1.5",
+                activeCategory === "workflow" && "px-1.5",
               )}
             >
               <div className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
@@ -161,10 +184,10 @@ export function SettingsDialog() {
                     onClick={() => setCategory(item.id)}
                     className={cn(
                       "flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                      category === "workflow"
+                      activeCategory === "workflow"
                         ? "sm:w-full sm:px-2"
                         : "sm:w-full",
-                      category === item.id
+                      activeCategory === item.id
                         ? "bg-background text-foreground shadow-sm ring-1 ring-border"
                         : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                     )}
@@ -178,7 +201,7 @@ export function SettingsDialog() {
             <p
               className={cn(
                 "mt-auto hidden px-2 pb-1 pt-6 text-[10px] leading-4 text-muted-foreground sm:block",
-                category === "workflow" && "sm:hidden",
+                activeCategory === "workflow" && "sm:hidden",
               )}
             >
               {t("settings.productName")}
@@ -187,34 +210,40 @@ export function SettingsDialog() {
             </p>
           </aside>
 
-          {category === "workflow" ? (
+          {activeCategory === "workflow" ? (
             <div className="min-h-0 min-w-0 overflow-hidden">
               <WorkflowSettings />
             </div>
           ) : (
             <ScrollArea className="min-h-0">
               <div className="mx-auto w-full max-w-3xl p-5 pb-12 sm:p-8 sm:pb-12">
-                {category === "appearance" && (
+                {activeCategory === "appearance" && (
                   <AppearanceSettings
                     settings={settings}
                     onUpdate={updateSettings}
                   />
                 )}
-                {category === "roles" && <RolesSettings />}
-                {category === "skills" && <SkillsSettings />}
-                {category === "plugins" && <PluginsSettings />}
-                {category === "permissions" && (
+                {activeCategory === "roles" && <RolesSettings />}
+                {activeCategory === "skills" && <SkillsSettings />}
+                {activeCategory === "plugins" && <PluginsSettings />}
+                {activeCategory === "permissions" && (
                   <PermissionSettings
                     settings={settings}
                     onUpdate={updateSettings}
                   />
                 )}
-                {category === "privacy" && (
+                {activeCategory === "privacy" && (
                   <PrivacySettings
                     settings={settings}
                     onUpdate={updateSettings}
                     onClearHistory={clearConversations}
                   />
+                )}
+                {activeCategory === "advanced" && (
+                  <AdvancedSettings developerMode={developerMode} />
+                )}
+                {activeCategory === "developer" && developerModeEnabled && (
+                  <DeveloperSettings />
                 )}
               </div>
             </ScrollArea>
@@ -658,6 +687,38 @@ function PrivacySettings({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/** Keeps advanced feature discovery separate from privacy and diagnostic data controls. */
+function AdvancedSettings({
+  developerMode,
+}: {
+  developerMode: ReturnType<typeof useDeveloperMode>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-7">
+      <SettingsHeading
+        title={t("settings.advanced.title")}
+        description={t("settings.advanced.description")}
+      />
+      <DeveloperModeSettings controller={developerMode} />
+    </div>
+  );
+}
+
+/** Groups settings intended for diagnosis and development without treating them as authorization. */
+function DeveloperSettings() {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-7">
+      <SettingsHeading
+        title={t("settings.developer.title")}
+        description={t("settings.developer.description")}
+      />
+      <RuntimeLogLevelSettings />
     </div>
   );
 }

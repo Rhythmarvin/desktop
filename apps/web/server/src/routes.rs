@@ -1,7 +1,8 @@
 use crate::app_state::AppState;
 use crate::handlers::{
-    agents, file_system, git, health, plugins, projects, sessions, skill_imports, skills,
-    snapshots, specs, task_diffs, tasks, workflow_runs, workflows, workspace_files,
+    agents, developer_mode, file_system, git, health, plugins, projects, runtime_log_level,
+    sessions, skill_imports, skills, snapshots, specs, task_diffs, tasks, workflow_runs, workflows,
+    workspace_files,
 };
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -9,13 +10,13 @@ use axum::middleware;
 use axum::routing::{get, post};
 use ora_contracts::{
     AGENT_IMPORT_COMMIT_PATH, AGENT_IMPORT_PREPARE_PATH, AGENT_PATH, AGENT_RUNTIME_STATUS_PATH,
-    AGENTS_PATH, APP_EVENT_WATCH_PATH, FILE_SYSTEM_DIRECTORY_PATH, GIT_IDENTITY_PATH,
-    INSTALLED_PLUGINS_PATH, PROJECT_BRANCHES_PATH, PROJECT_PATH, PROJECTS_PATH,
-    SESSION_ATTACH_PATH, SESSION_CONFIG_PATH, SESSION_LOAD_PATH, SESSION_PATH,
-    SESSION_PERMISSION_RESPONSE_PATH, SESSION_PROMPT_PATH, SESSION_RESUME_HISTORY_PATH,
-    SESSION_STOP_PATH, SESSION_SWITCH_AGENT_PATH, SESSION_WARM_PATH, SESSIONS_PATH,
-    SKILL_IMPORT_COMMIT_PATH, SKILL_IMPORT_PATH, SKILL_IMPORTS_PATH, SKILL_PATH, SKILLS_PATH,
-    SPEC_CATALOG_PATH, SPEC_READ_PATH, SPEC_WATCH_PATH, TASK_COMMIT_PATH,
+    AGENTS_PATH, APP_EVENT_WATCH_PATH, DEVELOPER_MODE_PATH, FILE_SYSTEM_DIRECTORY_PATH,
+    GIT_IDENTITY_PATH, INSTALLED_PLUGINS_PATH, PROJECT_BRANCHES_PATH, PROJECT_PATH, PROJECTS_PATH,
+    RUNTIME_LOG_LEVEL_PATH, SESSION_ATTACH_PATH, SESSION_CONFIG_PATH, SESSION_LOAD_PATH,
+    SESSION_PATH, SESSION_PERMISSION_RESPONSE_PATH, SESSION_PROMPT_PATH,
+    SESSION_RESUME_HISTORY_PATH, SESSION_STOP_PATH, SESSION_SWITCH_AGENT_PATH, SESSION_WARM_PATH,
+    SESSIONS_PATH, SKILL_IMPORT_COMMIT_PATH, SKILL_IMPORT_PATH, SKILL_IMPORTS_PATH, SKILL_PATH,
+    SKILLS_PATH, SPEC_CATALOG_PATH, SPEC_READ_PATH, SPEC_WATCH_PATH, TASK_COMMIT_PATH,
     TASK_DIFF_COMMENT_REPLIES_PATH, TASK_DIFF_COMMENT_STATUS_PATH, TASK_DIFF_COMMENTS_PATH,
     TASK_DIFF_PATH, TASK_PATH, TASK_PUSH_PATH, TASK_WORKSPACE_PATH, TASKS_PATH,
     WORKFLOW_ACTIVATE_PATH, WORKFLOW_DRAFT_PATH, WORKFLOW_PATH, WORKFLOW_PUBLISH_PATH,
@@ -173,6 +174,21 @@ pub fn build_router(app_state: AppState) -> Router {
         // =============================================================================
         .route(GIT_IDENTITY_PATH, get(git::get_identity))
         // =============================================================================
+        // developerMode (shared user preference)
+        // =============================================================================
+        .route(
+            DEVELOPER_MODE_PATH,
+            get(developer_mode::get_developer_mode).put(developer_mode::set_developer_mode),
+        )
+        // =============================================================================
+        // runtimeLogLevel (server-global)
+        // =============================================================================
+        .route(
+            RUNTIME_LOG_LEVEL_PATH,
+            get(runtime_log_level::get_runtime_log_level)
+                .put(runtime_log_level::set_runtime_log_level),
+        )
+        // =============================================================================
         // workflow
         // =============================================================================
         .route(
@@ -262,12 +278,15 @@ mod tests {
     use crate::bootstrap::build_app_state_for_database;
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request, StatusCode};
-    use ora_application::WorktreeRepository;
+    use ora_application::{UserConfigRepository, WorktreeRepository};
     use ora_contracts::{
         FileSystemBreadcrumb, FileSystemEntry, FileSystemEntryKind, ListDirectoryResponse,
         RequestId,
     };
-    use ora_db::{DatabaseBootstrapper, DatabaseLocation, SqliteWorktreeRepository};
+    use ora_db::{
+        DatabaseBootstrapper, DatabaseLocation, SqliteUserConfigRepository,
+        SqliteWorktreeRepository,
+    };
     use ora_domain::WorktreeId;
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
@@ -1478,6 +1497,132 @@ mod tests {
         assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// Verifies reads and updates are authoritative and shared across cloned Web router state.
+    #[tokio::test]
+    async fn serves_process_wide_runtime_log_level_routes() {
+        let (_temp_dir, database_path, app) = test_router();
+
+        let initial = request_empty(&app, Method::GET, "/api/runtime/log-level").await;
+        assert_eq!(initial.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(initial).await,
+            json!({
+                "configuredLevel": "info",
+                "effectiveLevel": "info",
+                "startupOverride": null,
+            })
+        );
+
+        let updated = request_json(
+            &app,
+            Method::PUT,
+            "/api/runtime/log-level",
+            json!({ "level": "debug" }),
+        )
+        .await;
+        assert_eq!(updated.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(updated).await,
+            json!({
+                "configuredLevel": "debug",
+                "effectiveLevel": "debug",
+                "startupOverride": null,
+            })
+        );
+
+        let shared = request_empty(&app, Method::GET, "/api/runtime/log-level").await;
+        assert_eq!(response_json(shared).await["effectiveLevel"], "debug");
+        assert_eq!(
+            bootstrapped_user_config_repository(&database_path)
+                .load_preferred_log_level()
+                .unwrap(),
+            ora_logging::LogLevel::Debug
+        );
+
+        let invalid = request_json(
+            &app,
+            Method::PUT,
+            "/api/runtime/log-level",
+            json!({ "level": "verbose" }),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Verifies developer mode defaults off and persists updates through the shared table.
+    #[tokio::test]
+    async fn serves_shared_developer_mode_routes() {
+        let (_temp_dir, database_path, app) = test_router();
+
+        let initial = request_empty(&app, Method::GET, "/api/settings/developer-mode").await;
+        assert_eq!(initial.status(), StatusCode::OK);
+        assert_eq!(response_json(initial).await, json!({ "enabled": false }));
+
+        let updated = request_json(
+            &app,
+            Method::PUT,
+            "/api/settings/developer-mode",
+            json!({ "enabled": true }),
+        )
+        .await;
+        assert_eq!(updated.status(), StatusCode::OK);
+        assert_eq!(response_json(updated).await, json!({ "enabled": true }));
+
+        let shared = request_empty(&app, Method::GET, "/api/settings/developer-mode").await;
+        assert_eq!(response_json(shared).await, json!({ "enabled": true }));
+        assert_eq!(
+            bootstrapped_user_config_repository(&database_path)
+                .load_developer_mode()
+                .unwrap(),
+            ora_application::DeveloperMode::Enabled
+        );
+    }
+
+    /// Verifies malformed persisted developer-mode state is surfaced instead of repaired silently.
+    #[tokio::test]
+    async fn rejects_malformed_persisted_developer_mode() {
+        let (_temp_dir, database_path, app) = test_router();
+        rusqlite::Connection::open(&database_path)
+            .unwrap()
+            .execute(
+                "INSERT INTO user_config(key, value) VALUES ('developer_mode', 'maybe')",
+                [],
+            )
+            .unwrap();
+
+        let response = request_empty(&app, Method::GET, "/api/settings/developer-mode").await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// Verifies persistence failure is client-visible and restores the prior effective level.
+    #[tokio::test]
+    async fn rolls_back_web_runtime_level_when_persistence_fails() {
+        let (_temp_dir, database_path, app) = test_router();
+        rusqlite::Connection::open(&database_path)
+            .unwrap()
+            .execute("DROP TABLE user_config", [])
+            .unwrap();
+
+        let failed = request_json(
+            &app,
+            Method::PUT,
+            "/api/runtime/log-level",
+            json!({ "level": "warn" }),
+        )
+        .await;
+        assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let state = request_empty(&app, Method::GET, "/api/runtime/log-level").await;
+        assert_eq!(
+            response_json(state).await,
+            json!({
+                "configuredLevel": "info",
+                "effectiveLevel": "info",
+                "startupOverride": null,
+            })
+        );
+    }
+
     /// Sends one JSON request to the router under test.
     async fn request_json(
         app: &axum::Router,
@@ -1581,6 +1726,20 @@ mod tests {
             });
 
         SqliteWorktreeRepository::new(pool)
+    }
+
+    /// Opens the test database so route assertions can inspect shared preferences.
+    fn bootstrapped_user_config_repository(database_path: &Path) -> SqliteUserConfigRepository {
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::path(database_path),
+                &ora_db::default_migration_catalog().unwrap(),
+            )
+            .unwrap_or_else(|error| {
+                panic!("expected repository pool bootstrap to succeed: {error}")
+            });
+
+        SqliteUserConfigRepository::new(pool)
     }
 
     /// Initializes one real Git repository with an initial commit so task routes can exercise linked worktree creation.

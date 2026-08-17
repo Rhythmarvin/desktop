@@ -199,6 +199,7 @@ tasks:
     desc: Run the desktop Tauri app in development mode
     env:
       ORA_DATA_DIR: "{{.ROOT_DIR}}/.data"
+      ORA_LOG_LEVEL: '{{.LOG_LEVEL | default "debug"}}'
       VSLANG: "1033"
     cmds:
       - pnpm --filter @ora/desktop tauri dev

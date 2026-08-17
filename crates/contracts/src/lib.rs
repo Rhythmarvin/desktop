@@ -2,12 +2,14 @@ pub mod app_event;
 
 pub mod agent;
 pub mod agent_import;
+pub mod developer_mode;
 pub mod error;
 pub mod file_system;
 pub mod frontend;
 pub mod git;
 pub mod plugin;
 pub mod project;
+pub mod runtime_log_level;
 pub mod session;
 pub mod skill;
 pub mod skill_import;
@@ -20,12 +22,14 @@ pub use agent_import::*;
 pub use app_event::*;
 
 pub use agent::*;
+pub use developer_mode::*;
 pub use error::*;
 pub use file_system::*;
 pub use frontend::*;
 pub use git::*;
 pub use plugin::*;
 pub use project::*;
+pub use runtime_log_level::*;
 pub use session::*;
 pub use skill::*;
 pub use skill_import::*;
@@ -49,11 +53,13 @@ pub fn export_typescript_bindings_to(
 
     app_event::export(&config)?;
     agent::export(&config)?;
+    developer_mode::export(&config)?;
     error::export(&config)?;
     file_system::export(&config)?;
     git::export(&config)?;
     plugin::export(&config)?;
     project::export(&config)?;
+    runtime_log_level::export(&config)?;
     session::export(&config)?;
     skill::export(&config)?;
     skill_import::export(&config)?;

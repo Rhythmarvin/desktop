@@ -167,7 +167,7 @@ mod tests {
         FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, FrontendQueryParam,
         frontend_endpoints,
     };
-    use ora_contracts::TASK_PATH;
+    use ora_contracts::{DEVELOPER_MODE_PATH, RUNTIME_LOG_LEVEL_PATH, TASK_PATH};
     use pretty_assertions::assert_eq;
     use std::collections::BTreeSet;
 
@@ -270,6 +270,84 @@ mod tests {
                 .iter()
                 .any(|endpoint| endpoint.operation_name == "updateAgent"
                     && endpoint.path_template == "/api/agents/{agentId}")
+        );
+    }
+
+    /// Verifies runtime log-level reads and writes share one path with distinct HTTP semantics.
+    #[test]
+    fn exports_runtime_log_level_endpoints() {
+        let endpoints = frontend_endpoints();
+        let runtime_endpoints = endpoints
+            .iter()
+            .filter(|endpoint| endpoint.namespace == "runtimeLogLevel")
+            .copied()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            runtime_endpoints,
+            vec![
+                FrontendEndpoint {
+                    operation_name: "getRuntimeLogLevel",
+                    namespace: "runtimeLogLevel",
+                    member_name: "get",
+                    method: FrontendHttpMethod::Get,
+                    path_template: RUNTIME_LOG_LEVEL_PATH,
+                    request_type: "GetRuntimeLogLevelRequest",
+                    response_type: "RuntimeLogLevelStateResponse",
+                    path_params: &[],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "setRuntimeLogLevel",
+                    namespace: "runtimeLogLevel",
+                    member_name: "set",
+                    method: FrontendHttpMethod::Put,
+                    path_template: RUNTIME_LOG_LEVEL_PATH,
+                    request_type: "SetRuntimeLogLevelRequest",
+                    response_type: "RuntimeLogLevelStateResponse",
+                    path_params: &[],
+                    has_json_body: true,
+                },
+            ]
+        );
+    }
+
+    /// Verifies developer-mode reads and writes share the Settings path and typed response.
+    #[test]
+    fn exports_developer_mode_endpoints() {
+        let endpoints = frontend_endpoints();
+        let developer_mode_endpoints = endpoints
+            .iter()
+            .filter(|endpoint| endpoint.namespace == "developerMode")
+            .copied()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            developer_mode_endpoints,
+            vec![
+                FrontendEndpoint {
+                    operation_name: "getDeveloperMode",
+                    namespace: "developerMode",
+                    member_name: "get",
+                    method: FrontendHttpMethod::Get,
+                    path_template: DEVELOPER_MODE_PATH,
+                    request_type: "GetDeveloperModeRequest",
+                    response_type: "DeveloperModeResponse",
+                    path_params: &[],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "setDeveloperMode",
+                    namespace: "developerMode",
+                    member_name: "set",
+                    method: FrontendHttpMethod::Put,
+                    path_template: DEVELOPER_MODE_PATH,
+                    request_type: "SetDeveloperModeRequest",
+                    response_type: "DeveloperModeResponse",
+                    path_params: &[],
+                    has_json_body: true,
+                },
+            ]
         );
     }
 }

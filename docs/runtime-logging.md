@@ -5,7 +5,7 @@ Ora Rust services initialize shared structured logging through `ora-logging`.
 ## Ownership boundary
 
 - `ora-logging` owns the process-wide subscriber setup, JSON event formatting, sink selection, file rotation, retention cleanup, and the immutable process timezone.
-- Runtime composition roots own reading configuration, calling `ora_logging::init_logging` with an explicit `LoggingConfig`, and retaining the returned `LoggingGuard` for the rest of the process lifetime. The guard keeps non-blocking writer workers alive for every active sink (stdout and/or file); dropping it early loses buffered output. On shutdown, `WorkerGuard` waits briefly for the background worker to drain and may still drop remaining buffered events if a sink is slow. Stdout and file sinks are non-lossy: a full writer channel exerts backpressure on callers instead of dropping lines, so log integrity is preferred over never blocking under extreme sink stalls.
+- Runtime composition roots own reading configuration, calling `ora_logging::init_logging` with an explicit `LoggingConfig`, and retaining the returned `LoggingGuard` for the rest of the process lifetime. The guard keeps non-blocking writer workers alive for every active sink (stdout and/or file); dropping it early loses buffered output. The separate cloneable `LogLevelControl` reads or reloads the process-wide filter without rebuilding sinks. Reloads affect only future events and never recover events already filtered. On shutdown, `WorkerGuard` waits briefly for the background worker to drain and may still drop remaining buffered events if a sink is slow. Stdout and file sinks are non-lossy: a full writer channel exerts backpressure on callers instead of dropping lines, so log integrity is preferred over never blocking under extreme sink stalls.
 - Runtime request seams and infrastructure crates emit structured `tracing` events but never configure sinks or read environment variables. Application handlers and repository adapters do not emit generic completion or propagation-only failure events.
 
 Initialization is process-wide and the timezone can be set only once, so it must happen before any `ora_logging::clock` access. If a file sink cannot be created or prepared, initialization fails with a typed `LoggingInitError` instead of silently degrading to another sink.
@@ -14,7 +14,7 @@ Initialization is process-wide and the timezone can be set only once, so it must
 
 `apps/web/server` maps these environment variables into `ora-logging`:
 
-- `ORA_LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, or `error`. Default: `info`. An unrecognized value fails startup.
+- `ORA_LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, or `error`. Values are trimmed and ASCII-case-insensitive. When set, it overrides the shared SQLite `user_config.log_level` preference for that process start. When the row is absent, the default is `info`. An unrecognized value fails startup.
 - `ORA_LOG_MODE`: `stdout`, `file`, or `stdout_and_file`. Default: `stdout`. An unrecognized value fails startup.
 - `ORA_LOG_MAX_DAYS`: retention window in days for file-backed logging, counting the current active file. Default: `3`. A non-numeric or zero value fails startup.
 - `ORA_TIMEZONE`: IANA timezone used by structured event timestamps, such as `Asia/Shanghai` or `Europe/London`.
@@ -27,7 +27,15 @@ The Web server resolves its process timezone once during startup. A non-empty `O
 
 ## Desktop configuration
 
-Desktop does not read logging environment variables. It builds its `LoggingConfig` in code: the file sink is `app_data_dir/logs/ora.log` with daily rotation and three retained days, debug builds write to stdout and the file while release builds write to the file only, and the timezone comes from the operating system. See [Desktop Runtime](desktop-runtime.md).
+Desktop reads `ORA_LOG_LEVEL` once during startup using the same supported names and parsing rules as Web. It takes precedence over the shared SQLite `user_config.log_level` preference; when the row is absent, the default is `info`. An unrecognized environment or persisted value fails startup. The file sink remains `app_data_dir/logs/ora.log` with daily rotation and three retained days, debug builds write to stdout and the file while release builds write to the file only, and the timezone comes from the operating system. `task run:desktop` supplies `debug` by default and accepts an explicit `LOG_LEVEL`, but that Task variable exists only for the launched process and is not persisted. See [Desktop Runtime](desktop-runtime.md).
+
+## Runtime log-level updates
+
+Web and Desktop expose the same contracts-client operations to read and set the process-wide log level. After developer mode is enabled in Settings → Advanced, the selector appears under Settings → Developer options. The UI uses the shared contract surface and does not keep a competing preference in browser storage or frontend state. A successful update first reloads the live filter and then atomically upserts `user_config.log_level`. Each accepted update runs in an internal transaction task, so a disconnected Web client or cancelled Desktop invocation can stop waiting without abandoning the cache update or persistence rollback. If persistence fails, Ora restores the previous effective filter and reports the update as failed when the caller is still waiting. Reads always return the authoritative configured preference, current effective filter, and any startup environment override; the UI deliberately presents only the effective selection and never exposes the environment source.
+
+Both runtimes use two-stage startup so database migration remains observable. They initialize logging provisionally from `ORA_LOG_LEVEL` or `info`, open and migrate Backend, load `user_config.log_level`, and reload the live filter before readiness when no environment override exists. The precedence is `ORA_LOG_LEVEL` → SQLite preference → `info`. An environment override is never written into SQLite. A runtime update still takes effect immediately and persists while an override is present, but the unchanged environment variable wins again on the next restart. Reloading is process/server global and affects only future events; already-filtered events cannot be recovered.
+
+Changing the level does not rebuild or alter stdout/file sink selection, log path, JSON formatting, rotation, retention, timezone, writer workers, or request correlation. `trace` and `debug` can substantially increase event volume, so the UI identifies them as temporary diagnostic choices.
 
 ## JSON event contract
 

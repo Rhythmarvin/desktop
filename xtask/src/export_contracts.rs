@@ -466,6 +466,14 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "WatchSpecsRequest" => "spec",
         // gitIdentity
         "GetGitIdentityRequest" | "GitIdentityResponse" => "git",
+        // runtimeLogLevel
+        "GetRuntimeLogLevelRequest"
+        | "SetRuntimeLogLevelRequest"
+        | "RuntimeLogLevelStateResponse" => "runtimeLogLevel",
+        // developerMode
+        "GetDeveloperModeRequest" | "SetDeveloperModeRequest" | "DeveloperModeResponse" => {
+            "developerMode"
+        }
         other => panic!("unknown contract type `{other}`"),
     }
 }

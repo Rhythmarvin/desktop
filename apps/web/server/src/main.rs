@@ -14,21 +14,34 @@ use crate::error::WebBootstrapError;
 use crate::shutdown::wait_for_shutdown;
 use crate::timezone::TimezoneWarning;
 use axum::Router;
-use ora_logging::{LoggingGuard, init_logging, ora_info, ora_warn, register_gitlancer_logger};
+use ora_logging::{
+    InitializedLogging, init_logging, ora_info, ora_warn, register_gitlancer_logger,
+};
 use tokio::net::TcpListener;
 
 /// Boots the web server runtime, initializes shared services, and starts serving HTTP traffic.
 #[tokio::main]
 async fn main() -> Result<(), WebBootstrapError> {
     let runtime_config = RuntimeConfig::from_env()?;
-    let _logging_guard = initialize_logging(runtime_config.logging())?;
-    report_timezone_status(&runtime_config);
+    let startup_override = runtime_config.startup_log_level_override();
+    let initialized_logging = initialize_logging(runtime_config.logging())?;
+    let (_logging_guard, level_control) = initialized_logging.into_parts();
     register_gitlancer_logger();
-    let app_state = build_app_state(&runtime_config)?;
+    let app_state = build_app_state(&runtime_config, level_control, startup_override).await?;
     ora_info!(
         message = "web runtime binary paths registered",
         ripgrep_path = %app_state.binary_paths().ripgrep_path().display(),
         deno_path = %app_state.binary_paths().deno_path().display(),
+    );
+    let runtime_log_level = app_state
+        .runtime_log_level()
+        .state()
+        .await
+        .map_err(WebBootstrapError::RuntimeLogLevelRead)?;
+    report_timezone_status(
+        &runtime_config,
+        runtime_log_level.effective_level,
+        runtime_log_level.startup_override,
     );
     let router = build_router(app_state.clone());
     let listener = bind_listener(&runtime_config).await?;
@@ -59,16 +72,20 @@ async fn bind_listener(runtime_config: &RuntimeConfig) -> Result<TcpListener, We
         .map_err(WebBootstrapError::Bind)
 }
 
-/// Initializes structured logging and returns the guard that owns writer lifetimes.
+/// Initializes structured logging and returns independent writer and level-control ownership.
 fn initialize_logging(
     logging_config: &ora_logging::LoggingConfig,
-) -> Result<LoggingGuard, WebBootstrapError> {
+) -> Result<InitializedLogging, WebBootstrapError> {
     init_logging(logging_config.clone()).map_err(WebBootstrapError::LoggingInit)
 }
 
 /// Reports the resolved timezone configuration, warning on missing or invalid settings,
 /// and emits the post-initialization info log once logging is ready.
-fn report_timezone_status(runtime_config: &RuntimeConfig) {
+fn report_timezone_status(
+    runtime_config: &RuntimeConfig,
+    effective_level: ora_logging::LogLevel,
+    startup_override: Option<ora_logging::LogLevel>,
+) {
     match runtime_config.timezone_warning() {
         Some(TimezoneWarning::MissingConfiguration) => {
             ora_warn!(
@@ -91,5 +108,7 @@ fn report_timezone_status(runtime_config: &RuntimeConfig) {
         message = "logging initialized",
         timezone = %runtime_config.logging().timezone,
         timezone_source = runtime_config.timezone_source().as_str(),
+        log_level = %effective_level,
+        log_level_source = if startup_override.is_some() { "environment" } else { "preference" },
     );
 }

@@ -3024,6 +3024,7 @@ dependencies = [
  "ora-history",
  "ora-logging",
  "ora-process",
+ "ora-runtime-settings",
  "ora-scheduler",
  "ora-skill-package",
  "ora-utils",
@@ -3071,12 +3072,15 @@ version = "0.1.0"
 dependencies = [
  "chrono-tz",
  "iana-time-zone",
+ "ora-application",
  "ora-backend",
  "ora-contracts",
  "ora-fs",
  "ora-logging",
  "ora-plugin-manager",
+ "ora-runtime-settings",
  "pretty_assertions",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
@@ -3132,6 +3136,7 @@ dependencies = [
  "chrono-tz",
  "gitlancer",
  "regex",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "time",
@@ -3159,6 +3164,16 @@ dependencies = [
  "libc",
  "tokio",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ora-runtime-settings"
+version = "0.0.0"
+dependencies = [
+ "ora-logging",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

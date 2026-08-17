@@ -86,6 +86,12 @@ pub enum WebBootstrapError {
     SkillStorageReconciliation(#[source] ora_backend::SkillStorageReconciliationError),
     #[error(transparent)]
     LoggingInit(#[from] ora_logging::LoggingInitError),
+    #[error("failed to read the active runtime log level")]
+    RuntimeLogLevelRead(#[from] ora_logging::LogLevelReadError),
+    #[error("failed to apply the persisted runtime log level")]
+    RuntimeLogLevelReload(#[from] ora_logging::LogLevelReloadError),
+    #[error("failed to load the persisted Web runtime preference")]
+    RuntimePreference(#[source] ora_backend::BackendError),
     #[error("failed to bind HTTP listener")]
     Bind(#[source] std::io::Error),
     #[error("HTTP server exited unexpectedly")]

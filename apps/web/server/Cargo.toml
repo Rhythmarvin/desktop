@@ -20,6 +20,7 @@ ora-domain = { workspace = true }
 ora-fs = { workspace = true }
 ora-logging = { workspace = true }
 ora-plugin-manager = { workspace = true }
+ora-runtime-settings = { workspace = true }
 ora-skill-package = { workspace = true }
 ora-utils = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -35,6 +36,7 @@ uuid = { workspace = true }
 futures-util = "0.3"
 pretty_assertions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

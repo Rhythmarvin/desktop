@@ -1,10 +1,12 @@
 pub mod agents;
+pub mod developer_mode;
 pub mod file_system;
 pub mod git;
 pub mod health;
 mod ndjson_stream;
 pub mod plugins;
 pub mod projects;
+pub mod runtime_log_level;
 pub mod sessions;
 pub mod skill_imports;
 pub mod skills;

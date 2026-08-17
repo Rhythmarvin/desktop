@@ -1,12 +1,16 @@
 use crate::config::DesktopConfigStore;
 use crate::workspace_files::WorkspaceFileApi;
-use ora_backend::Backend;
+use ora_backend::{Backend, BackendPreferredLogLevelStore};
 use ora_plugin_manager::PluginManager;
+use ora_runtime_settings::RuntimeLogLevelManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+
+pub type DesktopRuntimeLogLevelManager =
+    RuntimeLogLevelManager<ora_logging::LogLevelControl, BackendPreferredLogLevelStore>;
 
 /// Stores every executable shipped with the Desktop application.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,6 +87,7 @@ pub struct DesktopState {
     pub backend: Backend,
     pub plugin_manager: Arc<PluginManager>,
     pub config: DesktopConfigStore,
+    pub runtime_log_level: DesktopRuntimeLogLevelManager,
     pub workspace_files: Arc<WorkspaceFileApi>,
     pub binary_paths: BundledBinaryPaths,
     /// The Tauri application data directory, owner of the dashboard locator files.

@@ -9,6 +9,7 @@ use crate::skill::SkillApi;
 use crate::spec::SpecApi;
 use crate::task::TaskApi;
 use crate::task_diff::TaskDiffApi;
+use crate::user_config::{BackendPreferredLogLevelStore, UserConfigApi};
 use crate::workflow::WorkflowApi;
 use crate::workflow_run::WorkflowRunApi;
 use crate::workflow_run_engine::{ConcreteWorkflowRunControl, build_workflow_run_engine};
@@ -74,6 +75,7 @@ pub struct Backend {
     project: Arc<ProjectApi>,
     task: Arc<TaskApi>,
     task_diff: Arc<TaskDiffApi>,
+    user_config: Arc<UserConfigApi>,
     session: Arc<SessionApi>,
     agent_runtime: Arc<AgentRuntimeManager>,
     skill: Arc<SkillApi>,
@@ -156,6 +158,7 @@ impl Backend {
                 git_cleanup.clone(),
                 relative_path_base.clone(),
             )),
+            user_config: Arc::new(UserConfigApi::new(pool.clone())),
             session: Arc::new(SessionApi::new(pool.clone())),
             agent_runtime,
             skill: Arc::new(SkillApi::new(
@@ -282,6 +285,37 @@ impl Backend {
     /// Returns the repository pool needed by server-only services excluded from this extraction.
     pub fn repository_pool(&self) -> RepositoryPool {
         self.pool.clone()
+    }
+
+    /// Returns the authoritative shared developer-mode preference.
+    pub async fn developer_mode(&self) -> Result<ora_application::DeveloperMode, BackendError> {
+        self.user_config.developer_mode().await
+    }
+
+    /// Persists and returns the authoritative shared developer-mode preference.
+    pub async fn set_developer_mode(
+        &self,
+        mode: ora_application::DeveloperMode,
+    ) -> Result<ora_application::DeveloperMode, BackendError> {
+        self.user_config.set_developer_mode(mode).await
+    }
+
+    /// Returns the preferred runtime log level stored in shared user configuration.
+    pub async fn preferred_log_level(&self) -> Result<ora_logging::LogLevel, BackendError> {
+        self.user_config.preferred_log_level().await
+    }
+
+    /// Persists and returns the preferred runtime log level in shared user configuration.
+    pub async fn set_preferred_log_level(
+        &self,
+        level: ora_logging::LogLevel,
+    ) -> Result<ora_logging::LogLevel, BackendError> {
+        self.user_config.set_preferred_log_level(level).await
+    }
+
+    /// Returns the restricted preferred-level persistence capability for runtime logging.
+    pub fn preferred_log_level_store(&self) -> BackendPreferredLogLevelStore {
+        BackendPreferredLogLevelStore::new(self.user_config.clone())
     }
 
     /// Replaces the root used by task creations that start after this update.
@@ -969,7 +1003,7 @@ impl Backend {
 /// holds the reservation. Parking an async worker for that long starves every
 /// other request the runtime is serving, so the wait belongs on the blocking
 /// pool even though the caller is asynchronous for unrelated reasons.
-async fn spawn_repository_work<T>(
+pub(crate) async fn spawn_repository_work<T>(
     work: impl FnOnce() -> Result<T, BackendError> + Send + 'static,
 ) -> Result<T, BackendError>
 where
@@ -1014,6 +1048,7 @@ fn run_workflow_run_boot_sweep(pool: &RepositoryPool, clock: SystemClock) {
 mod tests {
     use super::{Backend, BackendPaths};
     use crate::error::ErrorClassification;
+    use ora_application::DeveloperMode;
     use ora_contracts::CreateTaskRequest;
     use ora_contracts::{
         CreateAgentRequest, CreateProjectRequest, CreateSkillRequest, DeleteAgentRequest,
@@ -1021,6 +1056,7 @@ mod tests {
         GetTaskRequest, ListAgentsRequest, ListProjectsRequest, ListSkillsRequest, TaskStatus,
         UpdateAgentRequest, UpdateProjectRequest, UpdateSkillRequest,
     };
+    use ora_logging::LogLevel;
     use std::fs;
     use std::path::Path;
     use std::process::Command;
@@ -1046,6 +1082,33 @@ mod tests {
 
         assert!(database_path.is_file());
         assert!(worktree_root.is_dir());
+        assert_eq!(
+            (
+                backend.developer_mode().await.unwrap(),
+                backend.preferred_log_level().await.unwrap(),
+            ),
+            (DeveloperMode::Disabled, LogLevel::Info)
+        );
+        assert_eq!(
+            (
+                backend
+                    .set_developer_mode(DeveloperMode::Enabled)
+                    .await
+                    .unwrap(),
+                backend
+                    .set_preferred_log_level(LogLevel::Debug)
+                    .await
+                    .unwrap(),
+            ),
+            (DeveloperMode::Enabled, LogLevel::Debug)
+        );
+        assert_eq!(
+            (
+                backend.developer_mode().await.unwrap(),
+                backend.preferred_log_level().await.unwrap(),
+            ),
+            (DeveloperMode::Enabled, LogLevel::Debug)
+        );
 
         let project = backend
             .create_project(CreateProjectRequest {

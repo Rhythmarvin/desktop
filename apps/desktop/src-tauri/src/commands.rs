@@ -1355,6 +1355,201 @@ pub async fn get_desktop_config(
     }
 }
 
+/// Returns the shared developer-mode preference from authoritative persistence.
+#[tauri::command]
+pub async fn get_developer_mode(
+    state: State<'_, DesktopState>,
+    request: GetDeveloperModeRequest,
+) -> Result<DeveloperModeResponse, CommandError> {
+    let _ = request;
+    let backend = state.backend.clone();
+    let lifecycle = RequestLifecycle::start("get_developer_mode", &UuidRequestIdGenerator);
+    let request_span =
+        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
+
+    async move {
+        match backend.developer_mode().await.map(developer_mode_response) {
+            Ok(response) => {
+                lifecycle.complete_success();
+                Ok(response)
+            }
+            Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
+        }
+    }
+    .instrument(request_span)
+    .await
+}
+
+/// Replaces the shared developer-mode preference for Web and Desktop clients.
+#[tauri::command]
+pub async fn set_developer_mode(
+    state: State<'_, DesktopState>,
+    request: SetDeveloperModeRequest,
+) -> Result<DeveloperModeResponse, CommandError> {
+    let backend = state.backend.clone();
+    let lifecycle = RequestLifecycle::start("set_developer_mode", &UuidRequestIdGenerator);
+    let request_span =
+        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
+
+    async move {
+        let result = backend
+            .set_developer_mode(internal_developer_mode(request.enabled))
+            .await
+            .map(developer_mode_response);
+        match result {
+            Ok(response) => {
+                lifecycle.complete_success();
+                Ok(response)
+            }
+            Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
+        }
+    }
+    .instrument(request_span)
+    .await
+}
+
+/// Converts the domain enum into the shared response contract.
+fn developer_mode_response(mode: ora_application::DeveloperMode) -> DeveloperModeResponse {
+    DeveloperModeResponse {
+        enabled: mode.is_enabled(),
+    }
+}
+
+/// Converts a contract boolean into an explicit domain state.
+fn internal_developer_mode(enabled: bool) -> ora_application::DeveloperMode {
+    if enabled {
+        ora_application::DeveloperMode::Enabled
+    } else {
+        ora_application::DeveloperMode::Disabled
+    }
+}
+
+/// Returns the authoritative process-wide Desktop logging state.
+#[tauri::command]
+pub async fn get_runtime_log_level(
+    state: State<'_, DesktopState>,
+    request: GetRuntimeLogLevelRequest,
+) -> Result<RuntimeLogLevelStateResponse, CommandError> {
+    let _ = request;
+    let manager = state.runtime_log_level.clone();
+    let lifecycle = RequestLifecycle::start("get_runtime_log_level", &UuidRequestIdGenerator);
+    let request_span =
+        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
+    async move {
+        match read_runtime_log_level(&manager).await {
+            Ok(response) => {
+                lifecycle.complete_success();
+                Ok(response)
+            }
+            Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
+        }
+    }
+    .instrument(request_span)
+    .await
+}
+
+/// Replaces and persists the process-wide Desktop logging level.
+#[tauri::command]
+pub async fn set_runtime_log_level(
+    state: State<'_, DesktopState>,
+    request: SetRuntimeLogLevelRequest,
+) -> Result<RuntimeLogLevelStateResponse, CommandError> {
+    let manager = state.runtime_log_level.clone();
+    let lifecycle = RequestLifecycle::start("set_runtime_log_level", &UuidRequestIdGenerator);
+    let request_span =
+        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
+
+    async move {
+        match update_runtime_log_level(&manager, request, &lifecycle).await {
+            Ok(response) => {
+                lifecycle.complete_success();
+                Ok(response)
+            }
+            Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
+        }
+    }
+    .instrument(request_span)
+    .await
+}
+
+/// Reads shared manager state and maps concrete control failures into the Desktop error surface.
+async fn read_runtime_log_level<S>(
+    manager: &ora_runtime_settings::RuntimeLogLevelManager<ora_logging::LogLevelControl, S>,
+) -> Result<RuntimeLogLevelStateResponse, BackendError>
+where
+    S: ora_runtime_settings::PreferredLogLevelStore,
+{
+    manager
+        .state()
+        .await
+        .map(runtime_log_level_response)
+        .map_err(|source| BackendError::internal("failed to read runtime log level", source))
+}
+
+/// Applies one transaction while preserving any rollback failure as a secondary log event.
+async fn update_runtime_log_level<S>(
+    manager: &ora_runtime_settings::RuntimeLogLevelManager<ora_logging::LogLevelControl, S>,
+    request: SetRuntimeLogLevelRequest,
+    lifecycle: &RequestLifecycle,
+) -> Result<RuntimeLogLevelStateResponse, BackendError>
+where
+    S: ora_runtime_settings::PreferredLogLevelStore,
+{
+    manager
+        .set_level(internal_log_level(request.level))
+        .await
+        .map(runtime_log_level_response)
+        .map_err(|error| {
+            if let Some(rollback_error) = error.rollback_error() {
+                let report = ora_logging::ErrorReport::from_error(rollback_error);
+                ora_logging::ora_error!(
+                    operation = "set_runtime_log_level.rollback",
+                    request_id = %lifecycle.request_id(),
+                    outcome = "secondary_failure",
+                    error.code = "internal_error",
+                    error.message = report.message(),
+                    error.chain = report.chain(),
+                    error.chain_depth = report.chain_depth(),
+                    "secondary cleanup failed"
+                );
+            }
+            BackendError::internal("failed to update runtime log level", error)
+        })
+}
+
+/// Converts shared manager state into the transport-neutral contract response.
+fn runtime_log_level_response(
+    state: ora_runtime_settings::RuntimeLogLevelState,
+) -> RuntimeLogLevelStateResponse {
+    RuntimeLogLevelStateResponse {
+        configured_level: contract_log_level(state.configured_level),
+        effective_level: contract_log_level(state.effective_level),
+        startup_override: state.startup_override.map(contract_log_level),
+    }
+}
+
+/// Converts an internal level into the closed wire vocabulary exhaustively.
+fn contract_log_level(level: ora_logging::LogLevel) -> RuntimeLogLevel {
+    match level {
+        ora_logging::LogLevel::Trace => RuntimeLogLevel::Trace,
+        ora_logging::LogLevel::Debug => RuntimeLogLevel::Debug,
+        ora_logging::LogLevel::Info => RuntimeLogLevel::Info,
+        ora_logging::LogLevel::Warn => RuntimeLogLevel::Warn,
+        ora_logging::LogLevel::Error => RuntimeLogLevel::Error,
+    }
+}
+
+/// Converts a validated contract level into the shared logging vocabulary exhaustively.
+fn internal_log_level(level: RuntimeLogLevel) -> ora_logging::LogLevel {
+    match level {
+        RuntimeLogLevel::Trace => ora_logging::LogLevel::Trace,
+        RuntimeLogLevel::Debug => ora_logging::LogLevel::Debug,
+        RuntimeLogLevel::Info => ora_logging::LogLevel::Info,
+        RuntimeLogLevel::Warn => ora_logging::LogLevel::Warn,
+        RuntimeLogLevel::Error => ora_logging::LogLevel::Error,
+    }
+}
+
 /// Persists a new creation root and updates Backend configuration without interrupting in-flight work.
 #[tauri::command]
 pub async fn set_worktree_root(
@@ -1420,4 +1615,149 @@ pub async fn set_worktree_root(
     }
     .instrument(request_span)
     .await
+}
+
+#[cfg(test)]
+mod runtime_log_level_tests {
+    use std::sync::{Arc, Mutex};
+
+    use ora_backend::{ErrorClassification, RequestLifecycle, UuidRequestIdGenerator};
+    use ora_contracts::{RuntimeLogLevel, RuntimeLogLevelStateResponse, SetRuntimeLogLevelRequest};
+    use ora_logging::{LogLevel, test_log_level_control};
+    use ora_runtime_settings::{PreferredLogLevelStore, RuntimeLogLevelManager};
+    use pretty_assertions::assert_eq;
+    use thiserror::Error;
+
+    use super::{read_runtime_log_level, update_runtime_log_level};
+
+    /// Verifies Desktop reads and updates authoritative state while retaining startup explanation.
+    #[tokio::test]
+    async fn reads_and_updates_desktop_runtime_log_level() {
+        let store = FakeStore::new(LogLevel::Info);
+        let manager = RuntimeLogLevelManager::new(
+            test_log_level_control(LogLevel::Trace),
+            store,
+            LogLevel::Info,
+            Some(LogLevel::Trace),
+        );
+        let lifecycle = RequestLifecycle::start("test", &UuidRequestIdGenerator);
+
+        assert_eq!(
+            read_runtime_log_level(&manager).await.unwrap(),
+            RuntimeLogLevelStateResponse {
+                configured_level: RuntimeLogLevel::Info,
+                effective_level: RuntimeLogLevel::Trace,
+                startup_override: Some(RuntimeLogLevel::Trace),
+            }
+        );
+        assert_eq!(
+            update_runtime_log_level(
+                &manager,
+                SetRuntimeLogLevelRequest {
+                    level: RuntimeLogLevel::Warn,
+                },
+                &lifecycle,
+            )
+            .await
+            .unwrap(),
+            RuntimeLogLevelStateResponse {
+                configured_level: RuntimeLogLevel::Warn,
+                effective_level: RuntimeLogLevel::Warn,
+                startup_override: Some(RuntimeLogLevel::Trace),
+            }
+        );
+    }
+
+    /// Verifies invalid wire values are rejected before a Desktop command can mutate state.
+    #[test]
+    fn rejects_invalid_desktop_runtime_log_level_values() {
+        let result = serde_json::from_value::<SetRuntimeLogLevelRequest>(serde_json::json!({
+            "level": "verbose"
+        }));
+
+        assert!(result.is_err());
+    }
+
+    /// Verifies a Backend store failure is primary and restores the previous live filter.
+    #[tokio::test]
+    async fn rolls_back_desktop_runtime_level_when_persistence_fails() {
+        let store = FakeStore::new(LogLevel::Info);
+        store.fail_next_save();
+        let manager = RuntimeLogLevelManager::new(
+            test_log_level_control(LogLevel::Info),
+            store,
+            LogLevel::Info,
+            None,
+        );
+        let lifecycle = RequestLifecycle::start("test", &UuidRequestIdGenerator);
+
+        let error = update_runtime_log_level(
+            &manager,
+            SetRuntimeLogLevelRequest {
+                level: RuntimeLogLevel::Debug,
+            },
+            &lifecycle,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.classification(), ErrorClassification::Internal);
+        assert_eq!(
+            read_runtime_log_level(&manager).await.unwrap(),
+            RuntimeLogLevelStateResponse {
+                configured_level: RuntimeLogLevel::Info,
+                effective_level: RuntimeLogLevel::Info,
+                startup_override: None,
+            }
+        );
+    }
+
+    #[derive(Clone)]
+    struct FakeStore {
+        state: Arc<Mutex<FakeStoreState>>,
+    }
+
+    struct FakeStoreState {
+        level: LogLevel,
+        fail_next_save: bool,
+    }
+
+    impl FakeStore {
+        /// Builds an isolated preferred-level store for command adapter tests.
+        fn new(level: LogLevel) -> Self {
+            Self {
+                state: Arc::new(Mutex::new(FakeStoreState {
+                    level,
+                    fail_next_save: false,
+                })),
+            }
+        }
+
+        /// Makes the next atomic save fail without changing the stored value.
+        fn fail_next_save(&self) {
+            self.state.lock().unwrap().fail_next_save = true;
+        }
+    }
+
+    impl PreferredLogLevelStore for FakeStore {
+        type Error = FakeStoreError;
+
+        async fn load_preferred_level(&self) -> Result<LogLevel, Self::Error> {
+            Ok(self.state.lock().unwrap().level)
+        }
+
+        async fn save_preferred_level(&self, level: LogLevel) -> Result<(), Self::Error> {
+            let mut state = self.state.lock().unwrap();
+            if state.fail_next_save {
+                state.fail_next_save = false;
+                return Err(FakeStoreError);
+            }
+            state.level = level;
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Error)]
+    #[error("fake store failure")]
+    struct FakeStoreError;
 }

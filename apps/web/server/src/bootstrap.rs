@@ -5,13 +5,18 @@ use crate::config::RuntimeConfig;
 use crate::error::WebBootstrapError;
 use crate::service::{FileSystemApi, WorkspaceFileApi};
 use ora_backend::{Backend, BackendBootstrapError, BackendPaths};
-use ora_logging::ora_warn;
+use ora_logging::{LogLevel, LogLevelControl, ora_warn};
 use ora_plugin_manager::PluginManager;
+use ora_runtime_settings::{PreferredLogLevelStore, RuntimeLogLevelManager};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Builds the application state used by the web runtime from SQLite-backed dependencies.
-pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBootstrapError> {
+pub async fn build_app_state(
+    runtime_config: &RuntimeConfig,
+    level_control: LogLevelControl,
+    startup_override: Option<LogLevel>,
+) -> Result<AppState, WebBootstrapError> {
     let backend = build_backend(
         runtime_config.database().path(),
         runtime_config.worktree().root(),
@@ -26,6 +31,17 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
         .parent()
         .unwrap_or_else(|| Path::new("."));
     let plugin_manager = discover_plugins(data_dir);
+    let store = backend.preferred_log_level_store();
+    let configured_level = store
+        .load_preferred_level()
+        .await
+        .map_err(WebBootstrapError::RuntimePreference)?;
+    let effective_level = startup_override.unwrap_or(configured_level);
+    if level_control.current_level()? != effective_level {
+        level_control.set_level(effective_level)?;
+    }
+    let runtime_log_level =
+        RuntimeLogLevelManager::new(level_control, store, configured_level, startup_override);
 
     Ok(AppState::new(
         backend,
@@ -37,6 +53,7 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
         )),
         Arc::new(plugin_manager),
         runtime_config.binaries().clone(),
+        runtime_log_level,
     ))
 }
 
@@ -59,6 +76,12 @@ pub(crate) fn build_app_state_for_database(
         binary_paths.ripgrep_path(),
         chrono_tz::UTC,
     )?;
+    let runtime_log_level = RuntimeLogLevelManager::new(
+        ora_logging::test_log_level_control(LogLevel::Info),
+        backend.preferred_log_level_store(),
+        LogLevel::Info,
+        None,
+    );
 
     Ok(AppState::new(
         backend,
@@ -70,6 +93,7 @@ pub(crate) fn build_app_state_for_database(
         )),
         Arc::new(discover_plugins(data_dir)),
         binary_paths,
+        runtime_log_level,
     ))
 }
 
@@ -164,19 +188,136 @@ mod tests {
     }
 
     /// Verifies runtime bootstrap becomes usable without creating a project.
-    #[test]
-    fn starts_with_an_empty_project_catalog() {
+    #[tokio::test]
+    async fn starts_with_an_empty_project_catalog() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("empty-bootstrap");
         let runtime_config = runtime_config(&data_dir);
         let database_path = data_dir.join("ora.sqlite3");
 
-        build_app_state(&runtime_config)
-            .unwrap_or_else(|error| panic!("expected runtime bootstrap to succeed: {error}"));
+        build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Info),
+            None,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("expected runtime bootstrap to succeed: {error}"));
 
         let repository = bootstrapped_project_repository(&database_path);
 
         assert_eq!(repository.list_projects().unwrap(), Vec::new());
+    }
+
+    /// Verifies a persisted preference survives runtime reconstruction and becomes effective.
+    #[tokio::test]
+    async fn restores_persisted_log_level_after_restart() {
+        let temp_dir = TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("persisted-restart");
+        let runtime_config = runtime_config(&data_dir);
+        let first = build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Info),
+            None,
+        )
+        .await
+        .unwrap();
+        first
+            .backend()
+            .set_preferred_log_level(ora_logging::LogLevel::Warn)
+            .await
+            .unwrap();
+        drop(first);
+
+        let restarted = build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Info),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            restarted.runtime_log_level().state().await.unwrap(),
+            ora_runtime_settings::RuntimeLogLevelState {
+                configured_level: ora_logging::LogLevel::Warn,
+                effective_level: ora_logging::LogLevel::Warn,
+                startup_override: None,
+            }
+        );
+    }
+
+    /// Verifies the process-scoped environment value wins without replacing the stored preference.
+    #[tokio::test]
+    async fn applies_web_override_without_replacing_persisted_preference() {
+        let temp_dir = TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("override-precedence");
+        let runtime_config = runtime_config(&data_dir);
+        let first = build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Info),
+            None,
+        )
+        .await
+        .unwrap();
+        first
+            .backend()
+            .set_preferred_log_level(ora_logging::LogLevel::Warn)
+            .await
+            .unwrap();
+        drop(first);
+
+        let overridden = build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Trace),
+            Some(ora_logging::LogLevel::Trace),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            overridden.runtime_log_level().state().await.unwrap(),
+            ora_runtime_settings::RuntimeLogLevelState {
+                configured_level: ora_logging::LogLevel::Warn,
+                effective_level: ora_logging::LogLevel::Trace,
+                startup_override: Some(ora_logging::LogLevel::Trace),
+            }
+        );
+    }
+
+    /// Verifies bootstrap reports malformed persisted values instead of replacing them with defaults.
+    #[tokio::test]
+    async fn rejects_malformed_persisted_log_level_during_web_bootstrap() {
+        let temp_dir = TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("malformed-preference");
+        let runtime_config = runtime_config(&data_dir);
+        let database_path = data_dir.join("ora.sqlite3");
+        let initial = build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Info),
+            None,
+        )
+        .await
+        .unwrap();
+        drop(initial);
+        rusqlite::Connection::open(database_path)
+            .unwrap()
+            .execute(
+                "INSERT INTO user_config(key, value) VALUES ('log_level', 'verbose')",
+                [],
+            )
+            .unwrap();
+
+        let result = build_app_state(
+            &runtime_config,
+            ora_logging::test_log_level_control(ora_logging::LogLevel::Info),
+            None,
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(WebBootstrapError::RuntimePreference(_))
+        ));
     }
 
     /// Builds one runtime configuration without mutating process environment during tests.

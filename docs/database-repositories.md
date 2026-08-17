@@ -19,6 +19,7 @@
 | `SqliteTaskWorkspaceRepository` | `TaskWorkspaceCommit` |
 | `SqliteWorktreeProvisioningLeaseRepository` | `WorktreeProvisioningLeaseStore` |
 | `SqliteGitCleanupJobRepository` | durable Git cleanup queue used by `ora-backend` |
+| `SqliteUserConfigRepository` | `UserConfigRepository` |
 
 Adding an adapter never changes a port signature. Handlers keep depending on the traits they own, so a composition root can swap in fakes without touching use-case code.
 
@@ -54,6 +55,8 @@ Repositories map SQLite columns onto the current `ora-domain` shapes, including 
 - `task_diff_comments` maps root-thread columns and reply columns into the mutually exclusive `TaskDiffCommentKind` enum. Visible comments are returned in `(created_at, id)` order; malformed rows fail rather than being coerced.
 
 An unrecognized persisted category value is a mapping failure, not a silently coerced default.
+
+`SqliteUserConfigRepository` owns raw access to the shared `user_config` table. It exposes only typed `developer_mode` and `log_level` operations, returns disabled and `info` for absent rows without materializing them, stores canonical text through atomic per-key upserts, and preserves unrelated rows. Persisted log levels must exactly match the canonical lower-case vocabulary; unlike environment parsing, whitespace and ASCII-case variants are treated as corruption. A malformed supported value fails explicitly instead of being repaired silently. Web and Desktop compose this same repository through Backend.
 
 ## Aggregate deletion
 

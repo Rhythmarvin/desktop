@@ -26,6 +26,7 @@ The remaining runtime paths are derived from `ORA_DATA_DIR`:
 - SQLite database: `<ORA_DATA_DIR>/ora.sqlite3`
 - Imported skill folders: `<ORA_DATA_DIR>/atoms/skills`
 - Log file: `<ORA_DATA_DIR>/logs/ora.log`
+- Shared user preferences: `<ORA_DATA_DIR>/ora.sqlite3`, table `user_config`
 - Session history root: `<ORA_DATA_DIR>/sessions`
 
 The Web runtime also requires explicit executable paths and never falls back to
@@ -65,6 +66,8 @@ authoritative linked-worktree path, which becomes the ACP session `cwd`. See
 When unset, the server binds `0.0.0.0:32578`. An invalid host or port fails startup with a typed bootstrap error rather than falling back to an unexpected listener address.
 
 Logging variables are documented in [Runtime Logging](runtime-logging.md).
+
+The Web runtime initializes logging provisionally from `ORA_LOG_LEVEL` or `info`, then opens and migrates Backend. It reads the typed `user_config.log_level` row and, when there is no environment override, reloads the process filter before readiness. Final precedence is `ORA_LOG_LEVEL`, the SQLite preference, then `info`; malformed persisted values and persistence failures are explicit runtime errors rather than silent resets. The same database stores `user_config.developer_mode`, which controls whether shared Settings shows Developer options but does not authorize backend operations.
 
 ## Health endpoints
 
@@ -181,6 +184,20 @@ Spec catalog and read responses never expose an absolute workspace root. Discove
 ### gitIdentity
 
 - `GET /api/git/identity`
+
+### runtimeLogLevel
+
+- `GET /api/runtime/log-level`
+- `PUT /api/runtime/log-level` with `{ "level": "trace" | "debug" | "info" | "warn" | "error" }`
+
+These operations read or update the server-authoritative process-wide filter. An update reloads the live filter before atomically persisting the preference; persistence failure restores the previous effective level. A response includes the configured preference, effective level, and optional startup override. The setting affects only future events and does not change the server's stdout/file mode, `<ORA_DATA_DIR>/logs/ora.log` path, JSON format, rotation, retention, or timezone.
+
+### developerMode
+
+- `GET /api/settings/developer-mode`
+- `PUT /api/settings/developer-mode` with `{ "enabled": true | false }`
+
+These operations read or atomically persist the shared SQLite-backed developer-mode preference. Developer mode controls whether the shared Settings UI reveals Developer options; it is not an authorization boundary. A malformed persisted value is reported when this route reads it rather than during Web startup.
 
 Each route translates transport input into the matching `ora-contracts` request DTO, delegates to the shared backend, and serializes the returned contract response without adding adapter-local response shapes.
 
