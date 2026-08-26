@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  IconCopy,
+  IconDotsVertical,
   IconFileImport,
   IconPencil,
   IconPlus,
@@ -19,6 +21,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Input,
   Tooltip,
   TooltipContent,
@@ -39,6 +46,7 @@ interface WorkflowManagerProps {
   disabled?: boolean;
   onSelect: (workflowId: string) => void;
   onCreate: (name: string) => Promise<boolean>;
+  onCopy: (workflowId: string) => Promise<boolean>;
   onRename: (workflowId: string, name: string) => Promise<boolean>;
   onDelete: (workflowId: string) => void;
   onImport: (file: File) => Promise<boolean>;
@@ -52,6 +60,7 @@ export function WorkflowManager({
   disabled = false,
   onSelect,
   onCreate,
+  onCopy,
   onRename,
   onDelete,
   onImport,
@@ -69,6 +78,7 @@ export function WorkflowManager({
   );
   const [createBusy, setCreateBusy] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const visibleWorkflows = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -155,6 +165,19 @@ export function WorkflowManager({
     }
     setRenameWorkflowName(workflow.name);
     setRenameTarget(workflow);
+  }
+
+  /** Duplicates the library entry through the registered flush-and-switch action. */
+  async function copyWorkflow(workflowId: string): Promise<void> {
+    if (disabled || copyBusy) {
+      return;
+    }
+    setCopyBusy(true);
+    try {
+      await onCopy(workflowId);
+    } finally {
+      setCopyBusy(false);
+    }
   }
 
   /** Renames the selected library entry using its stable identity. */
@@ -248,43 +271,47 @@ export function WorkflowManager({
                   {workflow.name}
                 </span>
               </button>
-              <div
-                className={cn(
-                  "mr-1 flex items-center transition-opacity duration-100",
-                  selected
-                    ? "opacity-100"
-                    : "opacity-0 group-hover/tree:opacity-100 group-focus-within/tree:opacity-100",
-                )}
-              >
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
+              <DropdownMenu>
+                <DropdownMenuTrigger
                   disabled={disabled}
-                  aria-label={t("settings.workflow.renameNamed", {
+                  aria-label={t("settings.workflow.openActions", {
                     name: workflow.name,
                   })}
-                  onClick={() => openRenameDialog(workflow)}
+                  className={cn(
+                    "mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:opacity-100 disabled:opacity-60",
+                    selected
+                      ? "opacity-100"
+                      : "opacity-0 group-hover/tree:opacity-100 group-focus-within/tree:opacity-100",
+                  )}
                 >
-                  <IconPencil />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={disabled}
-                  aria-label={t("settings.workflow.deleteNamed", {
-                    name: workflow.name,
-                  })}
-                  onClick={() => {
-                    if (!disabled) {
-                      setDeleteTarget(workflow);
-                    }
-                  }}
-                >
-                  <IconTrash />
-                </Button>
-              </div>
+                  <IconDotsVertical className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem
+                    disabled={disabled || copyBusy}
+                    onClick={() => void copyWorkflow(workflow.id)}
+                  >
+                    <IconCopy className="size-3.5" />
+                    {t("settings.workflow.copyWorkflow")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={disabled}
+                    onClick={() => openRenameDialog(workflow)}
+                  >
+                    <IconPencil className="size-3.5" />
+                    {t("settings.workflow.renameWorkflow")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={disabled}
+                    variant="destructive"
+                    onClick={() => setDeleteTarget(workflow)}
+                  >
+                    <IconTrash className="size-3.5" />
+                    {t("common.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           );
         })}
