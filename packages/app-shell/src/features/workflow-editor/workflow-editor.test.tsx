@@ -533,6 +533,23 @@ describe("WorkflowEditor", () => {
     });
   });
 
+  it("reserves a visible trailing action column while the workflow library narrows", async () => {
+    renderEditor();
+    const actionButton = await screen.findByRole("button", {
+      name: "打开代码审查工作流的操作菜单",
+    });
+    const workflowItem = actionButton.parentElement;
+    const workflowManager = actionButton.closest("div.flex-col");
+    const selectionButton = screen
+      .getByText("代码审查工作流")
+      .closest("button");
+
+    expect(workflowManager).toHaveClass("min-w-0", "overflow-hidden");
+    expect(workflowItem).toHaveClass("flex");
+    expect(selectionButton).toHaveClass("min-w-0", "flex-1");
+    expect(actionButton).toHaveClass("shrink-0");
+    expect(actionButton).not.toHaveClass("absolute");
+  });
   it("closes node configuration with its button or Escape", async () => {
     const user = userEvent.setup();
     renderEditor();

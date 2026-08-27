@@ -202,7 +202,7 @@ export function WorkflowManager({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="px-2 pb-3">
         <div className="relative min-w-0">
           <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -247,7 +247,7 @@ export function WorkflowManager({
           <TooltipContent>{t("settings.workflow.newWorkflow")}</TooltipContent>
         </Tooltip>
       </div>
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
+      <div className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
         {visibleWorkflows.map((workflow) => {
           const selected = workflow.id === selectedWorkflowId;
           return (
