@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -60,40 +61,82 @@ export function WorkflowAnnotationView({
   const { t } = useTranslation();
   const actions = useContext(WorkflowAnnotationActionsContext);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [editing, setEditing] = useState(false);
   if (actions === null) {
     throw new Error("WorkflowAnnotationView requires annotation actions");
   }
+  const { readOnly } = actions;
 
   useEffect(() => {
-    if (!actions.readOnly && selected && data.text === "") {
-      textareaRef.current?.focus();
+    if (editing && selected && !readOnly) {
+      const textarea = textareaRef.current;
+      textarea?.focus();
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
     }
-  }, [actions.readOnly, data.text, selected]);
+  }, [editing, readOnly, selected]);
+
+  /** Enters text editing after React Flow has resolved the gesture as a click. */
+  function startEditing(): void {
+    if (!readOnly) {
+      setEditing(true);
+    }
+  }
 
   return (
     <div
-      className={`relative size-full min-h-24 min-w-48 rounded-xl border p-3 shadow-sm ${THEME_CLASSES[data.theme]}`}
+      className={`relative size-full min-h-24 min-w-48 rounded-xl border p-3 shadow-sm ${!readOnly && !(editing && selected) ? "cursor-grab active:cursor-grabbing" : ""} ${THEME_CLASSES[data.theme]}`}
       data-workflow-annotation-id={id}
     >
       <NodeResizer
-        isVisible={selected && !actions.readOnly}
+        isVisible={selected && !readOnly}
         minWidth={192}
         minHeight={96}
         lineClassName="border-ring"
         handleClassName="size-2.5! border-ring! bg-background!"
       />
-      <textarea
-        ref={textareaRef}
-        className="nodrag nowheel size-full resize-none bg-transparent text-sm leading-5 outline-none placeholder:text-current/45"
-        value={data.text}
-        readOnly={actions.readOnly}
-        aria-label={t("settings.workflow.annotationText")}
-        placeholder={t("settings.workflow.annotationPlaceholder")}
-        onChange={(event) => actions.update(id, { text: event.target.value })}
-        onKeyDown={(event) => event.stopPropagation()}
-      />
-      {selected && !actions.readOnly && (
-        <div className="nodrag absolute -bottom-9 left-0 flex h-8 items-center gap-1 rounded-lg border border-border bg-background px-1 shadow-sm">
+      {editing && selected && !readOnly ? (
+        <textarea
+          ref={textareaRef}
+          className="nodrag nopan nowheel size-full resize-none bg-transparent text-sm leading-5 outline-none placeholder:text-current/45"
+          value={data.text}
+          aria-label={t("settings.workflow.annotationText")}
+          placeholder={t("settings.workflow.annotationPlaceholder")}
+          onBlur={() => setEditing(false)}
+          onChange={(event) => actions.update(id, { text: event.target.value })}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setEditing(false);
+            }
+          }}
+        />
+      ) : (
+        <div
+          className="size-full select-none whitespace-pre-wrap break-words text-sm leading-5"
+          aria-label={t("settings.workflow.annotationText")}
+          title={
+            readOnly ? undefined : t("settings.workflow.annotationEditHint")
+          }
+          data-annotation-editing="false"
+          onClick={() => {
+            startEditing();
+          }}
+        >
+          {data.text === "" ? (
+            <span className="text-current/45">
+              {t("settings.workflow.annotationPlaceholder")}
+            </span>
+          ) : (
+            data.text
+          )}
+        </div>
+      )}
+      {selected && !readOnly && (
+        <div
+          className="nodrag absolute -bottom-9 left-0 flex h-8 items-center gap-1 rounded-lg border border-border bg-background px-1 shadow-sm"
+          onPointerDown={(event) => event.preventDefault()}
+        >
           {WORKFLOW_ANNOTATION_THEMES.map((theme) => (
             <button
               key={theme}

@@ -5,9 +5,9 @@ interface CanvasToolIconProps extends SVGProps<SVGSVGElement> {
 }
 
 /**
- * Keeps the requested Lucide geometry on an integer 20px box with a constant
- * 2px rendered stroke, avoiding the fractional stroke produced by generic
- * button SVG scaling. Icon paths are from Lucide v1.34.0 (ISC license).
+ * Keeps the requested Lucide geometry on an explicit 20px box instead of
+ * allowing generic button SVG rules to rescale it. Icon paths are from Lucide
+ * v1.34.0 (ISC license).
  */
 function CanvasToolIcon({
   children,
@@ -20,7 +20,7 @@ function CanvasToolIcon({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2.4}
+      strokeWidth={1.3}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={`size-5 ${className ?? ""}`}

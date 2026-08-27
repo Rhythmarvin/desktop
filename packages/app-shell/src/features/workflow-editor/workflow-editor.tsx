@@ -375,21 +375,6 @@ function WorkflowEditorContent({
     previewedVersionRef.current = previewedVersion;
   });
 
-  /** Library rows for the manager, derived from persisted workflow summaries. */
-  const libraryWorkflows: DemoWorkflow[] = useMemo(
-    () =>
-      (library.data ?? []).map((summary) => ({
-        id: summary.id,
-        name: summary.name,
-        description: "",
-        updatedAt: workflowTimestampToIso(summary.updatedAt),
-        viewport: { x: 0, y: 0, zoom: 1 },
-        nodes: [],
-        edges: [],
-        annotations: [],
-      })),
-    [library.data],
-  );
   // Render-phase adjustments (the documented "adjust state when props change"
   // pattern): hydrate when the selected workflow identity changes. Autosave must
   // not remount the canvas, so timestamp-only draft updates are ignored here;

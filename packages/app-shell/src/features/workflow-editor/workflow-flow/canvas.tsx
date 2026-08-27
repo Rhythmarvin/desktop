@@ -89,6 +89,9 @@ const CONNECTION_LINE_STYLE = {
 } satisfies CSSProperties;
 const WORKFLOW_ANNOTATION_WIDTH = 240;
 const WORKFLOW_ANNOTATION_HEIGHT = 140;
+const WORKFLOW_ANNOTATION_Z_INDEX = 0;
+const WORKFLOW_NODE_Z_INDEX = 1;
+const WORKFLOW_SELECTED_NODE_Z_INDEX = 1_000;
 
 type ConnectionDraft =
   | {
@@ -207,7 +210,20 @@ function WorkflowCanvasInner({
   const { deleteElements, fitView, screenToFlowPosition, setViewport } =
     useReactFlow<WorkflowCanvasNode, Edge>();
   const canvasNodes = useMemo<WorkflowCanvasNode[]>(
-    () => [...nodes, ...annotations],
+    () => [
+      ...annotations.map((annotation) => ({
+        ...annotation,
+        zIndex: WORKFLOW_ANNOTATION_Z_INDEX,
+      })),
+      ...nodes.map((node) => ({
+        ...node,
+        // Notes reserve the bottom layer, while selected executable nodes keep
+        // React Flow's usual elevation over their executable peers.
+        zIndex: node.selected
+          ? WORKFLOW_SELECTED_NODE_Z_INDEX
+          : WORKFLOW_NODE_Z_INDEX,
+      })),
+    ],
     [annotations, nodes],
   );
   const reconnectingEdgeIdRef = useRef<string | null>(null);
@@ -507,9 +523,10 @@ function WorkflowCanvasInner({
             proOptions={{ hideAttribution: true }}
             nodesFocusable
             edgesFocusable
-            nodesDraggable={!readOnly && interactionMode === "pointer"}
-            nodesConnectable={!readOnly && interactionMode === "pointer"}
-            elementsSelectable={!readOnly && interactionMode === "pointer"}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            elementsSelectable={!readOnly}
+            elevateNodesOnSelect={false}
             edgesReconnectable={!readOnly}
             reconnectRadius={28}
             connectionRadius={24}

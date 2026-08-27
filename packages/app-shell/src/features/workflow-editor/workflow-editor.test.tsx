@@ -456,7 +456,7 @@ describe("WorkflowEditor", () => {
 
   it("adds and edits annotations and switches between pointer and hand modes", async () => {
     const user = userEvent.setup();
-    renderSettings();
+    renderEditor();
     const canvas = await screen.findByLabelText("工作流画布");
     vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
       ...canvas.getBoundingClientRect(),
@@ -477,13 +477,26 @@ describe("WorkflowEditor", () => {
       "data-interaction-mode",
       "hand",
     );
+    expect(
+      screen.getByLabelText("Agent节点: 理解改动").closest(".react-flow__node"),
+    ).toHaveClass("draggable");
     await user.click(pointer);
 
     const addAnnotation = screen.getByRole("button", { name: "添加注释" });
     const annotationIcon = addAnnotation.querySelector("svg");
     expect(annotationIcon).toHaveClass("size-5");
-    expect(annotationIcon).toHaveAttribute("stroke-width", "2.4");
     await user.click(addAnnotation);
+    const annotation = await screen.findByLabelText("注释内容");
+    expect(annotation.closest(".nodrag")).toBeNull();
+    expect(annotation.closest("[data-workflow-annotation-id]")).toHaveClass(
+      "cursor-grab",
+      "active:cursor-grabbing",
+    );
+    expect(annotation.closest(".react-flow__node")).toHaveStyle({ zIndex: 0 });
+    expect(
+      screen.getByLabelText("Agent节点: 理解改动").closest(".react-flow__node"),
+    ).toHaveStyle({ zIndex: 1 });
+    await user.click(annotation);
     const note = await screen.findByRole("textbox", { name: "注释内容" });
     fireEvent.change(note, { target: { value: "检查并行分支" } });
     await waitFor(() => {

@@ -57,6 +57,13 @@ React Flow–based canvas for the workspace workflow editor.
 
 - The parent applies React Flow `NodeChange` and `EdgeChange` events directly
   with `applyNodeChanges` and `applyEdgeChanges`.
+- Pointer mode box-selects from a blank-canvas left drag; hand mode pans from
+  that same gesture. In both modes, a drag that starts on a node moves the node.
+- An annotation behaves like a regular draggable node in its reading state,
+  including the grab cursor. A click enters text editing, while a pointer drag
+  continues to move the annotation; blur or Escape returns it to dragging.
+- Annotations always remain below executable nodes, including while selected or
+  dragged, so they provide context without covering workflow controls.
 - Node clicks reopen a collapsed inspector when the clicked node is still
   selected (drag-collapse leaves selection intact, so selection alone cannot
   drive the reopen).
