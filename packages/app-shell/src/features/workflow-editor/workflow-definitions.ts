@@ -92,7 +92,8 @@ export function useCreateWorkflow() {
  * Creates an unused copy name by repeatedly applying the localized copy-name template.
  *
  * Workflow names must stay unique, so repeated copies retain the requested suffix chain
- * instead of introducing a numbering scheme with different semantics.
+ * instead of introducing a numbering scheme with different semantics. Throws when a
+ * malformed template cycles through names that are already in use.
  */
 export function nextWorkflowCopyName(
   sourceName: string,
@@ -102,8 +103,16 @@ export function nextWorkflowCopyName(
   const existing = new Set(
     Array.from(existingNames, (name) => name.toLocaleLowerCase()),
   );
+  const attempted = new Set<string>();
   let candidate = copyName(sourceName);
   while (existing.has(candidate.toLocaleLowerCase())) {
+    const normalizedCandidate = candidate.toLocaleLowerCase();
+    if (attempted.has(normalizedCandidate)) {
+      throw new Error(
+        "Copy name generator did not produce a unique workflow name.",
+      );
+    }
+    attempted.add(normalizedCandidate);
     candidate = copyName(candidate);
   }
   return candidate;

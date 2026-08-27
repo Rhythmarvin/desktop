@@ -550,6 +550,24 @@ describe("WorkflowEditor", () => {
     expect(actionButton).toHaveClass("shrink-0");
     expect(actionButton).not.toHaveClass("absolute");
   });
+
+  it("closes an open workflow action menu when its trigger is clicked again", async () => {
+    renderEditor();
+    const actionButton = await screen.findByRole("button", {
+      name: "打开代码审查工作流的操作菜单",
+    });
+
+    fireEvent.click(actionButton);
+    expect(screen.getByRole("menuitem", { name: "复制" })).toBeInTheDocument();
+
+    fireEvent.click(actionButton);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("menuitem", { name: "复制" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("closes node configuration with its button or Escape", async () => {
     const user = userEvent.setup();
     renderEditor();
