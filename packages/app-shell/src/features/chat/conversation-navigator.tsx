@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -74,7 +75,10 @@ export function ConversationNavigator({
   const [preview, setPreview] = useState<AnchorPreview | null>(null);
   const [previousControlHovered, setPreviousControlHovered] = useState(false);
   const [nextControlHovered, setNextControlHovered] = useState(false);
-  const anchors = providedAnchors ?? conversationAnchors(turns ?? [], t);
+  const anchors = useMemo(
+    () => providedAnchors ?? conversationAnchors(turns ?? [], t),
+    [providedAnchors, t, turns],
+  );
   const previewAnchorId = preview?.anchorId ?? null;
   const previewAnchor = anchors.find((anchor) => anchor.id === previewAnchorId);
   const lastGeneratedAnchorId = anchors.at(-1)?.id;

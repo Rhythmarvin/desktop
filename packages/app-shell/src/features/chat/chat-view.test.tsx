@@ -2089,6 +2089,40 @@ describe("MessageList", () => {
     expect(screen.queryByTestId("conversation-anchor-list")).toBeNull();
   });
 
+  it("mounts only a bounded window for a long conversation", async () => {
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(800);
+    const clientWidth = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(760);
+    const longConversation = Array.from({ length: 100 }, (_, index) =>
+      turn(`turn-${index}`, `Question ${index}`, index * 2, [
+        assistantItem(`assistant-${index}`, `Answer ${index}`, index * 2 + 1),
+      ]),
+    );
+
+    renderWithI18n(
+      <MessageList
+        turns={longConversation}
+        userName="Eric"
+        isResponding={false}
+      />,
+    );
+
+    const virtualTurns = await screen.findByTestId("virtualized-message-turns");
+    const messageList = screen.getByTestId("message-list");
+    messageList.scrollTop = 100 * 260 - 800;
+    fireEvent.scroll(messageList);
+    await waitFor(() => {
+      const mountedTurns = virtualTurns.querySelectorAll("[data-turn-anchor]");
+      expect(mountedTurns.length).toBeGreaterThan(0);
+      expect(mountedTurns.length).toBeLessThan(20);
+    });
+    clientHeight.mockRestore();
+    clientWidth.mockRestore();
+  });
+
   it("renders sent user Markdown and copies the source string", async () => {
     const user = userEvent.setup();
     const writeText = vi

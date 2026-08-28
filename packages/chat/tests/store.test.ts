@@ -233,6 +233,44 @@ test("clears isResponding at each turn_ended during history replay", async () =>
   assert.equal(store.getState().conversations["ora-1"]?.isLoaded, true);
 });
 
+test("keeps a finite long replay staged until its final conversation is ready", async () => {
+  const recordedTurns = 120;
+  const replay = Array.from({ length: recordedTurns }, (_, index) => [
+    textEvent("user_message_chunk", `question ${index}`, `user-${index}`),
+    textEvent("agent_message_chunk", `answer ${index}`, `agent-${index}`),
+    { type: "turn_ended", stopReason: "end_turn" } as const,
+  ]).flat();
+  const client: ChatSessionClient = {
+    load: () =>
+      events<LoadSessionEvent>([...replay, { type: "completed" } as const]),
+    prompt: () => events<PromptSessionEvent>([]),
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  const store = createChatStore(client, {
+    createId: (() => {
+      let nextId = 0;
+      return () => `local-${++nextId}`;
+    })(),
+    now: () => 42,
+  });
+  let respondingPublications = 0;
+  const unsubscribe = store.subscribe((state) => {
+    if (state.conversations["ora-1"]?.isResponding) {
+      respondingPublications += 1;
+    }
+  });
+
+  await store.getState().loadSession("ora-1");
+  unsubscribe();
+
+  assert.equal(respondingPublications, 0);
+  assert.equal(
+    store.getState().conversations["ora-1"]?.turns.length,
+    recordedTurns,
+  );
+});
+
 test("flushes batched replay text together with a following tool boundary", async () => {
   let finishStream: () => void = () => {};
   const streamFinished = new Promise<void>((resolve) => {
@@ -267,7 +305,7 @@ test("flushes batched replay text together with a following tool boundary", asyn
   });
 
   const loading = store.getState().loadSession("ora-1");
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
 
   assert.deepEqual(
     store

@@ -193,6 +193,12 @@ Keep these stacks separate — shared chrome only where noted.
 - `WorkflowRunLiveSnapshot.conversation` remains a lightweight presentation projection used for
   run-level indicators. Opening a stage card resolves the node state's opaque `sessionId`, loads
   that session through the shared chat store, and renders the ordinary `ChatView` transcript.
+- Finite history replay stays staged until the complete conversation is ready; only a genuinely
+  active tail that remains open beyond the preview frame is published incrementally. The preview
+  contains that tail alone, so opening a long node session never repaints the accumulated history
+  once per recorded turn. Long transcripts use the shared variable-height turn virtualizer, and
+  Workspace-only workflow chats skip task artifact-index construction because they do not expose
+  task inline-file links.
 - The projection follows the formal chat stream contract: backend adapters must
   deliver one run's events in cursor/sequence order and keep item IDs stable.
   The frontend applies incremental id-based upserts and does not globally re-sort

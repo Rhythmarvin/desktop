@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { AgentActivityDots } from "../../components/agent-activity-dots";
 import { useTranslation } from "react-i18next";
 import { AnchorHighlight } from "./anchor-highlight";
@@ -32,6 +33,23 @@ interface MessageListProps {
 }
 
 const EMPTY_MODEL_CHANGES: ChatModelChange[] = [];
+const VIRTUALIZATION_MIN_TURNS = 40;
+const ESTIMATED_TURN_HEIGHT_PX = 260;
+const VIRTUAL_TURN_OVERSCAN = 3;
+const HIDDEN_SURFACE_FALLBACK_TURNS = 8;
+
+/** Keeps a hidden or not-yet-measured chat useful without mounting its complete transcript. */
+function fallbackVirtualTurns(turnCount: number): Array<{
+  index: number;
+  start: number;
+}> {
+  const firstIndex = Math.max(0, turnCount - HIDDEN_SURFACE_FALLBACK_TURNS);
+  return Array.from({ length: turnCount - firstIndex }, (_, offset) => {
+    const index = firstIndex + offset;
+    return { index, start: index * ESTIMATED_TURN_HEIGHT_PX };
+  });
+}
+
 /** The scrollable turn thread, kept pinned to live ACP activity unless the reader scrolls away. */
 export function MessageList({
   turns,
@@ -53,9 +71,13 @@ export function MessageList({
   const [artifactCache] = useState(
     () => new Map<string, TurnArtifactCacheEntry>(),
   );
+  const linksUseArtifactIndex = taskId !== undefined || projectId !== undefined;
   const artifactIndices = useMemo(
-    () => collectCumulativeArtifactIndices(turns, artifactCache),
-    [artifactCache, turns],
+    () =>
+      linksUseArtifactIndex
+        ? collectCumulativeArtifactIndices(turns, artifactCache)
+        : [],
+    [artifactCache, linksUseArtifactIndex, turns],
   );
   const artifactIndex = useMemo(
     () => artifactIndices.at(-1) ?? { edited: [], referenced: [] },
@@ -89,6 +111,86 @@ export function MessageList({
     followTailKey: `${turns.length}:${lastUserMessageId ?? ""}`,
     lastAnchorId,
   });
+  const virtualized = turns.length >= VIRTUALIZATION_MIN_TURNS;
+  // TanStack Virtual owns an imperative measurement cache by design; callers use its stable
+  // instance directly instead of asking React Compiler to memoize this component.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const turnVirtualizer = useVirtualizer({
+    count: virtualized ? turns.length : 0,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => turns[index]?.id ?? index,
+    estimateSize: () => ESTIMATED_TURN_HEIGHT_PX,
+    // A temporarily hidden Theater card reports zero height; retaining the estimate prevents its
+    // virtual range from collapsing until the card becomes measurable again.
+    measureElement: (element) =>
+      element.getBoundingClientRect().height || ESTIMATED_TURN_HEIGHT_PX,
+    overscan: VIRTUAL_TURN_OVERSCAN,
+    // A first measurement is unavailable until the scroll element mounts. Supplying a realistic
+    // initial viewport lets a cold long-history render mount only a small window immediately.
+    initialRect: { width: 760, height: 800 },
+    enabled: virtualized,
+  });
+  const turnIndexById = useMemo(
+    () => new Map(turns.map((turn, index) => [turn.id, index])),
+    [turns],
+  );
+  const measuredVirtualTurns = turnVirtualizer.getVirtualItems();
+  const renderedVirtualTurns =
+    measuredVirtualTurns.length > 0
+      ? measuredVirtualTurns
+      : fallbackVirtualTurns(turns.length);
+
+  /** Materializes an off-screen virtual turn before handing its exact anchor to DOM navigation. */
+  const navigateToAnchor = (anchorId: string): void => {
+    if (!virtualized) {
+      navigation.navigateToAnchor(anchorId);
+      return;
+    }
+    const separator = anchorId.lastIndexOf(":");
+    const turnId = separator === -1 ? anchorId : anchorId.slice(0, separator);
+    const turnIndex = turnIndexById.get(turnId);
+    if (turnIndex === undefined) return;
+    turnVirtualizer.scrollToIndex(turnIndex, { align: "start" });
+    window.requestAnimationFrame(() => navigation.navigateToAnchor(anchorId));
+  };
+
+  /** Renders one complete turn row; virtual and short transcripts deliberately share the markup. */
+  const renderTurn = (turn: ChatTurn, index: number) => {
+    const turnIndex = artifactIndices[index] ?? {
+      edited: [],
+      referenced: [],
+    };
+    const turnChatLinkValue =
+      taskId !== undefined
+        ? { index: turnIndex, taskId, cwd }
+        : projectId !== undefined
+          ? { index: turnIndex, cwd }
+          : null;
+    return (
+      <>
+        {modelChangesAt(modelChanges, index).map((change) => (
+          <ModelChangeDivider key={change.id} modelName={change.modelName} />
+        ))}
+        <div data-turn-anchor={turn.id}>
+          <div data-turn-user data-conversation-anchor={`${turn.id}:user`}>
+            <MessageBubble message={turn.userMessage} userName={userName} />
+          </div>
+          {(turn.items.length > 0 || turn.status !== "streaming") && (
+            <ChatLinkContext.Provider value={turnChatLinkValue}>
+              <div
+                data-turn-response
+                data-conversation-anchor={`${turn.id}:response`}
+                className="relative overflow-visible rounded-xl"
+              >
+                <AnchorHighlight />
+                <ResponseTurn turn={turn} userName={userName} />
+              </div>
+            </ChatLinkContext.Provider>
+          )}
+        </div>
+      </>
+    );
+  };
 
   return (
     <ChatLinkContext.Provider value={chatLinkValue}>
@@ -111,51 +213,35 @@ export function MessageList({
             ref={contentRef}
             className="mx-auto w-full max-w-[760px] px-3 pb-4 pt-5 sm:px-5 sm:pt-8"
           >
-            {turns.map((turn, index) => {
-              const turnIndex = artifactIndices[index] ?? {
-                edited: [],
-                referenced: [],
-              };
-              const turnChatLinkValue =
-                taskId !== undefined
-                  ? { index: turnIndex, taskId, cwd }
-                  : projectId !== undefined
-                    ? { index: turnIndex, cwd }
-                    : null;
-              return (
-                <div key={turn.id}>
-                  {modelChangesAt(modelChanges, index).map((change) => (
-                    <ModelChangeDivider
-                      key={change.id}
-                      modelName={change.modelName}
-                    />
-                  ))}
-                  <div data-turn-anchor={turn.id}>
+            {virtualized ? (
+              <div
+                data-testid="virtualized-message-turns"
+                className="relative w-full"
+                style={{ height: turnVirtualizer.getTotalSize() }}
+              >
+                {renderedVirtualTurns.map((virtualTurn) => {
+                  const turn = turns[virtualTurn.index];
+                  if (turn === undefined) return null;
+                  return (
                     <div
-                      data-turn-user
-                      data-conversation-anchor={`${turn.id}:user`}
+                      key={turn.id}
+                      ref={turnVirtualizer.measureElement}
+                      data-index={virtualTurn.index}
+                      className="absolute left-0 top-0 w-full"
+                      style={{
+                        transform: `translateY(${virtualTurn.start}px)`,
+                      }}
                     >
-                      <MessageBubble
-                        message={turn.userMessage}
-                        userName={userName}
-                      />
+                      {renderTurn(turn, virtualTurn.index)}
                     </div>
-                    {(turn.items.length > 0 || turn.status !== "streaming") && (
-                      <ChatLinkContext.Provider value={turnChatLinkValue}>
-                        <div
-                          data-turn-response
-                          data-conversation-anchor={`${turn.id}:response`}
-                          className="relative overflow-visible rounded-xl"
-                        >
-                          <AnchorHighlight />
-                          <ResponseTurn turn={turn} userName={userName} />
-                        </div>
-                      </ChatLinkContext.Provider>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            ) : (
+              turns.map((turn, index) => (
+                <div key={turn.id}>{renderTurn(turn, index)}</div>
+              ))
+            )}
             {modelChangesAt(modelChanges, turns.length).map((change) => (
               <ModelChangeDivider
                 key={change.id}
@@ -171,7 +257,7 @@ export function MessageList({
           turns={turns}
           activeAnchorId={navigation.activeAnchorId}
           isAtTail={navigation.isAtTail}
-          onNavigate={navigation.navigateToAnchor}
+          onNavigate={navigateToAnchor}
           onNavigateToTail={navigation.navigateToTail}
         />
       </div>
