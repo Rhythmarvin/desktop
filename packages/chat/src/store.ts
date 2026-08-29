@@ -239,28 +239,18 @@ export function createChatStore(
       const controller = new AbortController();
       const staged = new HistoryBuilder(createId, now);
       let completed = false;
+      let historyReplayCompleted = false;
       let pendingPreviewTimer: ReturnType<typeof setTimeout> | null = null;
-      let activePreviewPublished = false;
 
-      /** Publishes the active replay turn without repainting once per provider text token. */
+      /** Publishes the staged conversation after replay has crossed into live updates. */
       const flushPendingPreview = () => {
         if (pendingPreviewTimer !== null) {
           clearTimeout(pendingPreviewTimer);
           pendingPreviewTimer = null;
         }
-        const preview = staged.preview(previous.configOptions);
-        if (preview.isResponding) {
-          activePreviewPublished = true;
-          updateConversation(set, oraSessionId, () => preview);
-          return;
-        }
-        // Historical turns look open between their first chunk and turn_ended.
-        // Always clear a previously published live flag when the turn settles;
-        // otherwise the sidebar keeps the working icon until the whole load ends.
-        updateConversation(set, oraSessionId, (conversation) =>
-          conversation.isResponding
-            ? { ...conversation, isResponding: false }
-            : conversation,
+        if (!historyReplayCompleted) return;
+        updateConversation(set, oraSessionId, () =>
+          staged.preview(previous.configOptions, /*includeHistory*/ true),
         );
       };
 
@@ -305,42 +295,26 @@ export function createChatStore(
           } else if (event.type === "permission_request") {
             staged.addPermission(event);
             previewUpdate = true;
+          } else if (event.type === "history_replay_completed") {
+            historyReplayCompleted = true;
+            updateConversation(set, oraSessionId, () =>
+              staged.preview(previous.configOptions, /*includeHistory*/ true),
+            );
           } else if (event.type === "turn_ended") {
-            // A completed historical turn normally reaches this boundary before its first
-            // preview timer fires. Keeping it staged prevents a fast replay from mounting and
-            // tearing down the full transcript once per recorded turn. A genuinely live tail
-            // pauses long enough to publish, so preserve its final buffered batch before ending.
-            if (activePreviewPublished && pendingPreviewTimer !== null) {
-              flushPendingPreview();
-            } else if (pendingPreviewTimer !== null) {
+            if (pendingPreviewTimer !== null) {
               clearTimeout(pendingPreviewTimer);
               pendingPreviewTimer = null;
             }
-            const wasPublished = activePreviewPublished;
             staged.endTurn(event.stopReason);
-            activePreviewPublished = false;
-            if (wasPublished) {
-              updateConversation(set, oraSessionId, (conversation) =>
-                conversation.isResponding
-                  ? { ...conversation, isResponding: false }
-                  : conversation,
-              );
-            }
+            if (historyReplayCompleted) flushPendingPreview();
           } else if (event.type === "history_notice") {
             staged.addHistoryNotice(event.notice);
           } else {
             completed = true;
           }
-          if (!completed && previewUpdate) {
-            // Delay the first preview by one frame. Finite historical turns usually reach their
-            // boundary inside that window and never repaint React; a workflow-owned prompt that
-            // is actually still active remains open and publishes normally. Once visible, retain
-            // the existing frame batching for text and immediate boundaries for tool activity.
-            if (!activePreviewPublished || batchPreview) {
-              schedulePendingPreview();
-            } else {
-              flushPendingPreview();
-            }
+          if (!completed && previewUpdate && historyReplayCompleted) {
+            if (batchPreview) schedulePendingPreview();
+            else flushPendingPreview();
           }
         }
         if (!completed) {
@@ -799,14 +773,17 @@ class HistoryBuilder {
   /** Materializes safe partial replay state while a load stream is still producing events. */
   preview(
     fallbackConfigOptions: acp.SessionConfigOption[],
+    includeHistory = false,
   ): SessionConversation {
     const activeTurn = this.turns.at(-1);
     return {
       ...EMPTY_CONVERSATION,
-      // Cold history loads can contain thousands of completed turns before reaching a live tail.
-      // Only the open tail is useful as an incremental preview; publishing the accumulated prefix
-      // would repeatedly remount all prior Markdown and makes replay cost grow quadratically.
-      turns: this.hasOpenTurn && activeTurn !== undefined ? [activeTurn] : [],
+      turns:
+        includeHistory || !this.hasOpenTurn
+          ? [...this.turns]
+          : activeTurn === undefined
+            ? []
+            : [activeTurn],
       historyNotices: [...this.historyNotices],
       availableCommands: this.availableCommands,
       sessionTitle: this.sessionTitle,
@@ -1419,6 +1396,9 @@ export async function loadSessionConversation(
       staged.addPermission(event);
     } else if (event.type === "turn_ended") {
       staged.endTurn(event.stopReason);
+    } else if (event.type === "history_replay_completed") {
+      // The boundary is informative for streaming store loads; this read-only helper already
+      // keeps the complete builder in memory and only materializes it after the stream ends.
     } else {
       completed = true;
     }

@@ -119,6 +119,7 @@ export type LoadSessionEvent =
     stopReason: import("@agentclientprotocol/sdk").StopReason;
   }
   | { "type": "history_notice"; notice: SessionHistoryNotice }
+  | { "type": "history_replay_completed" }
   | { "type": "completed" };
 
 /**

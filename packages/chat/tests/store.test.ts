@@ -123,6 +123,7 @@ test("publishes an active prompt incrementally while its session loads", async (
     load: () => ({
       async *[Symbol.asyncIterator]() {
         yield textEvent("user_message_chunk", "automated prompt", "user-1");
+        yield { type: "history_replay_completed" } as const;
         yield textEvent("agent_message_chunk", "partial ", "agent-1");
         yield textEvent("agent_message_chunk", "rep", "agent-1");
         yield textEvent("agent_message_chunk", "ly", "agent-1");
@@ -161,7 +162,7 @@ test("publishes an active prompt incrementally while its session loads", async (
       live.turns[0].items[0].content,
     "partial reply",
   );
-  assert.equal(livePublicationCount, 1);
+  assert.equal(livePublicationCount, 2);
 
   finishStream();
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -199,6 +200,7 @@ test("clears isResponding at each turn_ended during history replay", async () =>
         yield textEvent("user_message_chunk", "hello", "user-1");
         yield textEvent("agent_message_chunk", "hi", "agent-1");
         yield { type: "turn_ended", stopReason: "end_turn" } as const;
+        yield { type: "history_replay_completed" } as const;
         await afterFirstTurn;
         yield textEvent("user_message_chunk", "again", "user-2");
         yield textEvent("agent_message_chunk", "there", "agent-2");
@@ -221,6 +223,7 @@ test("clears isResponding at each turn_ended during history replay", async () =>
   // Completed historical turns must not leave the working flag stuck.
   assert.equal(store.getState().conversations["ora-1"]?.isLoading, true);
   assert.equal(store.getState().conversations["ora-1"]?.isResponding, false);
+  assert.equal(store.getState().conversations["ora-1"]?.turns.length, 1);
 
   finishAfterFirstTurn();
   await new Promise<void>((resolve) => setTimeout(resolve, 25));
@@ -242,7 +245,11 @@ test("keeps a finite long replay staged until its final conversation is ready", 
   ]).flat();
   const client: ChatSessionClient = {
     load: () =>
-      events<LoadSessionEvent>([...replay, { type: "completed" } as const]),
+      events<LoadSessionEvent>([
+        ...replay,
+        { type: "history_replay_completed" } as const,
+        { type: "completed" } as const,
+      ]),
     prompt: () => events<PromptSessionEvent>([]),
     respondToPermission: async () => ({}),
     setConfig: async () => ({ configOptions: [] }),
@@ -280,6 +287,7 @@ test("flushes batched replay text together with a following tool boundary", asyn
     load: () => ({
       async *[Symbol.asyncIterator]() {
         yield textEvent("user_message_chunk", "inspect", "user-1");
+        yield { type: "history_replay_completed" } as const;
         yield textEvent("agent_message_chunk", "checking", "agent-1");
         yield {
           type: "session_update",

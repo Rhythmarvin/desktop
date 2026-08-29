@@ -297,6 +297,8 @@ pub enum LoadSessionEvent {
     HistoryNotice {
         notice: SessionHistoryNotice,
     },
+    /// Marks the boundary between the durable replay prefix and live provider events.
+    HistoryReplayCompleted,
     Completed,
 }
 

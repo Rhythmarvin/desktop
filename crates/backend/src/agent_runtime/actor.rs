@@ -311,9 +311,13 @@ impl RuntimeActor {
                             match self.replay_recorded_history(&events).await {
                                 Replay::Delivered
                                     if events
-                                        .send(Ok(LoadSessionEvent::Completed))
+                                        .send(Ok(LoadSessionEvent::HistoryReplayCompleted))
                                         .await
-                                        .is_ok() =>
+                                        .is_ok()
+                                        && events
+                                            .send(Ok(LoadSessionEvent::Completed))
+                                            .await
+                                            .is_ok() =>
                                 {
                                     self.channel = Some(channel);
                                 }

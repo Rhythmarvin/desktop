@@ -64,6 +64,13 @@ impl SessionFollowers {
             {
                 return;
             }
+            if contract_sender
+                .send(Ok(LoadSessionEvent::HistoryReplayCompleted))
+                .await
+                .is_err()
+            {
+                return;
+            }
             let mut overflow_open = true;
             loop {
                 tokio::select! {
@@ -230,8 +237,13 @@ mod tests {
                     .recv()
                     .await
                     .map(|result| result.map_err(|error| error.to_string())),
+                receiver
+                    .recv()
+                    .await
+                    .map(|result| result.map_err(|error| error.to_string())),
             ],
             [
+                Some(Ok(LoadSessionEvent::HistoryReplayCompleted)),
                 Some(Ok(LoadSessionEvent::SessionUpdate { update })),
                 Some(Ok(LoadSessionEvent::TurnEnded {
                     stop_reason: StopReason::EndTurn,
